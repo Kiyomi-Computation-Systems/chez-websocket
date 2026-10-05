@@ -57,7 +57,8 @@ and the door suite.
   - a client's close, answered, its code and reason checked, 1005 told: moved here
     from M3.2 by form on 2026-10-05, since the bytes M3.1 reads can carry one.
 - **M3.2 the closing handshake**:
-  - a close sent, and closes crossing;
+  - a close sent, and closes crossing; a message that comes after the server's close
+    delivered as before, by form on 2026-10-05;
   - the close timeout, by its deadline's kind;
   - the stream's end, 1006 told; 1005 and 1006 never sent.
 - **M3.3 the ping clock**:

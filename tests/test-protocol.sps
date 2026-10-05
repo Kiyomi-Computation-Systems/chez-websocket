@@ -1,6 +1,7 @@
 #!r6rs
-;;; (websocket protocol)'s step against its oracles (M3.1): messages, control
-;;; frames, the cap, UTF-8, failing, a client's close, sending, and reading on.
+;;; (websocket protocol)'s step against its oracles (M3.1, M3.2): messages,
+;;; control frames, the cap, UTF-8, failing, a client's close, sending,
+;;; reading on, and the closing handshake.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.4's fragments, §5.5's control
@@ -22,6 +23,19 @@
 ;;;   (the milestone plan's amendment).
 ;;; - The design's §5: the events and actions, a message's kind its first
 ;;;   frame's, and the failures' codes.
+;;; - For the closing handshake (M3.2), RFC 6455's raw text again: §5.5.1, a
+;;;   close received answered unless one was sent, the stream closed at once
+;;;   once a close has gone each way, and two closes that cross; §5.5.2, a
+;;;   ping answered unless a close has been received; §5.5, a control
+;;;   frame's payload at most 125 bytes, so a close's reason at most 123;
+;;;   §7.1.2, a close sent with its code and reason; §7.1.5 and §7.1.6, the
+;;;   code and reason told are the first close received's, 1005 for one with
+;;;   no code, 1006 when none came; §7.1.7, failing sends a close, so never
+;;;   a second; §7.4.1, 1005, 1006 and 1015 never set in a close.  The
+;;;   design's §5: the close deadline named by its kind, and a close not
+;;;   answered in time closing the stream anyway (websockets' close_timeout).
+;;;   The form of 2026-10-05, "Deliver as before": messages that come after
+;;;   the server's close are delivered as before.
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
 ;;; Node's ws 7.5.10 was fed every case in its pieces (m3-mutations.md).
@@ -212,6 +226,41 @@
       '()
       (let-values (((s actions) (ws-step s (car events))))
         (cons actions (step* s (cdr events))))))
+
+;; server-close : Nat (Listof Byte) -> Action
+;; The server's close written (§5.5.1): its body the code, two bytes
+;; big-endian, then the reason's UTF-8.
+(define (server-close code reason) (wrote #x88 (append (big-endian code 2) reason)))
+
+;; The close deadline armed, and disarmed: time is a deadline's kind
+;; (design §5).
+(define armed '(arm-deadline close))
+(define disarmed '(disarm-deadline))
+
+;; failed-closing : Nat Symbol -> (Listof Action)
+;; Failing once the server's close is sent: no second close (§7.1.7), the
+;; deadline disarmed, the stream closed, the reason logged, and 1006 told.
+(define (failed-closing code why)
+  (list disarmed '(close-stream) (list 'log 'failed code why) (list 'closed 1006 no-bytes #f)))
+
+;; run-from : Limits (Listof Event) (Listof Byte) (Listof Nat) -> (Listof Action)
+;; As run, once the events are stepped on the new connection: their
+;; actions, then each read's.
+(define (run-from limits events bytes cuts)
+  (let* ((s (make-ws-state limits)) (first (concat (step* s events))) (v (bv bytes)))
+    (let loop ((from 0) (ends (append cuts (list (length bytes)))) (out (list first)))
+      (if (null? ends)
+          (concat (reverse out))
+          (let-values (((s actions) (ws-step s (list 'bytes v from (car ends)))))
+            (if (closed? actions)
+                (concat (reverse (cons actions out)))
+                (loop (car ends) (cdr ends) (cons actions out))))))))
+
+;; any-pieces-from : Limits (Listof Event) (Listof Byte) -> (Listof (Listof Action))
+;; As any-pieces, once the events are stepped.
+(define (any-pieces-from limits events bytes)
+  (append (list (run-from limits events bytes '()) (run-from limits events bytes (bytewise bytes)))
+          (map (lambda (k) (run-from limits events bytes (list k))) (range 0 (+ 1 (length bytes))))))
 
 ;; read-event : (Listof Byte) -> Event
 (define (read-event bytes)
@@ -449,6 +498,96 @@
                                   (frame #x89 hello) (frame #x80 (ascii "lo")))
                      '()))
 
+    ;; --- the server's close, and closes crossing (§5.5.1, §7.1.2; M3.2) ---
+    (test-equal "the server's close is written with its code and reason, and arms the close deadline: each code an endpoint may send, a code alone, and the drain's 1001, going away"
+                (append (map (lambda (code) (list (list (server-close code (ascii "bye")) armed))) sendable-codes)
+                        (list (list (list (server-close 1000 '()) armed))
+                              (list (list (server-close 1001 (ascii "going away")) armed))))
+                (append (map (lambda (code) (step* (make-ws-state open) (list (list 'close code "bye"))))
+                             sendable-codes)
+                        (list (step* (make-ws-state open) '((close 1000 "")))
+                              (step* (make-ws-state open) '((close 1001 "going away"))))))
+    (test-equal "a close's reason of 123 bytes, the most a close holds past its code (§5.5), is sent whole, and U+FEFF first is kept"
+                (list (list (list (server-close 4000 (concat (repeat 41 '(#xE2 #x82 #xAC)))) armed))
+                      (list (list (server-close 1000 '(#xEF #xBB #xBF #x41)) armed)))
+                (list (step* (make-ws-state open) (list (list 'close 4000 (make-string 41 (integer->char #x20AC)))))
+                      (step* (make-ws-state open) (list (list 'close 1000 (string (integer->char #xFEFF) #\A))))))
+    (test-equal "a close the server may not send is an assertion naming ws-step, open, closing or ended: 1005, 1006 and 1015 (§7.4.1), and every other code no endpoint may send; a code that is not a fixnum; a reason that is not a string, or over 123 bytes; a close it may send is accepted"
+                (append (repeat (+ (length unsendable-codes) 6) '(refused ws-step)) '(accepted))
+                (let ((closing (make-ws-state open)) (ended (make-ws-state open)))
+                  (step* closing '((close 1000 "")))
+                  (step* ended (list (read-event (frame #x88 '()))))
+                  (append (map (lambda (code) (refusal (lambda () (ws-step (make-ws-state open) (list 'close code "")))))
+                               unsendable-codes)
+                          (list (refusal (lambda () (ws-step (make-ws-state open) '(close "1000" ""))))
+                                (refusal (lambda () (ws-step (make-ws-state open) '(close 1000.0 ""))))
+                                (refusal (lambda () (ws-step (make-ws-state open) (list 'close 1000 (bv '(65))))))
+                                (refusal (lambda () (ws-step (make-ws-state open) (list 'close 4000 (make-string 124 #\a)))))
+                                (refusal (lambda () (ws-step closing '(close 1005 ""))))
+                                (refusal (lambda () (ws-step ended '(close 1006 ""))))
+                                (refusal (lambda () (ws-step (make-ws-state open) (list 'close 4000 (make-string 123 #\a)))))))))
+    (let ((crossing (frame #x88 (append '(#x03 #xE8) (ascii "A")))))
+      (test-equal "closes crossing (§5.5.1, §7.1.5): the server's close sent, the client's own comes: nothing more is written, the deadline is disarmed, the stream closed, and the client's code and reason told, cleanly; read whole, a byte at a time, and cut at every point"
+                  (as-any-pieces (list (server-close 1001 '()) armed disarmed '(close-stream)
+                                       (list 'closed 1000 (bv (ascii "A")) #t))
+                                 crossing)
+                  (any-pieces-from open '((close 1001 "")) crossing)))
+    (test-equal "the client's close answering the server's is told, its code or 1005 for none (§7.1.5) and its reason (§7.1.6), cleanly, and nothing is written for it"
+                (list (list (list (server-close 1000 '()) armed) (list disarmed '(close-stream) (list 'closed 1000 no-bytes #t)))
+                      (list (list (server-close 1000 '()) armed) (list disarmed '(close-stream) (list 'closed 1005 no-bytes #t)))
+                      (list (list (server-close 4000 (ascii "x")) armed)
+                            (list disarmed '(close-stream) (list 'closed 4999 (bv (ascii "bye")) #t))))
+                (list (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x88 '(#x03 #xE8)))))
+                      (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x88 '()))))
+                      (step* (make-ws-state open)
+                             (list '(close 4000 "x") (read-event (frame #x88 (append (big-endian 4999 2) (ascii "bye"))))))))
+    (test-equal "a client's close after the server's that fails its checks fails with no second close (§7.1.7): one byte, a code an endpoint may not send, a reason not UTF-8"
+                (list (failed-closing 1002 'close-body-one-byte) (failed-closing 1002 'close-code-not-sendable)
+                      (failed-closing 1007 'close-reason-not-utf8))
+                (map (lambda (body) (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x88 body))))))
+                     (list '(#x03) '(#x03 #xED) '(#x03 #xE8 #xFF))))
+    (test-equal "failing after the server's close writes no second close (§7.1.7): a refusal of the decoder, the cap, a byte no character goes on with, a continuation with no message"
+                (list (failed-closing 1002 'unknown-opcode) (failed-closing 1009 'message-too-big)
+                      (failed-closing 1007 'text-not-utf8) (failed-closing 1002 'continuation-without-message))
+                (list (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x83 '())))))
+                      (cadr (step* (make-ws-state (lim 10 100)) (list '(close 1000 "") (read-event (header #x82 11)))))
+                      (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x81 '(#xFF))))))
+                      (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x80 '(1))))))))
+    (test-equal "after the server's close, a ping is answered, since no close has been received (§5.5.2), and messages are delivered as before (by form), one begun before the close among them"
+                (list (list (list (server-close 1000 '()) armed) (list (pong '(1 2))))
+                      (list (list (server-close 1000 '()) armed) (list (deliver 'text hello) (deliver 'binary '(1 2 3))))
+                      (list '() (list (server-close 1000 '()) armed) (list (deliver 'text hello))))
+                (list (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x89 '(1 2)))))
+                      (step* (make-ws-state open)
+                             (list '(close 1000 "") (read-event (append (frame #x81 hello) (frame #x82 '(1 2 3))))))
+                      (step* (make-ws-state open)
+                             (list (read-event (frame #x01 (ascii "Hel"))) '(close 1000 "") (read-event (frame #x80 (ascii "lo")))))))
+    (test-equal "once the connection has ended, a close answers nothing: after a client's close, or a failure; and a close once one is sent answers nothing"
+                (list (list (answered 1000 '()) '())
+                      (list (failed 1002 'unknown-opcode) '())
+                      (list (list (server-close 1000 '()) armed) '()))
+                (list (step* (make-ws-state open) (list (read-event (frame #x88 '(#x03 #xE8))) '(close 1000 "")))
+                      (step* (make-ws-state open) (list (read-event (frame #x83 '())) '(close 1000 "")))
+                      (step* (make-ws-state open) '((close 1000 "") (close 1001 "again")))))
+    (test-equal "a send once the server's close is sent is an assertion naming ws-step (§5.5.1: no data frame after a close); so is a close of the wrong shape"
+                '((refused ws-step) (refused ws-step))
+                (let ((closing (make-ws-state open)))
+                  (step* closing '((close 1000 "")))
+                  (list (refusal (lambda () (ws-step closing '(send text "A"))))
+                        (refusal (lambda () (ws-step (make-ws-state open) '(close 1000)))))))
+    (test-equal "the server's close while reading is stopped leaves it stopped (by form): the client's close waiting behind the queue is read at the take that makes room, and ends the handshake with nothing written; a take that makes room with nothing waiting starts reading again"
+                (list (list (list (deliver 'binary '(1)) '(read-stop))
+                            (list (server-close 1000 '()) armed)
+                            (list (deliver 'binary '(2)))
+                            (list disarmed '(close-stream) (list 'closed 1000 no-bytes #t)))
+                      (list (list (deliver 'binary '(1)) '(read-stop))
+                            (list (server-close 1000 '()) armed)
+                            '((read-start))))
+                (list (step* (make-ws-state (lim 1048576 1))
+                             (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2)) (frame #x88 '(#x03 #xE8))))
+                                   '(close 1000 "") '(taken 1) '(taken 1)))
+                      (step* (make-ws-state (lim 1048576 1))
+                             (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))))
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"

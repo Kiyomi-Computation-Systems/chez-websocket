@@ -143,14 +143,20 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
     fails 1007 (§8.1), as websockets does.
   - Once a close has gone each way, the server closes the stream at once (§5.5.1,
     §7.1.1).
+  - After the server's close, reading goes on as before: a message that comes is
+    delivered, and a ping is answered, since no close has been received (§5.5.2).
+    This is websockets' way, decided by form (0001's second amendment). A full
+    queue nobody takes from leaves the client's close unread until the close
+    timeout.
   - A close sent and not answered within 10 s closes the stream anyway: websockets'
     `close_timeout`.
   - Codes 1005, 1006 and 1015 are never sent (§7.4.1). They are what the handler is
     told when a close carried no code (1005), or when the stream ended without one
     (1006).
-- **Failing** (§7.1.7) sends a close with its code, then closes the stream, and
-  logs why. Nothing the client sends after it is read. The handler is told 1006
-  and an empty reason, since no close came (§7.1.5, §7.1.6).
+- **Failing** (§7.1.7) sends a close with its code, unless the server's close was
+  sent, then closes the stream, and logs why. Nothing the client sends after it is
+  read. The handler is told 1006 and an empty reason, since no close came (§7.1.5,
+  §7.1.6).
 - **A delivered text is its UTF-8 bytes**, checked, and a close's reason too; the
   binding decodes them (§6). A send of text gives a string, which the step
   writes in UTF-8, and a send of binary a bytevector.

@@ -710,3 +710,74 @@ MERGED to main on 2026-10-05: **M3.1, messages and limits, and M3.1's review** (
 `make test` green on main: eight suites, 186 expected passes, every pin ok.
 
 NEXT: M3.2, the closing handshake (a close sent, closes crossing, the close timeout, the stream's end), when the owner asks.
+
+---
+
+M3.2, STEP 1 — THE SERVER'S CLOSE, AND CLOSES CROSSING. Branch `feat/m3.2-1-server-close`, cut from main at d643ec9. 2026-10-05.
+
+On the owner's "start M3.2". M3.2 was built whole, then cut in three by form ("Three stacked PRs", the recommended), one PR to each bullet of the plan's:
+1. this step, the server's close and closes crossing;
+2. step 2, the close timeout;
+3. step 3, the stream's end.
+
+Each step was proved green on its own, in a scratch worktree of main with its files laid in, with its mutants run on its own tree.
+
+**DECIDED by form (2026-10-05), the recommended: "Deliver as before"** (0001's second amendment). The design said nothing of messages that come after the server's close, before the client's answer. Measured on two prototypes of the core, at the default limits:
+- 16 messages queued and the rest of the read waiting: a 17th, and the client's close.
+- Delivering as before, the server's close leaves that close unread until the close timeout.
+- Reading on and dropping messages instead, the connection ends at once, cleanly, with the client's 1000.
+- Two messages the client sends after the server's close are delivered, or dropped.
+
+The peers:
+- websockets 17.2 queues them, and pauses reading past 16 frames whether closing or not;
+- ws 7.5.10, run on a fake socket, delivers them.
+
+So messages after the server's close are delivered as before. The close timeout bounds the wait, and M4's binding can take on behalf of a procedure that has ended.
+
+**`(websocket protocol)`**:
+- **The server's close**, `(close code reason)` (§7.1.2), is written with its code and reason, and `(arm-deadline close)` is answered with it.
+  - Its code must be one an endpoint may send, and its reason a string of at most 123 bytes in UTF-8, the most a close holds past its code (§5.5). Anything else is an assertion naming ws-step.
+  - Once a close is sent, another answers nothing, and a send is the caller's mistake (§5.5.1).
+- **After it, reading goes on as before** (by form), and a ping is answered, since no close has been received (§5.5.2).
+- **The client's close then ends the handshake**, crossing or answering. Nothing more is written; the deadline is disarmed, the stream closed, and its code and reason told, or 1005, cleanly (§7.1.5, §7.1.6).
+- **Failing once the server's close is sent writes no second close** (§7.1.7).
+- **Whenever the connection ends with the deadline armed**, the step answers `(disarm-deadline)` first.
+
+**`tests/test-protocol.sps`, 59 checks**, 11 of them new:
+- the server's close, its code and reason, and the codes and reasons it refuses;
+- closes crossing, cut at every point, and the client's answer;
+- a bad answer, and failing, with no second close;
+- a ping and messages after the server's close;
+- a close or a send once a close is sent, or after the end;
+- the server's close while reading is stopped.
+
+The import audit reads the library with no change: six checks.
+
+**The oracles.** RFC 6455's raw text: §5.5, §5.5.1, §5.5.2, §7.1.2, §7.1.5 to §7.1.7, and §7.4.1. The design's §5. The form.
+
+ws 7.5.10 was fed every connection the step's suite made, 651. Each event went in turn to its WebSocket, on a fake socket. 578 answered the same and 35 stepped nothing. The rest are ws's own:
+- 18 judge UTF-8 only at a message's end;
+- 14 echo a close's reason too, where ours echoes its code alone (M3.1);
+- 3 accept 1012 to 1014;
+- 2 are M2.1's length forms;
+- 1 answers no ping once its close is sent, though §5.5.2 asks for one.
+
+No answer disagreed.
+
+**Taken without a form:**
+- **A close's code is from §7.4.1's list**, the same one M3.1 checks a client's against. So 1012 to 1014 are refused, though websockets and ws send them.
+- **A close's reason is a string**, as a text's payload is. Over 123 bytes, it is refused, as ws refuses it.
+- **A close once one is sent, or after the end, answers nothing**, as websockets' and ws's `close` do.
+- **The step disarms its deadline when the connection ends.** The server's transport closes a stream only once its writes are written, so a deadline left armed could pass after the end.
+
+**Tests first.** The step's suite against main's library (M3.1's, 132c307) gave 48 passes, and the 11 new checks red.
+
+**174 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- M3.1's review's 145, re-cut where this step rewrote their lines, each red set grown by the checks of this step it also reddens;
+- this step's 29.
+
+0 mismatches. C-3 is equivalent here: nothing reads the deadline after the end until step 2. Every check has a killer that reddens it by value.
+
+`make test` green before the commit (Darwin arm64): eight suites, 197 expected passes, every pin ok. `make prod` green.
+
+NEXT: step 2, the close timeout, stacked on this.
