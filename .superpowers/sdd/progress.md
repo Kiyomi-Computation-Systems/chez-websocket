@@ -567,3 +567,41 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M2.2, the fr
 `make test` green on main: six suites, 120 expected passes, every pin ok.
 
 NEXT: M3.1, messages and limits (`(websocket protocol)` and `(websocket limits)`), when the owner asks.
+
+---
+
+M3.1, STEP 1 — THE LIMITS. Branch `feat/m3.1-1-limits`, cut from main at 71d6626. 2026-10-05.
+
+On the owner's "start M3.1". M3.1 was built whole, then cut in two by form ("Two stacked PRs", the recommended): this step is the limits, and step 2, stacked on it, the protocol. Each step was proved green on its own, in a scratch worktree of main with its files laid in, with its mutants run on its own tree.
+
+**DECIDED by form (2026-10-05), the recommended: "Also 16 messages"** (0001's amendment). Reading was to stop once the queue held a cap's worth of bytes. An empty message adds no bytes, so empty messages could queue without end while a handler is busy. Measured on a prototype of the core: one 16 KiB read of empty text frames, 6 bytes each, queued all 2,730 and never stopped reading, the step allocating 80 B a message. Reading now also stops at 16 queued messages, websockets' `max_queue`, and `CHEZ_WS_MAX_QUEUE` overrides it. Its variable lands here, and the queue in step 2.
+
+**`(websocket limits)`**: the limits record and its reading from an environment's strings, in `(rnrs)` alone.
+- `make-websocket-limits`, `default-websocket-limits`, `websocket-limits-with`, `websocket-limits-from-environment` and `websocket-limits-environment-variables`, and the seven accessors. The names are apart from the server's `limits-` ones.
+- The design's six variables, and `CHEZ_WS_MAX_QUEUE`. Durations are given in whole seconds and kept in ms, the unit the server's transport arms a deadline in.
+- A value is ASCII digits and nothing else. Each field has a least value: a cap and a queue of 1, a pong timeout of 1 s, and 0 for the rest. A low water above the high water is refused. The reading names the variable it refuses, and the constructor the field.
+
+**`tests/test-limits.sps`, 14 checks:**
+- the defaults, and the variables in the fields' order;
+- each variable alone, and all at once: sizes in their unit, durations in whole seconds;
+- each bound at its edge and below it, and the water marks;
+- malformed values, for every variable: a sign, a radix or exactness prefix, an exponent, a fraction, a space, a word, and a digit outside ASCII; and leading zeros;
+- what the constructor and `websocket-limits-with` make and refuse.
+
+The import audit reads the new library with no change: five checks.
+
+**The oracles.** The design's §7 table, decision 0001 and its amendment, and the server's conventions, from its `(http-server limits)`.
+
+**Taken without a form:**
+- **A value is ASCII digits alone.** The server reads with `string->number`, which takes more: measured, `"#x10"` reads as 16 and `"+5"` as 5.
+- **The least values.** A close timeout of 0 is accepted, as the server's drain of 0 is: the stream closes as the close is sent.
+- **`websocket-limits-with`**, as the server's `limits-with`, since a handler may give limits of its own (design §7). It checks what it makes, as the constructor does.
+
+**Tests first.** The suite ran red before the library existed (`library (websocket limits) not found`, exit 255). Against a stub whose fields are all 0, and which reads and checks nothing, 13 checks failed and one passed: the constructor's field order, which L-32 kills.
+
+**34 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree: 0 mismatches. The first run, on the whole slice, had one mismatch among them, a prediction error (L-10).
+
+`make test` green before the commit (Darwin arm64): seven suites, 135 expected passes, every pin ok. `make prod` green.
+
+NEXT: step 2, the protocol, stacked on this.
+
