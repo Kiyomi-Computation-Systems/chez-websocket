@@ -497,3 +497,38 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M2.1, the fr
 `make test` green on main: six suites, 109 expected passes, every pin ok.
 
 NEXT: M2.2, the encoder (the server's frames, unmasked and in shortest form: §5.7's unmasked examples byte for byte, and a decode of each encode, masked first), when the owner asks.
+
+---
+
+M2.2 — THE ENCODER, AND M2'S EXIT. Branch `feat/m2.2-encode`. 2026-10-05.
+
+**`frame-encode : (U 'text 'binary 'close 'ping 'pong) Bytevector [Nat Nat] -> Bytevector`** makes the server's frame of a kind whole, in a bytevector of its own: final, unmasked, and its length in its shortest form (design §4). Its payload is the bytevector's bytes from start to end, the whole bytevector by default, and the bytevector is left as it was. A kind the server never sends, a continuation among them, a control frame over 125 bytes, or anything but a range of a bytevector, is an assertion violation naming it.
+
+**`tests/test-frame.sps`, 40 checks**, 10 of them new:
+- §5.7's unmasked frames a server sends, byte for byte: "Hello" as text and as a ping, and the 256-byte and 64 KiB binary messages.
+- The length forms at their edges, and every kind a server sends at each edge: one final frame, unmasked, its length in its shortest form.
+- A decode of each encode, masked first, as M2.1 found it must be: the decoder refuses an unmasked frame.
+- A payload from a range; the kinds, the control frames and the ranges refused; the payload left as it was; and what an encode allocates: its frame, and nothing else.
+
+The provenance check holds the suite's unmasked headers to §5.7's frames and to the edges written out by hand.
+
+**The oracles.** ws 7.5.10's encoder was given every encode the suite made, 81 of them, and answered the same bytes for each. ws's sender refuses the four control frames over 125 bytes that ours refuses (m2-mutations.md).
+
+**Taken without a form:**
+- The encoder's shape: a whole frame. The design's protocol answers `(write bv)`, and the server's transport makes each write a libuv write of its own, copied at the call, so a header and a payload apart would be two.
+- A payload from a range, as the decoder's reads and `transport-write!` take one: a pong can echo a ping's payload from the core's buffer.
+
+**Departed from the plan:**
+- **§5.7's fragmented message is not encoded.** The plan asks for "§5.7's unmasked examples, byte for byte", and one of them is a message in two frames. Design §4 has the server send each message as one final frame, so the encoder makes no continuation and no frame without FIN. A check holds that it refuses a continuation.
+- **The allocation check**, as in each of M1's slices and M2.1.
+- **`check-range`, shared with the decoder's reads**, now checks for a bytevector and two fixnums first, so anything but a range of a bytevector is an assertion naming the caller. Before, a string was refused by `bytevector-length`.
+
+**Tests first.** Against M2.1's library, the suite stopped at once (`attempt to reference unbound identifier frame-encode`, exit 255). Against a stub that answers an empty bytevector, the 30 decoder checks and the payload's check passed, and the other 9 new ones failed.
+
+**92 mutants and a baseline** (m2-mutations.md), each red set named before the run: M2.1's 55 again, since the decode of each encode runs the decoder, and 37 new. The first run had one mismatch, an equivalent mutant: Chez's optimizer makes E-34's `(apply frame-encode (list …))` the direct call, which allocates nothing. Cut again, as a copy of the payload, it matched, and the final run on this commit's blobs had 0 mismatches. E-18 survives by design: a 64-bit length's first four bytes are zero for any payload under 2^32 bytes, and no test holds 4 GiB.
+
+**M2's exit.** The frame codec is done: the decoder (M2.1) and the encoder. One library, 40 checks, held to RFC 6455's §5.2, §5.3, §5.5 and §5.7, with ws 7.5.10 fed every case. README.org's status says so.
+
+`make test` green before the commit (Darwin arm64): six suites, 119 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
+
+NEXT: M3.1, messages and limits, `(websocket protocol)` and `(websocket limits)`, when the owner asks.

@@ -294,3 +294,151 @@ each the mean of four timed runs after a warm-up:
 A frame's header costs about the same in all four. A read of fewer than four
 bytes builds no key word, so a payload fed a byte at a time costs 16.7 ns a byte,
 where building the word at every read cost 21.2.
+
+## M2.2 — the encoder
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05. The suite is `tests/test-frame.sps`, 40 checks (blob 61e6285). The
+library (blob 52e0afc) adds `frame-encode`, which makes a server's frame whole in
+a bytevector of its own. The runner was M2.1's, with the 10 new checks named.
+
+### What this step changed
+
+- **The library.** `frame-encode`, and `check-range`, which the decoder's reads
+  share: it now checks for a bytevector and two fixnums first, so anything but a
+  range of a bytevector is an assertion naming the caller. Before, a string was
+  refused by `bytevector-length`, and an index of `0.0` passed, to be refused by
+  a fixnum operation.
+- **The suite.** It builds a server's unmasked headers by §5.2 too, and the
+  provenance check holds them to §5.7's unmasked frames and to the edges written
+  out by hand. 10 checks are new: §5.7's frames, the edges, every kind at each
+  edge, the decode of each encode, a range, three refusals, the payload left as
+  it was, and the allocation check.
+- **The decode of each encode** runs the decoder, so M2.1's mutants ran again
+  here, their red sets named anew.
+
+### The oracles
+
+- **RFC 6455's raw text.** §5.7's unmasked frames a server sends: "Hello" as text
+  (`81 05 48 65 6c 6c 6f`) and as a ping (`89 05 …`), and the headers of the
+  256-byte and 64 KiB binary messages (`82 7E 01 00`, `82 7F 00 00 00 00 00 01 00
+  00`). §5.2's length forms, §5.1's rule that a server masks no frame, and §5.5's
+  125 bytes for a control frame.
+- **The suite's own frames**, held to those before any check runs, or the suite
+  stops with a provenance failure, exit 3. To decode an encode, the suite masks
+  it first, with its own masking, which the same check holds to §5.7's: the
+  decoder refuses an unmasked frame (§5.1).
+- **Chez's own sizes.** An encode should allocate what `make-bytevector`
+  allocates for the frame's length, as base64's check does for its string.
+- **Node's ws 7.5.10, a server's encoder** (Node 20.10.0, the same copy as
+  M2.1's; `sender.js` SHA-1 `0d370839`). A shim of `(websocket frame)` logged
+  every `frame-encode` the suite made, the allocation check left out, since the
+  shim allocates: 81 encodes, 32 different kinds and payloads, of 0, 1, 5, 12,
+  125, 126, 127, 256, 65,535 and 65,536 bytes. ws's `Sender.frame` was given each
+  kind and payload, final, unmasked, without extension.
+
+  | calls | what ws answered |
+  |---|---|
+  | 81 | the same bytes |
+  | 4 | a control frame over 125 bytes, which ours refuses: ws's `Sender` refuses it too, `ping` and `pong` with "The data size must not be greater than 125 bytes", `close` with "The message must not be greater than 123 bytes" for its reason; at 125 bytes it sends all three, headers `89 7d`, `8a 7d` and `88 7d` |
+  | 4 | a kind ours refuses (a continuation, `reserved`, `#f`, 1): ws's methods take no kind |
+  | 7 | a range or payload ours refuses: no counterpart |
+
+  **No answer disagreed.** ws writes a 64-bit length as four zero bytes and 32
+  bits (`writeUInt32BE(0, 2)`, then the length at 6), which no payload a test
+  can hold tells apart from ours (E-18).
+
+### The test-first runs
+
+- **M2.1's library:** `Exception: attempt to reference unbound identifier
+  frame-encode`, exit 255.
+- **A stub that answers an empty bytevector and refuses nothing:** 31 passes and
+  9 red, as named before the run. The decoder's 30 stay green, and so does "an
+  encode leaves its payload's bytevector as it was", since a stub writes nothing;
+  E-21 and E-23 redden it by value.
+- **The first library run** had the allocation check red from a suite bug: its
+  expected side built the frame's list inside the measured thunk. With the
+  length taken outside it, the library passed all 40, and the stub, run again,
+  reddened the same 9.
+
+### The mutants
+
+M2.1's 55 mutants and its baseline ran again on this tree, each with the red set
+M2.1, step 2 records, but for these:
+- **D-0**, the baseline: 40 passes.
+- **The decode of each encode** is red too under D-10, D-11, D-12, D-13, D-15,
+  D-17, D-24, D-27, D-28, D-31, D-41, D-42, W-1 and W-3: each misreads a frame
+  the encoder makes.
+- **D-6** reddens the control frames refused too: `control?` is the encoder's as
+  well.
+- **D-9 and D-10** were cut again: `(fx>? n 125)` is in the encoder too, so
+  their cut takes the decoder's clause around it.
+
+| # | mutation | red |
+|---|----------|-----|
+| E-1 | a text frame's opcode a binary frame's | §5.7's frames, every kind, the decode, and a range |
+| E-2 | a ping's opcode a pong's | §5.7's frames, every kind, and the decode |
+| E-3 | a close's opcode a ping's | every kind, and the decode |
+| E-4 | a binary frame's opcode a text frame's | §5.7's frames, the edges, every kind, the decode, and a range |
+| E-5 | a pong's opcode a ping's | every kind, and the decode |
+| E-6 | a continuation encoded, with opcode 0 | the kinds refused, alone |
+| E-7 | any other kind encoded as binary | the same |
+| E-8 | FIN clear | §5.7's frames, the edges, every kind, the decode, and a range |
+| E-9 | RSV1 set | the same |
+| E-10 | the mask bit set with a 7-bit length | §5.7's frames, the edges, every kind, and a range |
+| E-11 | the mask bit set with a 16-bit length | §5.7's frames, the edges, and every kind |
+| E-12 | 126 in 7 bits | the edges, every kind, and the decode |
+| E-13 | 125 in 16 bits | the same |
+| E-14 | 65,536 in 16 bits | §5.7's frames, the edges, every kind, the decode, the payload left as it was, and the allocation check, through a raise: the 16-bit write refuses 65,536 |
+| E-15 | 65,535 in 64 bits | the edges, every kind, the decode, and the allocation check |
+| E-16 | a 16-bit length least significant byte first | §5.7's frames, the edges, every kind, and the decode |
+| E-17 | a 64-bit length least significant byte first | the same |
+| E-18 | a 64-bit length as ws writes it, four zero bytes and 32 bits | none: survives, the scope statement (below) |
+| E-19 | a 64-bit length announced as 16-bit | §5.7's frames, the edges, every kind, and the decode |
+| E-20 | the payload copied from the bytevector's start, not the range's | a range, alone |
+| E-21 | the copy's two bytevectors swapped | §5.7's frames, every kind, the decode, a range, and the payload left as it was |
+| E-22 | the payload's length taken as the range's end | a range, alone, through a raise |
+| E-23 | the payload cleared once copied | a range, and the payload left as it was |
+| E-24 | a control frame's length not checked | the control frames refused, alone |
+| E-25 | a control frame of 126 bytes encoded | the same |
+| E-26 | a control frame of 125 bytes refused | every kind, the decode, the payload left as it was, and the allocation check, through a raise |
+| E-27 | the encoder's range not checked | the ranges refused, alone |
+| E-28 | a bytevector not checked for | the same |
+| E-29 | a start not checked for a fixnum | the same |
+| E-30 | a negative start taken | the ranges refused, and the decoder's ranges |
+| E-31 | a start after the end taken | the same |
+| E-32 | an end past the bytevector taken | the same |
+| E-33 | the frame allocated twice | the allocation check, alone |
+| E-34 | the whole bytevector's payload copied before it is encoded | the same |
+| T-3 | the suite writes an unmasked 16-bit length least significant byte first | the provenance check: exit 3, no check run |
+| T-4 | the suite sets the mask bit in an unmasked header | the same |
+| T-5 | the suite's unmasked 126, written by hand, least significant byte first | the same |
+
+"§5.7's frames" is the check of §5.7's unmasked frames, byte for byte; "the
+edges", the length forms at their edges, unmasked; "every kind", every kind a
+server sends at each length form's edges; "the decode", a decode of each encode,
+masked first; and "a range", a payload from a range of its bytevector. "The
+ranges refused" is the encoder's check, and "the decoder's ranges" M2.1's.
+
+93 rows, each as named before the run, on the blobs above: 0 mismatches. Every
+red was exit 1 with no harness error, but the five provenance failures, exit 3.
+`make test` is green afterwards: six suites, 119 expected passes, every pin ok.
+
+Notes:
+- **The first run had one mismatch, an equivalent mutant.** E-34 was first cut
+  as `(apply frame-encode (list …))`, and stayed green: Chez's optimizer makes
+  that the direct call (`expand/optimize` shows it), so it allocated nothing.
+  Cut again as a copy of the payload, it reddened the allocation check alone. The
+  rows were then run again on the final blobs, after a change to comments only.
+- **E-18 survives by design.** A 64-bit length's first four bytes are zero for
+  every payload under 2^32 bytes, and no test holds 4 GiB. ws writes them so.
+- **The decode's own masking hides a set mask bit** (E-10, E-11): it sets that
+  bit itself. The byte checks catch both.
+- **E-12 and E-13 change a frame's size by two bytes**, and Chez allocates both
+  sizes alike, in 144 bytes, so the allocation check stays green. Their header
+  bytes catch them.
+- **Every check has its killers.** Each of the 10 new checks went red under at
+  least one mutant whose red set was named before the run, and each by value:
+  through a raise are only E-14's six, E-22's and E-26's four. The decoder's
+  ranges have three killers more, E-30 to E-32, and the provenance check three,
+  T-3 to T-5.

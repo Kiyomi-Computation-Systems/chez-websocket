@@ -1,6 +1,6 @@
 #!r6rs
 ;;; (websocket frame) — the frame codec (RFC 6455 §5.2): an incremental
-;;; decoder of the frames a client sends.
+;;; decoder of the frames a client sends, and the encoder of the server's.
 ;;;
 ;;; A frame arrives in pieces of any size, and its header can straddle two
 ;;; (design §4).  The decoder reads a header's bytes as they come, and
@@ -29,9 +29,16 @@
 ;;; on any 64-bit Chez.  Chez 10.4.1 calls its 32-bit bytevector accessors
 ;;; out of line, and still a word at a time took 1.85 ns a byte, where a
 ;;; byte at a time took 4.6 (measured in M2.1).
+;;;
+;;; The encoder makes each of the server's frames whole, in a bytevector of
+;;; its own: final, since each message is one frame (design §4), unmasked
+;;; (§5.1), and its length in its shortest form (§5.2).  So a frame is one
+;;; write, where a header and a payload apart would be two: the server's
+;;; transport makes each write a libuv write of its own, copied at the call.
 (library (websocket frame)
   (export make-frame-decoder frame-read-header! frame-read-payload!
-          frame-fin? frame-kind frame-length frame-left frame-refusal)
+          frame-fin? frame-kind frame-length frame-left frame-refusal
+          frame-encode)
   (import (rnrs))
 
   ;; kinds : (Vectorof (U Symbol #f))
@@ -55,12 +62,13 @@
   (define (make-frame-decoder)
     (new-decoder 0 0 0 (make-bytevector 4 0) 0 0 #f))
 
-  ;; check-range : Symbol Bytevector Nat Nat -> Unspecified
-  ;; An assertion violation, naming `who`, unless start to end is a range of
-  ;; the bytevector.
+  ;; check-range : Symbol Any Any Any -> Unspecified
+  ;; An assertion violation, naming `who`, unless bv is a bytevector and
+  ;; start to end a range of it.
   (define (check-range who bv start end)
-    (unless (and (<= 0 start end) (<= end (bytevector-length bv)))
-      (assertion-violation who "not a range of the bytevector" start end)))
+    (unless (and (bytevector? bv) (fixnum? start) (fixnum? end)
+                 (fx<=? 0 start) (fx<=? start end) (fx<=? end (bytevector-length bv)))
+      (assertion-violation who "not a range of a bytevector" start end)))
 
   ;; control? : Byte -> Boolean
   ;; Whether a header's first byte has a control frame's opcode (§5.5).
@@ -220,4 +228,45 @@
   ;; not-shortest or length-top-bit.
   (define (frame-refusal d)
     (let ((why (decoder-refusal d)))
-      (and why (list 1002 why)))))
+      (and why (list 1002 why))))
+
+  ;; opcode : Any -> (U Byte #f)
+  ;; The opcode of a kind of frame the server sends (§5.2), or #f.  Never a
+  ;; continuation's: each of the server's messages is one frame.
+  (define (opcode kind)
+    (case kind
+      ((text) 1) ((binary) 2) ((close) 8) ((ping) 9) ((pong) 10)
+      (else #f)))
+
+  ;; frame-encode : (U 'text 'binary 'close 'ping 'pong) Bytevector [Nat Nat] -> Bytevector
+  ;; The server's frame of that kind, its payload the bytevector's bytes
+  ;; from start to end, the whole bytevector by default: final, unmasked
+  ;; (§5.1), and its length in its shortest form (§5.2).  The bytevector is
+  ;; left as it was.  A kind not one of these five, a control frame's
+  ;; payload over 125 bytes (§5.5), or anything but a range of a bytevector,
+  ;; is an assertion violation.  What a payload holds is the protocol's to
+  ;; make: text in UTF-8, or a close's code and reason (§5.5.1).
+  (define frame-encode
+    (case-lambda
+      ((kind bv)
+       (frame-encode kind bv 0 (if (bytevector? bv) (bytevector-length bv) 0)))
+      ((kind bv start end)
+       (check-range 'frame-encode bv start end)
+       (let ((op (opcode kind))
+             (n (fx- end start)))
+         (unless op
+           (assertion-violation 'frame-encode "not a kind of frame the server sends" kind))
+         (when (and (control? op) (fx>? n 125))
+           (assertion-violation 'frame-encode "a control frame's payload is over 125 bytes" kind n))
+         (let* ((h (cond ((fx<? n 126) 2) ((fx<? n 65536) 4) (else 10)))
+                (out (make-bytevector (fx+ h n))))
+           (bytevector-u8-set! out 0 (fxior 128 op))
+           (cond ((fx=? h 2) (bytevector-u8-set! out 1 n))
+                 ((fx=? h 4)
+                  (bytevector-u8-set! out 1 126)
+                  (bytevector-u16-set! out 2 n (endianness big)))
+                 (else
+                  (bytevector-u8-set! out 1 127)
+                  (bytevector-u64-set! out 2 n (endianness big))))
+           (bytevector-copy! bv start out h n)
+           out))))))
