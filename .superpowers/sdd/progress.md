@@ -847,4 +847,6 @@ ws 7.5.10 was fed every connection, 676. 596 answered the same and 38 stepped no
 
 `make test` green before the commit (Darwin arm64): eight suites, 206 expected passes, every pin ok. `make prod` green.
 
+**Recorded on the owner's word (2026-10-05): a close the transport cannot force** (design §9, for M4). The server's `transport-close!` waits for every write to be written (chez-http-server v0.3.0, `taker-close!`, `taker-wrote!`). So when the close timeout's `close-stream` reaches a client that stopped reading, the connection stays open until the server drains. Today only a raise in a taker's call closes such a stream at once, and the server logs it as `taker-failed`. M4 decides by form: a door change in the server, or a bound of the binding's own.
+
 NEXT: M3.3, the ping clock (a quiet client pinged, and failed 1011 when the pong is late; any bytes re-arm it; stopped while reading is), when the owner asks; the three PRs first go through review and the closing ritual.

@@ -263,3 +263,17 @@ is refused.
 - **The binding's test driver** (M4, §8).
 - **What a connection costs:** measured in M4, beside the server's 20 KB for an idle
   connection and 3,637 to 3,644 B for a parked `await`.
+- **A close the transport cannot force** (M4; found building M3.2).
+  - **The gap.** The server's `transport-close!` closes the stream only once every
+    write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`
+    and `taker-wrote!`). A client that stops reading leaves a write outstanding.
+    So when the close timeout passes and the binding closes the stream, the
+    connection stays open until the server drains.
+  - **The server's advice falls short.** Its docs advise a deadline for such a
+    client (`docs/handlers.org`). But a deadline's call can only ask for the same
+    close again.
+  - **The one way through today is a raise.** A raise in a taker's call closes the
+    stream at once, and the server logs `taker-failed`.
+  - **M4 decides, by form**, between:
+    - a door change in the server: a close that drops what is unsent;
+    - a bound of the binding's own.
