@@ -307,3 +307,43 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M1.3 and M1'
 `make test` green on main: five suites, 71 expected passes, every pin ok.
 
 NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
+
+---
+
+FIX — THE SHA-1 REVIEW. Branch `fix/sha1-review`, cut from main at 85e51c0. 2026-10-05.
+
+On the owner's "fix them". A code review of the merged SHA-1 code (53fa639, PR #4) reported 15 findings. The library was right: its digests matched hashlib, OpenSSL and Perl's Digest::SHA from 0 bytes to 512 MiB. The findings were in the suite, the records and the import audit, which came in with SHA-1.
+
+**The library.** `(websocket sha1)` works its words with R6RS's fixnum operations, and rotates with `fxrotate-bit-field` where it called the generic shifts out of line. A 60-byte hash takes 2,789 ns, down from 4,384, and allocates the same. Its header says which calls Chez 10.4.1 compiles inline, measured: `fxand`, `fxior` and `fxxor` at any number of arguments, and `fx+` and `+` only at two. Words stay fixnums on any 64-bit Chez, and a fixnum operation raises rather than answer wrong.
+
+**`tests/test-sha1.sps`, sixteen checks**, four of them new and one replaced:
+- 4 MiB less a byte, whose length in bits sets every bit of the length field from 3 to 24; the other inputs set only some. Three peers agreed on its digest.
+- A hash is pure: two digests held at once are each their own, a hash leaves its message as it was, and a hash run inside another, from a timer interrupt, disturbs neither. Under a schedule shared by every call, the last fails. No thread is needed.
+- What a hash allocates, at six lengths up to 2,000 blocks, against what the test allocates for RFC 3174's padded message, 80-word schedule and digest. It replaces the ten-block slope, which a cost paid once a call cancelled (the flaw M1.3's review fixed in the UTF-8 suite).
+- No hash runs outside a check, so a library that raises fails its checks (exit 1), not the harness (exit 2).
+
+**The shared measure.** `(ws-testing)` exports `allocated`, and the UTF-8 suite drops its copy, and with it `(chezscheme)`. The measure:
+- takes the least of three counts, each from its own depth of the stack, 100 frames apart;
+- takes off an empty thunk's count;
+- checks the counter first.
+
+A count also takes in a new stack segment when the measured call reaches past the end of the current one. M1.1's measure read other than 640 at 75 of 40,001 stack depths. The review had proposed three counts from one depth, which read wrong at 15 of 9,001 depths. Three depths read wrong at none of 40,001.
+
+**Reading a red.** A failed check's line is followed by what it expected and what it got, and a harness error names what was raised. So the mutation runner reads raises from the log, without a copy of the harness.
+
+**The import audit** reads every form in a file, and every extension Chez looks for a library under, so neither a form after the library nor a `sha1.ss` beside `sha1.sls` slips past. It refuses `(rnrs eval)`, whose environment reaches any library. It passes over names that begin with ".", such as an editor's lock file, which it used to fail on.
+
+**Records.** M1.1's notes on M1-24 and on the 63-, 64- and 65-byte checks claimed more than the checks held. Both are corrected in `m1-mutations.md`.
+
+**127 mutants** (`m1-mutations.md`, M1.1's review), each red set named before the run:
+- M1.1's 24, re-cut for the fixnum library;
+- the review's 39: purity, allocation, the length field bit by bit, and a raise;
+- the harness's five, eight runs between the two suites;
+- the import audit's 14, old and new;
+- M1.3's 42, against the shared measure.
+
+The first run had one mismatch, a prediction error: an unmasked step sum now overflows `fx+` and raises, rather than growing a bignum. Every red set matched after the change to three depths. C-2, C-4, C-5 and M1-24 survive, by design or as the scope statement, and so do bits 25 to 31 of the length field and M1.3's U-20, as before.
+
+`make test` green before the commit (Darwin arm64): five suites, 75 expected passes, every pin ok. Each allocation suite was green over 30 runs. `make prod` green.
+
+NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
