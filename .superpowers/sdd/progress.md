@@ -395,3 +395,14 @@ The first runs had two prediction errors. The test-first sets left out the alloc
 `make test` green before the commit (Darwin arm64): five suites, 78 expected passes, every pin ok. The base64 suite was green over 30 runs. `make prod` green.
 
 NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the base64 review's fix** (the entry above), from #11, as e8329ff.
+- **The squash** has 96e9e08's tree (49da078), the head CI tested, and its parent is 1d3792f.
+- **CI.** #11 merged on `linux` SUCCESS at 96e9e08 (run 37341505829): five suites, 78 expected passes, tallied from its log against the local count. Main's run on e8329ff, 37342458274, was green too, and this reflect was pushed after it.
+- **Branches.** `fix/base64-review` deleted, local and remote. No PR is open.
+
+`make test` green on main: five suites, 78 expected passes, every pin ok.
+
+NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
