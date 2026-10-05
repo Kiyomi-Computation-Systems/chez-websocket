@@ -1,0 +1,153 @@
+name: CI
+
+# Linux only, deliberately (AGENTS.md: do NOT set up macOS runners). macOS is
+# the development platform and is exercised by `make test` on the laptop. The
+# one job builds chez-libuv's shim against system libuv, resolves the pinned
+# chez-http-server and the pins it carries onto one library path, and runs
+# the suite. It is chez-http-server's job without that project's test
+# clients.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The Chez floor (global-constraints). The job asserts the Chez it ends up
+# with actually meets this rather than trusting the resolution step.
+env:
+  CHEZ_FLOOR_VERSION: "10.4.1"
+
+jobs:
+  linux:
+    name: linux
+    # An explicit image, not ubuntu-latest, as chez-http-server's: an image
+    # change should be a reviewed commit. Changing it re-keys the Chez cache
+    # (step `os`).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # chez-http-server and the pins it carries (chez-libuv, chez-httparse,
+      # its nested byte-machine, uriparse) are private, and the job's own
+      # token reads only this repository. `make submodules` reads them with
+      # this secret, which the owner adds; without it, every run stops here,
+      # by name.
+      - name: Require the submodule read token
+        env:
+          SUBMODULES_READ_TOKEN: ${{ secrets.SUBMODULES_READ_TOKEN }}
+        run: |
+          if [ -z "${SUBMODULES_READ_TOKEN}" ]; then
+            echo "::error::The Actions secret SUBMODULES_READ_TOKEN is not set: a token with Contents read-only on Kiyomi-Computation-Systems' chez-http-server, chez-libuv, chez-httparse, uriparse and byte-machine."
+            exit 1
+          fi
+
+      # This repository alone, with the job's own token; `make submodules`
+      # clones the submodules below.
+      - uses: actions/checkout@v4
+
+      # libuv for the shim (pkg-config path); the X11/ncurses/uuid headers are
+      # what Chez's from-source build needs.
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config libuv1-dev \
+            libx11-dev libncurses-dev uuid-dev git
+
+      # The OS release for the Chez cache key, read off the machine rather than
+      # restated from runs-on (which a bump could forget), so a new image misses
+      # the cache instead of restoring a Chez built against another release's
+      # libraries. An empty ID or VERSION_ID fails the step.
+      - name: Identify the OS release
+        id: os
+        run: |
+          . /etc/os-release
+          echo "release=${ID:?}-${VERSION_ID:?}" >> "$GITHUB_OUTPUT"
+
+      # apt's chezscheme is below the floor, so build 10.4.1 from source and
+      # cache it keyed on the exact version and OS release (a change to either
+      # must miss, not merge).
+      - name: Restore cached Chez Scheme
+        id: chez-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/chez
+          key: chez-${{ runner.os }}-${{ steps.os.outputs.release }}-${{ runner.arch }}-${{ env.CHEZ_FLOOR_VERSION }}-threads
+
+      - name: Build Chez Scheme from source (apt's is below the floor)
+        if: steps.chez-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v${CHEZ_FLOOR_VERSION}" \
+            https://github.com/cisco/ChezScheme.git "${RUNNER_TEMP}/ChezScheme"
+          cd "${RUNNER_TEMP}/ChezScheme"
+          ./configure --threads --installprefix="${HOME}/.local/chez"
+          make -j"$(nproc)"
+          make install
+
+      # Saved here, not by the cache action's post-step, so a failed later step
+      # never publishes a half-installed prefix under the key.
+      - name: Save built Chez Scheme
+        if: steps.chez-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/chez
+          key: ${{ steps.chez-cache.outputs.cache-primary-key }}
+
+      - name: Put Chez on PATH
+        run: echo "${HOME}/.local/chez/bin" >> "${GITHUB_PATH}"
+
+      # The from-source install names its binary `scheme`; the Makefile
+      # defaults CHEZ to `chez`. Resolve whichever exists into the environment
+      # so every later `make` step uses it.
+      - name: Resolve the Chez binary
+        run: |
+          if command -v chez >/dev/null; then echo "CHEZ=chez" >> "$GITHUB_ENV"
+          elif command -v chezscheme >/dev/null; then echo "CHEZ=chezscheme" >> "$GITHUB_ENV"
+          elif command -v scheme >/dev/null; then echo "CHEZ=scheme" >> "$GITHUB_ENV"
+          else echo "no Chez Scheme binary found" >&2; exit 1; fi
+
+      - name: Assert Chez meets the declared floor
+        run: |
+          raw="$($CHEZ --version 2>&1)"
+          ver="$(echo "$raw" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          [ -n "$ver" ] || { echo "::error::could not parse a Chez version from '$raw'"; exit 1; }
+          lowest="$(printf '%s\n%s\n' "$ver" "$CHEZ_FLOOR_VERSION" | sort -V | head -1)"
+          [ "$lowest" = "$CHEZ_FLOOR_VERSION" ] || { echo "::error::Chez $ver is below the floor $CHEZ_FLOOR_VERSION"; exit 1; }
+          echo "Chez $ver satisfies the $CHEZ_FLOOR_VERSION floor"
+
+      - name: Report versions
+        run: |
+          $CHEZ --version 2>&1 || true
+          cmake --version | head -1
+          echo "libuv: $(pkg-config --modversion libuv)"
+
+      # Clone the server and the pins it carries, then verify each is where
+      # its parent records before building anything. The rewrite sends only
+      # the org's URLs through the read token (chez-srfi is public), and it
+      # lives in this step's environment, not a config file: git hands
+      # GIT_CONFIG_* to every clone, a nested one included, and a clone never
+      # reads the superproject's .git/config. Build and Test run `make
+      # submodules` again (deps needs it) without the token; every gitlink is
+      # at its pin by then, so git fetches nothing.
+      - name: Init submodules
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ secrets.SUBMODULES_READ_TOKEN }}@github.com/Kiyomi-Computation-Systems/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/Kiyomi-Computation-Systems/"
+        run: make submodules
+
+      - name: Check dependency pins
+        run: make check-pins
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Check help is complete
+        run: make check-help

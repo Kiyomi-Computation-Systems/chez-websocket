@@ -1,0 +1,6 @@
+# build artifacts (SRFI-64 symlink tree; anything we generate)
+/build/
+
+# Chez compiled objects / whole-program optimization outputs
+*.so
+*.wpo
