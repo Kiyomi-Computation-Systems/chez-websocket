@@ -148,8 +148,8 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
     This is websockets' way, decided by form (0001's second amendment). A full
     queue nobody takes from leaves the client's close unread until the close
     timeout.
-  - A close sent and not answered within 10 s closes the stream anyway: websockets'
-    `close_timeout`.
+  - A close sent and not answered within 10 s closes the stream anyway, writing
+    nothing, and 1006 is told: websockets' `close_timeout`.
   - Codes 1005, 1006 and 1015 are never sent (§7.4.1). They are what the handler is
     told when a close carried no code (1005), or when the stream ended without one
     (1006).

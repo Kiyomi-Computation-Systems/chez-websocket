@@ -237,6 +237,10 @@
 (define armed '(arm-deadline close))
 (define disarmed '(disarm-deadline))
 
+;; The stream closed with no close received: 1006 and an empty reason told,
+;; not cleanly (§7.1.5, §7.1.6), and nothing written.
+(define lost (list '(close-stream) (list 'closed 1006 no-bytes #f)))
+
 ;; failed-closing : Nat Symbol -> (Listof Action)
 ;; Failing once the server's close is sent: no second close (§7.1.7), the
 ;; deadline disarmed, the stream closed, the reason logged, and 1006 told.
@@ -261,6 +265,19 @@
 (define (any-pieces-from limits events bytes)
   (append (list (run-from limits events bytes '()) (run-from limits events bytes (bytewise bytes)))
           (map (lambda (k) (run-from limits events bytes (list k))) (range 0 (+ 1 (length bytes))))))
+
+;; let-go-waiting : (Listof Event) -> (U Bytevector 'kept)
+;; A read of two messages to a connection with room for one, so the second
+;; waits, and then the events: the read, if the connection let go of it, as
+;; a guardian hands back what nothing else holds once collected; kept if
+;; not, a value no raise prints.
+(define (let-go-waiting events)
+  (let ((g (make-guardian)) (s (make-ws-state (lim 1048576 1))))
+    (let ((r (bv (append (frame #x82 '(1)) (frame #x82 '(2))))))
+      (g r)
+      (step* s (cons (list 'bytes r 0 (bytevector-length r)) events)))
+    (collect (collect-maximum-generation))
+    (let ((got (g))) (keep! s) (or got 'kept))))
 
 ;; read-event : (Listof Byte) -> Event
 (define (read-event bytes)
@@ -588,6 +605,34 @@
                                    '(close 1000 "") '(taken 1) '(taken 1)))
                       (step* (make-ws-state (lim 1048576 1))
                              (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))))
+    ;; --- the close timeout (design §5; M3.2) ---
+    (test-equal "the close timeout (design §5): a close sent and not answered by its deadline closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written, a message unfinished or not; a close after it answers nothing"
+                (list (list (list (server-close 1000 '()) armed) lost)
+                      (list '() (list (server-close 1000 '()) armed) lost)
+                      (list (list (server-close 1000 '()) armed) lost '()))
+                (list (step* (make-ws-state open) '((close 1000 "") (deadline-passed)))
+                      (step* (make-ws-state open)
+                             (list (read-event (frame #x01 (ascii "Hel"))) '(close 1000 "") '(deadline-passed)))
+                      (step* (make-ws-state open) '((close 1000 "") (deadline-passed) (close 1000 "")))))
+    (test-equal "a deadline passing with none armed is an assertion naming ws-step: while open, once the client's close has disarmed it, once it has passed; so is one of the wrong shape while one is armed"
+                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
+                (let ((closing (make-ws-state open)) (answered (make-ws-state open)) (passed (make-ws-state open)))
+                  (step* closing '((close 1000 "")))
+                  (step* answered (list '(close 1000 "") (read-event (frame #x88 '()))))
+                  (step* passed '((close 1000 "") (deadline-passed)))
+                  (list (refusal (lambda () (ws-step (make-ws-state open) '(deadline-passed))))
+                        (refusal (lambda () (ws-step answered '(deadline-passed))))
+                        (refusal (lambda () (ws-step passed '(deadline-passed))))
+                        (refusal (lambda () (ws-step closing '(deadline-passed now)))))))
+    (test-equal "by default, with 16 messages queued and none taken, the client's close waits behind them until the close timeout, and 1006 is told, not cleanly (by form)"
+                (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
+                      (list (server-close 1000 '()) armed)
+                      lost)
+                (step* (make-ws-state default-websocket-limits)
+                       (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))
+                                                 (frame #x88 '(#x03 #xE8))))
+                             '(close 1000 "") '(deadline-passed))))
+
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"
@@ -843,6 +888,9 @@
                                              s)))))
                   (if (< ended 500000) 'let-go (list 'kept ended))))
 
+    (test-equal "once the close timeout has ended the connection, it keeps no read that waited for the queue"
+                (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
+                (let-go-waiting '((close 1000 "") (deadline-passed))))
     (test-equal "two connections at once are each their own: their messages and their control frames read in turns"
                 (list '() '() (list (deliver 'text hello)) (list (deliver 'binary '(1 2 3)))
                       '() '() (list (pong '(1 2 3))) (list (pong '(9 8 7))))
