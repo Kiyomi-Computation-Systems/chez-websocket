@@ -22,6 +22,7 @@
 ;;; - Payloads unmasked at every offset and into any place of a destination;
 ;;;   frames back to back split at every byte; §5.7's 256-byte and 64 KiB
 ;;;   messages, masked.
+;;; - Which kinds are control frames: a close, a ping and a pong.
 ;;; - The API: ranges, reads out of turn, a destination's room, the bytes
 ;;;   left as they were, and two decoders at once.
 ;;; - What decoding allocates: nothing, per call or per byte.
@@ -624,6 +625,14 @@
                                (if (and (eq? what 'header) (> next i)) (loop next) (bytevector->u8-list bv))))))))
            (list rfc-masked-text (stream back-to-back))))
     ;; The pong is masked with a key of its own, 01 02 03 04, by hand.
+    (test-equal "frame-control? answers, of every kind of header, a close's, a ping's and a pong's (§5.5)"
+      '(close ping pong)
+      (let loop ((ks kinds) (out '()))
+        (if (null? ks)
+            (reverse out)
+            (let ((d (make-frame-decoder)) (bv (u8-list->bytevector (header (car (car ks)) 0))))
+              (frame-read-header! d bv 0 (bytevector-length bv))
+              (loop (cdr ks) (if (frame-control? d) (cons (caddr (car ks)) out) out))))))
     (test-equal "two decoders at once are each their own"
       (list (list '(header #t text 5) hello) (list '(header #t pong 5) hello))
       (let ((a (make-frame-decoder)) (b (make-frame-decoder))

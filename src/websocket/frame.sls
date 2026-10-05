@@ -37,7 +37,7 @@
 ;;; transport makes each write a libuv write of its own, copied at the call.
 (library (websocket frame)
   (export make-frame-decoder frame-read-header! frame-read-payload!
-          frame-fin? frame-kind frame-length frame-left frame-refusal
+          frame-fin? frame-kind frame-control? frame-length frame-left frame-refusal
           frame-encode)
   (import (rnrs))
 
@@ -216,6 +216,12 @@
   ;; The kind of the frame whose header was answered last, by its opcode.
   (define (frame-kind d)
     (vector-ref kinds (fxand (decoder-first d) 15)))
+
+  ;; frame-control? : FrameDecoder -> Boolean
+  ;; Whether the frame whose header was answered last is a control frame: a
+  ;; close, a ping or a pong (§5.5).
+  (define (frame-control? d)
+    (control? (decoder-first d)))
 
   ;; frame-length : FrameDecoder -> Nat
   ;; The payload length of the frame whose header was answered last.

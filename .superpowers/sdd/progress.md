@@ -648,10 +648,44 @@ The import audit reads the new library with no change: six checks.
 - **The allocation check**, as in each of M1's and M2's slices. A message read in one frame is read into the bytevector it is delivered in, and a fragmented one into a buffer that doubles, never past the cap. Grown by each fragment alone, one-byte fragments to 1 MiB would copy about 2^39 bytes on the server's one loop.
 - **What a connection keeps**, checked with a guardian: no message once delivered, and no read once its bytes are read. A connection lives as long as its WebSocket.
 
-**Tests first.** The suite ran red before the library existed (`library (websocket protocol) not found`, exit 255). Against a stub whose step answers nothing and refuses nothing, 45 checks failed and one passed: the bytes left as they were, which M-82 kills. The first library run was green. Then writing the mutants found gaps, and checks for them came after: what a connection keeps, the buffer's doublings, a take while reading, events of the wrong shape, two connections' control frames, and a take after the end with reading stopped. Each was watched to fail under its mutants. Five lines no check could tell from their absence were shown redundant and taken out (m3-mutations.md).
+**Tests first.** The suite ran red before the library existed (`library (websocket protocol) not found`, exit 255). Against a stub whose step answers nothing and refuses nothing, 45 checks failed and one passed: the bytes left as they were, which M-82 kills. The first library run was green. Then writing the mutants found gaps, and checks for them came after: what a connection keeps, the buffer's doublings, a take while reading, events of the wrong shape, two connections' control frames, and a take after the end with reading stopped. Each was watched to fail under its mutants. Six lines no check could tell from their absence were shown redundant and taken out (m3-mutations.md).
 
 **124 rows** (m3-mutations.md), each red set named before the run, on this step's tree: step 1's 35 again, with the protocol's checks in their red sets, and this step's 89. The first run had 11 mismatches, all prediction errors: each an extra red, and none a survivor. The final run on this commit's blobs had 0 mismatches. Every check has a killer that reddens it by value. No mutant survives.
 
 `make test` green before the commit (Darwin arm64): eight suites, 182 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: M3.2, the closing handshake (a close sent, closes crossing, the close timeout, the stream's end), when the owner asks; the two PRs first go through review and the closing ritual.
+
+---
+
+M3.1'S REVIEW. Branch `fix/m3.1-review`, stacked on `feat/m3.1-2-protocol` (#17). 2026-10-05.
+
+The owner's `/code-review high` on #16 and #17 found nine things, and all nine are fixed, on the owner's "fix all" (m3-mutations.md has each):
+- **A message's buffer grows as its bytes arrive** (finding 1). It used to be allocated at the length a header announced, so one 14-byte header made the server allocate 1 MiB. It now starts empty and doubles as payload arrives. In a message's last frame, once a doubling would reach half its end, it takes the whole end. It never holds more than four times what has arrived.
+  - Measured against #17: a header announcing 1 MiB, alone, allocates 0 B, where it was 1,048,576 B. 1 MiB in one frame, read in 16 KiB pieces, allocates 2,080,912 B, about twice, at the same speed (1.99 ms against 1.98 ms). Read whole, it allocates the same as before.
+  - A floor of 16 KiB up front did as well or worse in every case, so it took no form. Plain doubling capped at the end measured 3,129,056 B, since one doubling landed just under the end.
+- **Each limit is a fixnum at most** (finding 2): the server's transport arms a deadline only for a fixnum of ms. A value past one is refused as the program starts, naming its variable.
+- **The guards no check held** (finding 3) now have rows: a take of -1 or 1.0, and a read starting at -1 or 0.0, or ending at 1.0. A sweep of every guard and branch for a mutant found more, now checked or recorded:
+  - an override that is not a pair;
+  - `websocket-limits-with` on a base other than the defaults;
+  - eight lines no mutant had reached (S-1 to S-7, and S-9);
+  - one equivalent mutant (S-8), and `digits?`'s length test, which can never fail, taken out.
+- **An ended connection lets go of its unfinished message** (finding 4). It is checked on the live heap, since the buffer is out of a guardian's reach.
+- **The records** say six lines, not five (finding 5). The record type's predicate and accessors carry signature comments (finding 6). The water marks are found by name (finding 7). `(websocket frame)` exports `frame-control?`, with its check, in place of the protocol's own `control-kind?` (finding 8). The limits table carries each field's accessor (finding 9).
+
+**Tests first.** The review's suites against #17's libraries:
+- the frame suite stops at once, `frame-control?` unbound;
+- the limits suite fails the fixnum check alone;
+- the protocol suite fails the growth check, `(1048576 1048592)` for `(0 2080416)`, and the ended connection's, `(kept 1000448)`.
+
+The rows that held guards #17 already had pass there. Their gap mutants, Q-1 to Q-5 and L-35, pass #17's suites, and each fails its check here.
+
+**145 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree. The first run had four mismatches:
+- **E-1 survived.** The ended connection's check compared two heaps measured apart, and they moved by about 87 KB between measures. It now measures each connection's footprint, back to back, after a warm-up, against half the fragment.
+- **Three were prediction errors.**
+
+The final run had 0 mismatches. S-8 survives, an equivalent mutant. M2's 98 frame mutants ran again, since the frame suite gained a check: 0 mismatches, and D-6 reddens `frame-control?`'s check too. ws 7.5.10 was fed the review's 582 connections, and no answer disagreed.
+
+`make test` green before the commit (Darwin arm64): eight suites, 186 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: the closing ritual for #16, #17 and this, on the owner's word; then M3.2, the closing handshake, when the owner asks.
