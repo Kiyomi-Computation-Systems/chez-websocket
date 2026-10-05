@@ -42,9 +42,14 @@
   (import (rnrs))
 
   ;; kinds : (Vectorof (U Symbol #f))
-  ;; Each opcode's kind (§5.2), or #f for one reserved.
+  ;; Each opcode's kind (§5.2), or #f for one reserved: the decoder's and the
+  ;; encoder's one table.
   (define kinds
     '#(continuation text binary #f #f #f #f #f close ping pong #f #f #f #f #f))
+
+  ;; control-max : Nat
+  ;; The most bytes a control frame's payload holds (§5.5), read and written.
+  (define control-max 125)
 
   ;; A decoder.  `stage` is where in a header its next byte falls: 0 and 1
   ;; for the first two bytes, 2 and 3 for a 16-bit length's, 4 to 11 for a
@@ -100,7 +105,7 @@
         ((fx=? stage 1)
          (let ((n (fxand b 127)))
            (cond ((fx=? 0 (fxand b #x80)) (refuse! d 'unmasked))
-                 ((and (control? (decoder-first d)) (fx>? n 125)) (refuse! d 'control-too-long))
+                 ((and (control? (decoder-first d)) (fx>? n control-max)) (refuse! d 'control-too-long))
                  ((fx=? n 126) (decoder-length-set! d 0) (next! d 2))
                  ((fx=? n 127) (decoder-length-set! d 0) (next! d 4))
                  (else (decoder-length-set! d n) (next! d 12)))))
@@ -231,21 +236,25 @@
       (and why (list 1002 why))))
 
   ;; opcode : Any -> (U Byte #f)
-  ;; The opcode of a kind of frame the server sends (§5.2), or #f.  Never a
-  ;; continuation's: each of the server's messages is one frame.
+  ;; The opcode of a kind of frame the server sends, as `kinds` has it, or
+  ;; #f.  The search starts past 0, a continuation's: each of the server's
+  ;; messages is one frame.
   (define (opcode kind)
-    (case kind
-      ((text) 1) ((binary) 2) ((close) 8) ((ping) 9) ((pong) 10)
-      (else #f)))
+    (and (symbol? kind)
+         (let find ((op 1))
+           (cond ((fx=? op (vector-length kinds)) #f)
+                 ((eq? (vector-ref kinds op) kind) op)
+                 (else (find (fx+ op 1)))))))
 
   ;; frame-encode : (U 'text 'binary 'close 'ping 'pong) Bytevector [Nat Nat] -> Bytevector
   ;; The server's frame of that kind, its payload the bytevector's bytes
   ;; from start to end, the whole bytevector by default: final, unmasked
   ;; (§5.1), and its length in its shortest form (§5.2).  The bytevector is
   ;; left as it was.  A kind not one of these five, a control frame's
-  ;; payload over 125 bytes (§5.5), or anything but a range of a bytevector,
-  ;; is an assertion violation.  What a payload holds is the protocol's to
-  ;; make: text in UTF-8, or a close's code and reason (§5.5.1).
+  ;; payload over 125 bytes (§5.5), a close's of one byte (§5.5.1: a close's
+  ;; body begins with its two-byte code), or anything but a range of a
+  ;; bytevector, is an assertion violation.  What else a payload holds is
+  ;; the protocol's to make: text in UTF-8, or a close's code and reason.
   (define frame-encode
     (case-lambda
       ((kind bv)
@@ -256,17 +265,20 @@
              (n (fx- end start)))
          (unless op
            (assertion-violation 'frame-encode "not a kind of frame the server sends" kind))
-         (when (and (control? op) (fx>? n 125))
+         (when (and (control? op) (fx>? n control-max))
            (assertion-violation 'frame-encode "a control frame's payload is over 125 bytes" kind n))
-         (let* ((h (cond ((fx<? n 126) 2) ((fx<? n 65536) 4) (else 10)))
-                (out (make-bytevector (fx+ h n))))
-           (bytevector-u8-set! out 0 (fxior 128 op))
-           (cond ((fx=? h 2) (bytevector-u8-set! out 1 n))
-                 ((fx=? h 4)
-                  (bytevector-u8-set! out 1 126)
-                  (bytevector-u16-set! out 2 n (endianness big)))
-                 (else
-                  (bytevector-u8-set! out 1 127)
-                  (bytevector-u64-set! out 2 n (endianness big))))
-           (bytevector-copy! bv start out h n)
-           out))))))
+         (when (and (eq? kind 'close) (fx=? n 1))
+           (assertion-violation 'frame-encode "a close's payload begins with a two-byte code" n))
+         ;; The length's form, decided once (§5.2): the second byte's seven
+         ;; bits, and how many bytes of length follow them.
+         (let*-values (((code k) (cond ((fx<? n 126) (values n 0))
+                                       ((fx<? n 65536) (values 126 2))
+                                       (else (values 127 8))))
+                       ((h) (fx+ 2 k)))
+           (let ((out (make-bytevector (fx+ h n))))
+             (bytevector-u8-set! out 0 (fxior 128 op))
+             (bytevector-u8-set! out 1 code)
+             (unless (fx=? k 0)
+               (bytevector-uint-set! out 2 n (endianness big) k))
+             (bytevector-copy! bv start out h n)
+             out)))))))
