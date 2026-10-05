@@ -552,3 +552,18 @@ The owner's `/code-review high` on #14 found ten things, and all ten are fixed, 
 `make test` green before the commit (Darwin arm64): six suites, 120 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
 
 NEXT: the closing ritual for #14 and this, on the owner's word; then M3.1, messages and limits, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M2.2, the frame encoder, M2's exit, and M2.2's review** (the two entries above), from the stacked #14 and #15, as 2dff51b and a656beb. **M2 is complete.**
+- **The squashes.** Each has the tree of the head CI tested: 2dff51b has fe724c0's, on 3d18c87, and a656beb has 3969de3's, on 2dff51b. #15 was rebased onto 2dff51b from ad3c58b, and its tree did not change.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #14 at fe724c0 (run 37359369359): six suites, 119 expected passes;
+  - #15, rebased onto #14's squash, at 3969de3 (run 37362101663): six suites, 120.
+
+  Main's run on a656beb, 37362391949, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m2.2-encode` and `fix/m2.2-review` deleted, local and remote. No PR is open.
+
+`make test` green on main: six suites, 120 expected passes, every pin ok.
+
+NEXT: M3.1, messages and limits (`(websocket protocol)` and `(websocket limits)`), when the owner asks.
