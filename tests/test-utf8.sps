@@ -17,7 +17,7 @@
 ;;; - The API: the range a feed reads, a range outside its bytevector, the
 ;;;   start state, and a refusal, which is final and never whole.
 ;;; - What a feed allocates: nothing, per call or per byte.
-(import (chezscheme) (srfi :64) (ws-testing) (websocket utf8))
+(import (rnrs) (srfi :64) (ws-testing) (websocket utf8))
 
 ;; outcome : (U Utf8State #f) -> (U 'whole 'unfinished 'refused)
 ;; A state as a value a check can compare.  It is never #f, so a feed that
@@ -64,15 +64,6 @@
 ;; The bytes fed a byte at a time, and as one piece.
 (define (both bytes)
   (list (refused-at bytes) (car (in-pieces bytes '()))))
-
-;; allocated : (-> Any) -> Nat
-;; The bytes allocated while the thunk runs.  It collects first, so no
-;; collection falls inside the thunk.
-(define (allocated thunk)
-  (collect)
-  (let ((before (sstats-bytes (statistics))))
-    (thunk)
-    (- (sstats-bytes (statistics)) before)))
 
 ;; §4's rows: each row's first and last code point.
 (define rows
@@ -220,7 +211,7 @@
               (map text? '((#x68 #xC3 #xA9) (#x68 #xED #xA0 #x80) (#x68 #xC3))))))
 
     ;; §7's text 32,768 times: a mebibyte of every length of character, fed
-    ;; as one piece and a byte a piece, against a thunk that calls nothing.
+    ;; as one piece and a byte a piece.
     (let* ((unit (u8-list->bytevector rfc3629-text))
            (size (bytevector-length unit))
            (n (* size 32768))
@@ -230,13 +221,10 @@
       (let ((whole-feed (lambda () (utf8-feed utf8-start big 0 n)))
             (bytewise-feed (lambda ()
                              (let loop ((s utf8-start) (i 0))
-                               (if (= i n) s (loop (utf8-feed s big i (+ i 1)) (+ i 1))))))
-            (nothing (lambda () #f)))
-        (whole-feed)
-        (bytewise-feed)
+                               (if (= i n) s (loop (utf8-feed s big i (+ i 1)) (+ i 1)))))))
         (test-equal "a feed allocates nothing, per call or per byte"
           '(whole whole 0 0)
           (list (outcome (whole-feed))
                 (outcome (bytewise-feed))
-                (- (allocated whole-feed) (allocated nothing))
-                (- (allocated bytewise-feed) (allocated nothing))))))))
+                (allocated whole-feed)
+                (allocated bytewise-feed)))))))

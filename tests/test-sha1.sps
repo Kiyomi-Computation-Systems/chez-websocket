@@ -41,15 +41,6 @@
     (do ((i 0 (+ i 1))) ((= i n) out)
       (bytevector-u8-set! out i (mod (* i 37) 256)))))
 
-;; allocated : (-> Any) -> Nat
-;; The bytes allocated while the thunk runs.  It collects first, so no
-;; collection falls inside the thunk.
-(define (allocated thunk)
-  (collect)
-  (let ((before (sstats-bytes (statistics))))
-    (thunk)
-    (- (sstats-bytes (statistics)) before)))
-
 (run-suite "sha1"
   (lambda ()
     (test-equal "RFC 3174 TEST1: abc"
