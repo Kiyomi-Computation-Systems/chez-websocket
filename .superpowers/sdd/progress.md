@@ -190,3 +190,34 @@ FC is the rule as it stood, with the new comment: its red is the one measured fi
 `make test` green before the commit (Darwin arm64): three suites, 17 expected passes, every pin ok. `make check-help` green.
 
 NEXT: M1.2, base64, when the owner asks; this PR first goes through review and the closing ritual.
+
+---
+
+M1.2 — BASE64, and decision 0002. Branch `feat/m1.2-base64`. 2026-10-05.
+
+**DECIDED (0002), on the owner's word: "keep our own".** The owner asked whether a Chez base64 library already existed, and the brief had looked only inside the server's pins. What exists, read from source:
+- Industria 2.3.0's `(industria base64)` and hashing 1.4.0's `(hashing sha-1)`, both MIT on Akku;
+- SRFI 207's procedures, which no chez-srfi carries, and whose decoder skips whitespace.
+
+SHA-1 and base64 stay this library's own. The brief's line cites the record.
+
+**`(websocket base64)`**: `base64-encode : Bytevector -> String` and `base64-decode : String -> (U Bytevector #f)`, RFC 4648 §4, in `(rnrs)` alone. The encode writes its characters to a string port, since `string-set!` is `(rnrs mutable-strings)`'s, not `(rnrs)`'s.
+
+**`tests/test-base64.sps`, 24 checks:**
+- RFC 4648 §10's seven vectors, both ways;
+- the whole alphabet both ways, its 48 bytes three peers' (Python, Perl, OpenSSL);
+- RFC 6455's keys: §1.3's decoded; §4.1's decoded as printed, and its bytes encoded as erratum 3150 corrects it;
+- RFC 6455's accept value, `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`, through `(websocket sha1)`;
+- the four refusals: a wrong length, a character outside the alphabet (one beyond ASCII among them), padding before the end, and three or more padding characters.
+
+The import audit reads the new library with no change: two checks.
+
+**Taken without a form: a decode accepts a last digit's set bits.** The plan's three refusals do not name them, RFC 4648 §3.5 lets a decoder refuse them, and RFC 6455 does not ask it to. RFC 6455 §4.1's own example key sets them; erratum 3150 corrects it. Four of five peers accept that key: websockets and ws (measured), and coder and gorilla (by Go's documentation). tungstenite refuses it. The design's §3 now says so, for M4.1.
+
+**Tests first.** The suite ran red before the library existed (`library (websocket base64) not found`). Against a stub, 19 checks failed and 5 passed: the empty encode, and the four refusals, which a decode refusing everything passes. Each of those five has its own mutant.
+
+**Seventeen mutants** (`m1-mutations.md`), each red set named before the run, and every one matched. B-11, a decode that requires the unused bits to be zero, reddens the printed §4.1 key alone.
+
+`make test` green before the commit (Darwin arm64): four suites, 42 expected passes, every pin ok.
+
+NEXT: M1.3, the UTF-8 checker, when the owner asks.

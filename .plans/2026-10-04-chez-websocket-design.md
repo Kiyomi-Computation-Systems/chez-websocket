@@ -68,6 +68,9 @@ in this order, answering the first failure:
 
 - **The server has already refused** what is not HTTP/1.1 and what has a body: an
   upgrade is an HTTP/1.1 request with no body (0016).
+- **A key's last digit may set bits past its data**, as RFC 6455 §4.1's own example
+  does (its erratum 3150). Such a key is accepted, as four of five peers accept it
+  (M1.2's mutation log).
 - **Accepted, the 101 carries** `Upgrade: websocket` and `Sec-WebSocket-Accept`. That
   is the base64 of the SHA-1 of the key and RFC 6455's GUID (§4.2.2). The server adds
   `Connection: upgrade` itself.
