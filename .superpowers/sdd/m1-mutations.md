@@ -117,3 +117,79 @@ Notes:
 - **The audit reads, it does not load.** MI-3 and MI-4 name libraries that do not
   exist yet, and the audit refuses them all the same. MI-6 is refused by design:
   an import must name its library plainly.
+
+## M1.2 — base64
+
+Platform: Darwin arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-05.
+The runner was M1.1's: each mutant named its red set before the run, the tree
+was restored after it, and every input was decoded and encoded again outside
+the suite, to tell a wrong answer from a raise.
+
+### The oracles
+
+- **RFC 4648 §10's seven vectors**, from the RFC's raw text.
+- **The alphabet's 48 bytes**, whose base64 is §4's Table 1 in order. Three peers
+  agreed: Python 3.14.5's `base64` (CPython's binascii), Perl's MIME::Base64 3.16
+  and OpenSSL 3.6.3 (`openssl base64 -d`).
+- **RFC 6455's keys.**
+  - §1.3's example decodes to `the sample nonce`, from the same three peers.
+  - §4.1 prints `AQIDBAUGBwgJCgsMDQ4PEC==` for the bytes 1 to 16. Its erratum 3150
+    (verified 2012) corrects it to `…PEA==`, since the printed `C` sets bits a
+    conforming encoder leaves clear (RFC 4648 §3.5). The three peers encode the
+    bytes as the erratum does, and decode the printed key to them.
+- **The accept value**, `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`, from RFC 6455 §4.2.2.
+
+### A decode accepts a last digit's set bits
+
+The plan names three refusals: a wrong length, a character outside the alphabet,
+and padding anywhere but the end. It does not say what to do with a last digit
+whose unused bits are set. RFC 4648 §3.5 lets a decoder refuse such input ("MAY"),
+and RFC 6455 does not ask it to. So the decode accepts it, as the plan reads. Four
+of the five peers accept RFC 6455 §4.1's printed key:
+- **websockets 17.2** decodes with `base64.b64decode(key, validate=True)`, which
+  Python 3.14.5 answers with the sixteen bytes (measured);
+- **ws 8.22.0** matches `/^[+/0-9A-Za-z]{22}==$/`, true for it in Node 20.10.0
+  (measured);
+- **coder v1.8.15 and gorilla v1.5.3** decode with Go's `base64.StdEncoding`. Go's
+  documentation says only its `Strict` mode requires the bits to be zero.
+- **tungstenite v0.30.0 refuses it.** It decodes with `data_encoding::BASE64`, and
+  data-encoding's documentation says it checks trailing bits by default.
+
+The accept value hashes the key as sent, so a client whose encoder set the bits
+still gets the accept value it computes. B-11 holds the choice.
+
+### The mutants
+
+| # | mutation | red |
+|---|----------|-----|
+| B-1 | the table swaps `+` and `/` | the alphabet's encode, and the accept value |
+| B-2 | the table's `q` is a `Q` | the alphabet's encode, alone |
+| B-3 | one byte left: its third digit written, not padded | `f`, `foob` and the bytes 1 to 16, encoded |
+| B-4 | two bytes left: their fourth digit written, not padded | `fo`, `fooba` and the accept value, encoded |
+| B-5 | the encode's loop runs one group past the end | `""`, `foo`, `foobar` and the alphabet, encoded: each reads past its end and raises |
+| B-6 | the decode's length check dropped | the wrong-length refusal, alone (`Z` decodes to nothing; `Zg=` raises) |
+| B-7 | a character outside the alphabet decodes as 0 | the alphabet, padding and three-padding refusals |
+| B-8 | the decode takes the URL alphabet's `-` and `_` too | the alphabet refusal, alone |
+| B-9 | three padding characters counted as padding | the three-padding refusal, alone (`Z===` leaves no room for its byte and raises) |
+| B-10 | `=` inside the data decodes as 0 | the padding and three-padding refusals |
+| B-11 | a last digit's unused bits must be zero | RFC 6455's client example, as printed, alone |
+| B-12 | the decode's size ignores the padding | the six padded decodes |
+| B-13 | the decode's second byte shifted by 7, not 8 | every decode of two bytes or more |
+| B-14 | a lowercase letter's value one low | every decode but the empty one |
+| B-15 | the encode's second digit shifted by 13, not 12 | every encode but the empty one |
+| B-16 | the empty string refused | `""` decoded, alone |
+| MI-9 | `base64.sls` imports `(chezscheme)` too | the audit's check for `base64.sls` |
+
+Every red was exit 1 with no harness error, as named before the run. All were
+reverted, and `make test` is green afterwards: four suites, 42 expected passes,
+every pin ok.
+
+Notes:
+- **A stub passes five checks.** Against an encode that answered `""` and a decode
+  that refused everything, 19 checks failed and 5 passed: the empty encode and
+  the four refusals. A decode that refuses everything passes every refusal, so
+  each refusal's red comes from a lenient mutant here (B-6 to B-10), and the
+  empty encode's from B-5.
+- **B-5, B-6 and B-9 redden partly through a raise.** `decoded` answers a byte
+  list or `refused`, never `#f`, so a raise cannot pass for a refusal (SRFI-64
+  turns a raise into `#f`).
