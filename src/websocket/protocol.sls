@@ -30,9 +30,9 @@
 ;;;   message begun before the last has ended, fails 1002.
 ;;; - The cap (0001).  A data frame whose length would take its message
 ;;;   past the cap fails 1009 at its header, before any of its payload is
-;;;   held.  A message read in one frame is read into the bytevector it is
-;;;   delivered in; a fragmented one into a buffer that doubles, up to the
-;;;   cap.
+;;;   held.  A message's buffer grows as its bytes arrive, never with what a
+;;;   header announces, doubling (room!); a message read whole in one frame
+;;;   is read into the bytevector it is delivered in.
 ;;; - UTF-8 (§8.1).  Text is checked as it arrives, so a byte no character
 ;;;   can go on with fails 1007 at once; a message must end on a whole
 ;;;   character.
@@ -91,10 +91,12 @@
   ;; A connection's end, as actions are accumulated: newest first.
 
   ;; end! : WsState (Listof Action) (Listof Action) -> (Listof Action)
-  ;; Ends the connection with `last`, its last actions, in order.  Nothing
-  ;; reads the connection after it, so what it holds is left as it is.
+  ;; Ends the connection with `last`, its last actions, in order, and lets
+  ;; go of an unfinished message's bytes: a connection lives as long as its
+  ;; WebSocket, and nothing reads it after its end.
   (define (end! s last acts)
     (ws-state-phase-set! s 'ended)
+    (ws-state-buffer-set! s #f)
     (append (reverse last) acts))
 
   ;; code-bytes : Nat -> Bytevector
@@ -191,14 +193,26 @@
           (else (deliver! s acts))))
 
   ;; room! : WsState Nat -> Unspecified
-  ;; Grows the buffer to hold n more bytes, doubling, never past the cap.
-  (define (room! s n)
-    (let* ((buffer (ws-state-buffer s))
+  ;; Grows the buffer, if it must, to hold `avail` more bytes, which have
+  ;; arrived.  A message's buffer grows with its bytes, never with what a
+  ;; header announces, so what a client makes the server hold follows what
+  ;; it sends.  It doubles, so a message read in many pieces is copied a
+  ;; bounded number of times.  In a message's last frame, whose end is
+  ;; known, once a doubling would reach half that end it takes the whole,
+  ;; and no growth falls just short of it: under four times what has
+  ;; arrived.  Before the last frame, it doubles up to the cap.
+  (define (room! s avail)
+    (let* ((d (ws-state-decoder s))
+           (buffer (ws-state-buffer s))
            (held (ws-state-held s))
-           (need (+ held n)))
-      (when (> need (bytevector-length buffer))
-        (let ((bigger (make-bytevector
-                       (min (ws-state-cap s) (max need (* 2 (bytevector-length buffer)))))))
+           (need (fx+ held avail)))
+      (when (fx>? need (bytevector-length buffer))
+        (let* ((doubled (max need (* 2 (bytevector-length buffer))))
+               (bigger (make-bytevector
+                        (if (frame-fin? d)
+                            (let ((end (+ held (frame-left d))))
+                              (if (>= (* 2 doubled) end) end doubled))
+                            (min (ws-state-cap s) doubled)))))
           (bytevector-copy! buffer 0 bigger 0 held)
           (ws-state-buffer-set! s bigger)))))
 
@@ -219,19 +233,14 @@
                ((> (+ (ws-state-held s) n) (ws-state-cap s))
                 (fail! s 1009 'message-too-big acts))
                (else
-                (room! s n)
                 (if (eqv? n 0) (data-end! s acts) acts))))
         (else
          (cond ((ws-state-message s) (fail! s 1002 'message-unfinished acts))
                ((> n (ws-state-cap s)) (fail! s 1009 'message-too-big acts))
                (else
                 (ws-state-message-set! s kind)
-                (ws-state-buffer-set! s (make-bytevector n))
+                (ws-state-buffer-set! s (make-bytevector 0))
                 (if (eqv? n 0) (data-end! s acts) acts)))))))
-
-  ;; control-kind? : Symbol -> Boolean
-  (define (control-kind? kind)
-    (memq kind '(ping pong close)))
 
   ;; read! : WsState Bytevector Nat Nat (Listof Action) -> (Listof Action)
   ;; Reads the bytes from start to end, until the connection ends, or the
@@ -255,13 +264,15 @@
                 (let ((refusal (frame-refusal d)))
                   (fail! s (car refusal) (cadr refusal) acts)))
                (else (loop next (header! s acts))))))
-          ((control-kind? (frame-kind d))
+          ((frame-control? d)
            (let ((n (frame-read-payload! d bv i end (ws-state-control s) (ws-state-control-n s))))
              (ws-state-control-n-set! s (fx+ (ws-state-control-n s) n))
              (loop (fx+ i n) (if (eqv? (frame-left d) 0) (control! s acts) acts))))
           (else
            (let* ((at (ws-state-held s))
-                  (n (frame-read-payload! d bv i end (ws-state-buffer s) at)))
+                  (n (begin
+                       (room! s (min (fx- end i) (frame-left d)))
+                       (frame-read-payload! d bv i end (ws-state-buffer s) at))))
              (ws-state-held-set! s (fx+ at n))
              (if (and (eq? (ws-state-message s) 'text)
                       (let ((u (utf8-feed (ws-state-utf8 s) (ws-state-buffer s) at (fx+ at n))))

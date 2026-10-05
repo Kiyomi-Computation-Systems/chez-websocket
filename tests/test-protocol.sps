@@ -29,7 +29,7 @@
 ;;; A step is fed pieces of one bytevector, cut at points; a step that ends
 ;;; the connection ends the feeding, as the binding closes the stream.
 (import (rnrs) (srfi :64) (ws-testing) (websocket limits) (websocket protocol)
-        (only (chezscheme) make-guardian collect collect-maximum-generation))
+        (only (chezscheme) make-guardian collect collect-maximum-generation bytes-allocated))
 
 ;; range : Nat Nat -> (Listof Nat)
 ;; The naturals from `from` up to, but not including, `to`.
@@ -542,9 +542,17 @@
                 (step* (make-ws-state (lim 1048576 2))
                        (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2)) (frame #x88 '(#x03 #xE8))))
                              '(taken 1) '(taken 1))))
-    (test-equal "a take of more than is queued, or with nothing queued, or a read while reading is stopped or after the connection has ended, is an assertion naming ws-step"
-                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
+    (test-equal "a take of more than is queued, or with nothing queued, or of a count that is not a fixnum of 0 or more, or a read while reading is stopped or after the connection has ended, is an assertion naming ws-step"
+                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
                 (list (refusal (lambda () (ws-step (make-ws-state open) '(taken 0))))
+                      (refusal (lambda ()
+                                 (let ((s (make-ws-state open)))
+                                   (step* s (list (read-event (frame #x82 '(1 2)))))
+                                   (ws-step s '(taken -1)))))
+                      (refusal (lambda ()
+                                 (let ((s (make-ws-state open)))
+                                   (step* s (list (read-event (frame #x82 '(1 2)))))
+                                   (ws-step s '(taken 1.0)))))
                       (refusal (lambda ()
                                  (let ((s (make-ws-state open)))
                                    (step* s (list (read-event (frame #x82 '(1 2)))))
@@ -561,8 +569,12 @@
     ;; --- the API ---
     (test-equal "an event outside the vocabulary or of the wrong shape, or a read outside its bytevector, is an assertion naming ws-step; limits that are not, naming make-ws-state"
                 '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step)
-                  (refused ws-step) (refused ws-step) (refused make-ws-state))
+                  (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step)
+                  (refused make-ws-state))
                 (list (refusal (lambda () (ws-step (make-ws-state open) '(no-such-event))))
+                      (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) -1 1))))
+                      (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) 0.0 1))))
+                      (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) 0 1.0))))
                       (refusal (lambda () (ws-step (make-ws-state open) 'bytes)))
                       (refusal (lambda () (ws-step (make-ws-state open) '(taken))))
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1)) 0))))
@@ -608,6 +620,44 @@
                           (list (- (cost open (ones 4096)) (cost open (frame #x82 (repeat 4096 1))))
                                 (- (cost L (ones 1000)) (cost L (frame #x82 (repeat 1000 1))))))))
 
+    ;; A message's buffer grows as its bytes arrive, never with what a header
+    ;; announces (the first review's finding): a header announcing 1 MiB,
+    ;; alone, allocates what one announcing a byte does.  In reads of
+    ;; 16 KiB, the server's read buffer, a message of 1 MiB in one frame
+    ;; allocates each size its buffer takes once, by the rule: double what
+    ;; it holds, or take what has arrived if more, and in a message's last
+    ;; frame take its whole end once a doubling would reach half of it.  The
+    ;; cap is 2 MiB, so that 1 MiB queued stops no reading.
+    (let* ((roomy (lim 2097152 100000))
+           (cost (lambda (events)
+                   (allocated (lambda ()
+                                (let ((s (make-ws-state roomy)))
+                                  (for-each (lambda (e) (let-values (((s actions) (ws-step s e))) (keep! actions)))
+                                            events))))))
+           (bytes-cost (lambda (n) (allocated (lambda () (keep! (make-bytevector n))))))
+           (reads (lambda (bytes size)
+                    (let loop ((bytes bytes) (out '()))
+                      (if (null? bytes)
+                          (reverse out)
+                          (let ((k (min size (length bytes))))
+                            (loop (list-tail bytes k) (cons (read-event (take bytes k)) out)))))))
+           (sizes (lambda (end first size)
+                    (let loop ((held 0) (have 0) (piece first) (out '()))
+                      (if (>= held end)
+                          (reverse out)
+                          (let ((need (+ held (min piece (- end held)))))
+                            (if (> need have)
+                                (let* ((doubled (max need (* 2 have)))
+                                       (next (if (>= (* 2 doubled) end) end doubled)))
+                                  (loop need next size (cons next out)))
+                                (loop need have size out)))))))
+           (mib 1048576)
+           (whole (frame #x82 (pattern mib))))
+      (test-equal "a message's buffer grows as its bytes arrive: a header announcing 1 MiB alone holds nothing for it, and 1 MiB in reads of 16 KiB takes each size its buffer grows to once"
+                  (list 0 (fold-left + 0 (map bytes-cost (sizes mib (- 16384 (length (header #x82 mib))) 16384))))
+                  (list (- (cost (list (read-event (header #x82 mib)))) (cost (list (read-event (header #x82 1)))))
+                        (- (cost (reads whole 16384)) (cost (list (read-event (frame #x82 '()))))))))
+
     ;; A connection lives as long as its WebSocket, idle or not, so what it
     ;; is done with it lets go: a guardian hands back what nothing else
     ;; holds once collected.
@@ -628,6 +678,31 @@
                               (g r)
                               (ws-step s (list 'bytes r 0 (bytevector-length r)))
                               (ws-step s '(taken 1))))))))
+
+    ;; An unfinished message's bytes are the connection's own, out of any
+    ;; guardian's reach, so the live heap tells.  A connection's footprint is
+    ;; the live heap holding it, every generation collected, less the live
+    ;; heap once it is let go: two measures back to back, after one round to
+    ;; warm up, since the first frees what loading left (about 87 KB here).
+    ;; One that ended in the middle of a fragment of 1,000,000 bytes and kept
+    ;; them would show them all; let go, a new one's few hundred bytes.  Half
+    ;; the fragment tells the two apart.
+    (test-equal "once the connection has ended, it keeps no unfinished message"
+                'let-go
+                (let* ((footprint (lambda (make)
+                                    (keep! (make))
+                                    (collect (collect-maximum-generation))
+                                    (let ((with (bytes-allocated)))
+                                      (keep! #f)
+                                      (collect (collect-maximum-generation))
+                                      (- with (bytes-allocated)))))
+                       (warm (footprint (lambda () (make-ws-state open))))
+                       (ended (footprint (lambda ()
+                                           (let ((s (make-ws-state open)))
+                                             (step* s (list (read-event (frame #x02 (pattern 1000000)))
+                                                            (read-event (frame #x83 '()))))
+                                             s)))))
+                  (if (< ended 500000) 'let-go (list 'kept ended))))
 
     (test-equal "two connections at once are each their own: their messages and their control frames read in turns"
                 (list '() '() (list (deliver 'text hello)) (list (deliver 'binary '(1 2 3)))

@@ -165,7 +165,7 @@ since the protocol reads its limits.
 
 ### Lines no check could tell apart, taken out before the run
 
-Writing the mutants found five lines no check could tell from their absence. Each
+Writing the mutants found six lines no check could tell from their absence. Each
 was shown redundant, and taken out:
 - A new message's reset of `held` to 0, and of the UTF-8 state to its start:
   `deliver!` leaves `held` at 0, and a text ends whole or the connection fails.
@@ -404,3 +404,266 @@ Notes:
   mutants still redden some check through a raise, such as a take refused
   because a message went uncounted (M-40, M-41).
 - **No mutant survives.** M3.1 has no scope statement.
+
+## M3.1's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05. The owner's `/code-review high` of #16 and #17 found nine things,
+and all nine are fixed, on the owner's "fix all". The blobs: `limits.sls`
+cdf3ec3, `protocol.sls` 132c307, `frame.sls` 1f004d2; `test-limits.sps`
+16c37e2, 15 checks; `test-protocol.sps` 5aae609, 48 checks; `test-frame.sps`
+b6c0444, 42 checks. The runner was step 2's, with three suites run for every
+mutant, since `(websocket frame)` changed too.
+
+### The findings and their fixes
+
+| # | finding | fixed |
+|---|---|---|
+| 1 | a frame's buffer allocated at its announced length, at its header | a message's buffer grows as its bytes arrive (below) |
+| 2 | limits with no upper bound: a bignum of ms passed, which `transport-deadline!` refuses | each value a fixnum at most, refused at the reading, naming the variable |
+| 3 | guards no check or mutant held: a take's fixnum and sign, a read's start and end | rows for each, and Q-1 to Q-5 |
+| 4 | an ended connection keeping its unfinished message | `end!` lets go of it, checked on the live heap |
+| 5 | "five lines" where six were listed | six, in step 2's records |
+| 6 | the record's predicate and accessors with no signature comment | a comment at the record type |
+| 7 | the water check finding its marks by position | by name, `named` |
+| 8 | `control-kind?` repeating `(websocket frame)`'s `control?` | `frame-control?`, exported, with its check |
+| 9 | `field-values` building accessors each call | the table carries each field's accessor |
+
+**Finding 1, measured.** A prototype of each fix was run against #17's library
+(Darwin arm64):
+
+| | #17 | grow as it arrives | 16 KiB up front, then grow |
+|---|---|---|---|
+| a 14-byte header announcing 1 MiB, alone | 1,048,576 B | 0 B | 16,384 B |
+| 1 MiB in one frame, in reads of 16 KiB | 1,049,088 B, 1.98 ms | 2,080,912 B, 1.99 ms | 2,081,376 B |
+| 1 MiB in one frame, in one read | 1,049,088 B | 1,049,088 B | 1,065,488 B |
+
+Growing as it arrives does as well as or better than the floor in every case,
+so there was nothing to put to a form. Plain doubling, capped at the message's
+end, first measured 3,129,056 B: a doubling landed just under the end
+(1,048,128 B), then grew again. So in a message's last frame, once a doubling
+would reach half its end, the buffer takes the whole end. It is then never
+more than four times what has arrived. The step's time is the same within
+noise.
+
+### The test-first runs
+
+The review's suites against #17's libraries:
+- **the frame suite** stops at once: `attempt to reference unbound identifier
+  frame-control?`, exit 255;
+- **the limits suite**: 14 passes, and the fixnum check red;
+- **the protocol suite**: 46 passes, and red the growth check, `(1048576
+  1048592)` for `(0 2080416)`, and the ended connection's, `(kept 1000448)`.
+
+The rows for finding 3, the non-pair override and the non-default base pass
+there: the code held them already, and no check did. Their mutants show it:
+Q-1 to Q-5 and L-35, cut on #17's libraries, pass #17's suites with every
+check green, and each fails its check here. L-37 cuts the review's new table.
+
+### The oracles
+
+- **The transport's contract**: `transport-deadline!` takes a fixnum of ms
+  (`(fixnum? ms)`, chez-http-server's `transport.sls`). Chez's own
+  `(greatest-fixnum)` sets the edge.
+- **Chez's own sizes** for the growth check. The test works out the sizes by
+  the rule the library's comment states: double, or take what has arrived if
+  more, and take the end once a doubling would reach half of it.
+- **The live heap** for what an ended connection keeps: a footprint is the live
+  heap holding it, every generation collected, less the live heap once it is
+  let go. The first such measure frees about 87 KB that loading left, so one
+  round warms up. Then a new connection measures 48 to 432 B, and an ended one
+  432 B, or 1,000,432 B with the release taken out. Half the fragment's
+  1,000,000 bytes tells them apart.
+- **ws 7.5.10**, fed every connection of the review's suite: 582. 542 answered
+  the same and 17 read nothing. The rest are ws's own, as in step 2: 18 judge
+  UTF-8 at a message's end, 3 accept 1012 to 1014, and 2 are M2.1's length
+  rules. No answer disagreed.
+
+### The mutants
+
+The keys are step 1's and step 2's, with four new: L-FIX, "a value is a fixnum
+at most…"; P-GROW, "a message's buffer grows as its bytes arrive…"; P-ENDKEEP,
+"once the connection has ended, it keeps no unfinished message"; and FC,
+`frame-control?`'s check in the frame suite. M3.1's rows were re-cut where the
+review changed their code. M-57 is withdrawn: a first buffer one byte bigger is
+now outgrown at once. G-5 cuts the eager buffer instead.
+
+| # | mutation | red |
+|---|----------|-----|
+| B-0 | unmutated | none: the tree unmutated, 105 passes |
+| L-1 | the default cap one byte less | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-ZERO, L-WITH, P-CAPDEF |
+| L-2 | the default queue 17 messages | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-ZERO, L-WITH, P-QCOUNT |
+| L-3 | the default ping interval 1 ms more | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-WITH |
+| L-4 | the default pong timeout 1 ms more | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-ZERO, L-WITH |
+| L-5 | the default close timeout 1 ms more | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-ZERO, L-WITH |
+| L-6 | the default high water a byte less | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-FIX, L-ZERO, L-WITH |
+| L-7 | the default low water a byte less | L-DEF, L-EMPTY, L-EACH, L-EDGE, L-WATER, L-FIX, L-ZERO, L-WITH |
+| L-8 | CHEZ_WS_MAX_QUEUE misspelled | L-VARS, L-EACH, L-ALL, L-EDGE, L-BELOW, L-MAL, L-FIX |
+| L-9 | a cap of 0 allowed | L-BELOW, L-MAKE-REF |
+| L-10 | a queue of 0 allowed | L-BELOW, L-MAKE-REF, L-WITH-REF |
+| L-11 | a pong timeout of 0 allowed | L-BELOW, L-MAKE-REF |
+| L-12 | a ping interval of 0 refused | L-ALL, L-EDGE |
+| L-13 | a close timeout of 0 refused | L-ALL, L-EDGE |
+| L-14 | a high water of 0 refused | L-EDGE |
+| L-15 | a low water of 0 refused | L-EDGE |
+| L-16 | the ping interval read in ms | L-EACH, L-FIX, L-ZERO |
+| L-17 | the pong timeout read in ms | L-EACH, L-ALL, L-EDGE, L-FIX |
+| L-18 | the close timeout read in ms | L-EACH, L-FIX |
+| L-19 | the cap read in KiB | L-EACH, L-ALL, L-EDGE, L-FIX |
+| L-20 | a plus sign taken for a digit | L-MAL |
+| L-21 | char-numeric? for a digit | L-MAL |
+| L-22 | an empty value not the default | L-EMPTY |
+| L-24 | a malformed value names itself, not its variable | L-MAL |
+| L-25 | the environment's refusals name the field | L-BELOW, L-WATER, L-FIX |
+| L-26 | no water check | L-WATER, L-MAKE-REF |
+| L-27 | equal water marks refused | L-EDGE, L-WATER, L-FIX |
+| L-28 | the water refusal names the high water first | L-WATER, L-MAKE-REF |
+| L-29 | any integer taken for a fixnum | L-FIX, L-MAKE-REF |
+| L-30 | the bound before the review: any exact integer | L-FIX |
+| L-31 | make-websocket-limits checks nothing | L-FIX, L-MAKE-REF, L-WITH-REF |
+| L-32 | make-websocket-limits swaps the ping interval and timeout | L-MAKE, L-MAKE-REF, L-WITH |
+| L-33 | websocket-limits-with takes any name | L-WITH-REF |
+| L-34 | websocket-limits-with ignores its overrides | L-WITH, L-WITH-REF, P-CAP, P-CAPFRAG, P-AFTER, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-QAPI, P-ALLOC, P-GROW |
+| L-35 | an override not checked for a pair | L-WITH-REF |
+| L-37 | the ping interval's and timeout's accessors swapped in the table | L-WITH |
+| A-1 | (websocket limits) imports (chezscheme) | the import audit's check of its library, alone |
+| A-2 | (websocket protocol) imports (chezscheme) | the import audit's check of its library, alone |
+| M-1 | make-ws-state takes anything for limits | P-API |
+| M-2 | the end does not end the connection | *P-CONT*, *P-UNFIN*, *P-AFTER*, *P-CLOSEMID*, P-SENDAPI, P-QEND, P-TAKEN, P-QAPI |
+| M-3 | the end's actions in the reverse order | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, P-QEND, P-TAKEN |
+| M-4 | a failing close's code little-endian | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND |
+| M-5 | a failure told 1000 | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND |
+| M-6 | a failure told clean | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND |
+| M-7 | a failure logged without why | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND |
+| M-8 | a failure leaves the stream open | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND |
+| M-9 | 1000 not sendable | P-CLOSE, P-CLOSE123, P-REASON, P-QEND, P-TAKEN |
+| M-10 | 999 sendable | P-CODE |
+| M-11 | 1003 not sendable | P-CLOSE |
+| M-12 | 1004 sendable | P-CODE |
+| M-13 | 1007 not sendable | P-CLOSE |
+| M-14 | 1006 sendable | P-CODE |
+| M-15 | 1011 not sendable | P-CLOSE |
+| M-16 | 1012 sendable | P-CODE |
+| M-17 | 3000 not sendable | P-CLOSE |
+| M-18 | 2999 sendable | P-CODE |
+| M-19 | 4999 not sendable | P-CLOSE |
+| M-20 | 5000 sendable | P-CODE |
+| M-21 | an empty close told 1000 | P-CLOSE0 |
+| M-22 | an empty close answered with 1000 | P-CLOSE0 |
+| M-23 | a close of one byte read as a code | P-CLOSE1 |
+| M-24 | a close's code not checked | P-CODE |
+| M-25 | a close's reason not checked | P-REASON |
+| M-26 | a close's reason may end mid-character | P-REASON |
+| M-27 | a close echoed with its reason | P-CLOSE, P-CLOSE123 |
+| M-28 | a close's reason told from its code on | P-CLOSE, P-CLOSE123 |
+| M-29 | a close with a code told unclean | P-CLOSE, P-CLOSE123, P-CLOSEMID, P-QEND, P-TAKEN |
+| M-30 | a ping not answered | P-B2B, P-PAIRS, P-PING, P-PINGMID, P-CAPFRAG, P-QREAD, P-TWO |
+| M-31 | a pong answered with a pong | P-B2B, P-PONG |
+| M-32 | a pong without its ping's payload | P-B2B, P-PAIRS, P-PING, P-PINGMID, P-CAPFRAG, P-QREAD, P-TWO |
+| M-33 | a cap's worth queued does not stop reading | P-CAP, P-CAPFRAG, P-CAPDEF, P-QBYTES |
+| M-34 | max-queue messages queued do not stop reading | P-QCOUNT, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-QAPI |
+| M-35 | no byte bound on the queue | P-CAP, P-CAPFRAG, P-CAPDEF, P-QBYTES, P-QSTAY |
+| M-36 | no count bound on the queue | P-QCOUNT, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-QAPI |
+| M-37 | a message always copied at its delivery | P-ALLOC, P-GROW |
+| M-38 | a message delivered in its whole buffer | P-FRAGS |
+| M-39 | a delivered message kept | P-KEEP |
+| M-40 | a message's bytes not queued | P-CAP, P-CAPFRAG, P-CAPDEF, *P-QBYTES*, *P-QSTAY*, *P-QWAIT*, *P-QREAD*, *P-QEND*, *P-TAKEN*, *P-PURE*, *P-KEEP* |
+| M-41 | a message not counted | *P-QBYTES*, *P-QSTAY*, *P-QCOUNT*, *P-QWAIT*, *P-QREAD*, *P-QEND*, *P-TAKEN*, P-QAPI, *P-PURE*, *P-KEEP* |
+| M-42 | read-stop not answered | P-CAP, P-CAPFRAG, P-CAPDEF, P-QBYTES, P-QSTAY, P-QCOUNT, P-QWAIT, P-QREAD, P-QEND, P-TAKEN |
+| M-43 | reading not marked stopped | P-QBYTES, P-QSTAY, P-QCOUNT, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-QAPI, *P-PURE*, P-KEEP |
+| M-44 | every data frame ends its message | P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-UNFIN, P-PONG, P-PINGMID, P-CAPFRAG, P-UTF8SPLIT, P-UTF8END, P-CLOSEMID, P-SENDMID, P-ALLOC |
+| M-45 | a text may end mid-character | P-UTF8END |
+| M-46 | the buffer grows by what it needs alone | P-ALLOC, P-GROW |
+| M-47 | the buffer grows past the cap before a message's last frame | P-ALLOC |
+| M-48 | the buffer forgets what it held as it grows (filled) | P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-PONG, P-PINGMID, P-CAPFRAG, P-UTF8SPLIT, P-SENDMID, P-QREAD |
+| M-49 | a control frame's count not begun again | P-B2B |
+| M-50 | a continuation needs no message | *P-CONT* |
+| M-51 | a continuation's cap not checked | P-CAPFRAG |
+| M-52 | fragments may not reach the cap | P-CAPFRAG, P-ALLOC |
+| M-53 | a continuation's cap checked on its own length | P-CAPFRAG |
+| M-54 | a message begun before the last ended | *P-UNFIN* |
+| M-55 | a first frame's cap not checked | P-CAP, P-CAPDEF, P-CAPMAX, P-AFTER |
+| M-56 | a message may not reach the cap | P-CAP, P-CAPDEF, P-ALLOC |
+| M-58 | reading goes on past a full queue | P-QWAIT, P-QREAD, P-QEND, P-TAKEN |
+| M-59 | what waits is kept from the read's start | P-QWAIT, *P-QREAD*, P-QEND, P-TAKEN, P-KEEP |
+| M-60 | a refusal's reason not logged | P-REFUSE, P-AFTER, P-QEND |
+| M-61 | a control payload always read into its start | P-B2B, P-TWO |
+| M-62 | a text's bytes checked from the buffer's start | P-UTF8AT, P-UTF8SPLIT, P-UTF8END |
+| M-63 | binary checked as UTF-8 | P-ONE, P-FRAGS, P-CAP, P-CAPFRAG, P-CAPDEF, P-BIN, *P-QBYTES*, *P-QSTAY*, P-ALLOC, *P-GROW*, *P-KEEP*, *P-ENDKEEP* |
+| M-64 | a read's range not checked | P-API |
+| M-65 | a read after the end allowed | P-QAPI |
+| M-66 | a read while stopped allowed | P-QAPI |
+| M-67 | a send after the end allowed | P-SENDAPI |
+| M-68 | text sent as binary | P-SEND, P-SEND2 |
+| M-69 | text sent in Latin-1 | *P-SEND2* |
+| M-70 | any kind of bytevector sent as binary | P-SENDAPI |
+| M-71 | a text's payload not checked for a string | P-SENDAPI |
+| M-72 | a take with nothing queued | P-QAPI |
+| M-73 | a take of more than is queued | P-QAPI |
+| M-74 | a take while reading answers read-start | P-QBYTES |
+| M-75 | read-start though what waits fills the queue again | P-QWAIT |
+| M-76 | read-start after the connection ended | P-QEND, P-TAKEN |
+| M-77 | what waits not let go before it is read | P-QWAIT, P-KEEP |
+| M-78 | an event not a pair reaches car | P-API |
+| M-79 | an event's shape not checked | P-API |
+| M-80 | an unknown event answered with nothing | P-API |
+| M-81 | the control buffer a byte short | *P-PING*, *P-CAPFRAG*, *P-CLOSE123* |
+| M-82 | the read's payload unmasked in place | P-PURE, P-KEEP |
+| M-83 | a fragmented message of its last frame's kind | P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-PONG, P-CAPFRAG, P-UTF8SPLIT, P-UTF8END, P-SENDMID |
+| M-84 | every message delivered as binary | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-CONT, P-PONG, P-CAPFRAG, P-UTF8OK, P-UTF8SPLIT, P-SENDMID, P-QCOUNT, P-QREAD, P-TWO |
+| M-85 | one control buffer for every connection | P-TWO |
+| M-86 | a send forgets the message begun | P-SENDMID |
+| M-87 | binary sent as text | P-SEND, P-SEND2, P-SENDMID |
+| M-88 | UTF-8 failed only at the message's end | P-UTF8AT |
+| G-1 | plain doubling, capped at the message's end | P-GROW |
+| G-3 | the whole end at a last frame's first byte | P-GROW |
+| G-5 | a first frame's buffer at its announced length, as before the review | P-GROW |
+| G-7 | room for the rest of the read, not of the frame | P-ALLOC |
+| S-9 | the buffer grows at every piece | P-ALLOC, P-GROW |
+| E-1 | the end keeps an unfinished message | P-ENDKEEP |
+| Q-1 | a take's count not checked for a fixnum | P-QAPI |
+| Q-2 | a negative take | P-QAPI |
+| Q-3 | a read's start not checked for a fixnum | P-API |
+| Q-4 | a read's end not checked for a fixnum | P-API |
+| Q-5 | a negative start | P-API |
+| S-1 | a delivery does not end the message | P-ONE, P-B2B, *P-CONT*, P-QBYTES, *P-QSTAY*, P-QCOUNT, *P-QWAIT*, *P-QREAD*, *P-TAKEN*, *P-PURE* |
+| S-2 | a delivery keeps its count of bytes held | *P-ONE*, *P-B2B*, *P-QBYTES*, *P-QSTAY*, *P-QWAIT*, *P-QREAD*, *P-TAKEN*, *P-PURE*, *P-KEEP* |
+| S-3 | a control frame of no payload not answered | P-B2B, P-PING, P-CLOSE0, P-SENDAPI |
+| S-4 | a continuation of no payload never ends | P-FRAGS, P-UTF8SPLIT, P-UTF8END |
+| S-5 | a first frame of no payload never ends | P-ONE, P-B2B, *P-QCOUNT*, P-ALLOC, P-GROW |
+| S-6 | every message begun as binary | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-CONT, P-PONG, P-CAPFRAG, P-UTF8OK, P-UTF8AT, P-UTF8SPLIT, P-UTF8END, P-AFTER, P-SENDMID, P-QCOUNT, P-QREAD, P-TWO |
+| S-7 | the reading goes on past the end | *P-CONT*, *P-UNFIN*, *P-AFTER*, *P-CLOSEMID* |
+| S-8 | a binary message's end checked as UTF-8 (equivalent: a binary's checker state is always whole) | none: survives, an equivalent mutant (below) |
+| F-1 | frame-control? leaves out a close | FC, *P-CLOSE*, *P-CLOSE123*, *P-CLOSE1*, *P-CODE*, *P-REASON*, P-CLOSEMID, *P-QEND*, *P-TAKEN* |
+
+A key in italics went red through a raise. Every other red was by value, exit 1,
+with no harness error.
+
+145 rows, each as named before the run, on the blobs above: 0 mismatches
+(`specs.py`, SHA-256 `e267fe0a…` for the first run, `1d6a44a6…` for the last).
+
+**M2's 98 frame mutants and their baseline ran again on this tree,** since the
+frame suite gained a check. Each kept its recorded red set. D-6, `control?`
+leaving out a close, reddens `frame-control?`'s check too, as named before the
+run: 99 rows, 0 mismatches.
+
+Notes:
+- **The first run had four mismatches.**
+  - **E-1 survived.** The ended connection's check, as first written, compared
+    the live heap holding an ended connection with the heap holding a new one,
+    measured apart, and allowed less than the fragment's 1,000,000 bytes more.
+    The heap moved by about 87 KB between the two, so a kept buffer showed only
+    913,336 bytes. The check now measures each connection's footprint, back to
+    back, after a warm-up, against half the fragment. E-1 reddens it at
+    1,000,240 bytes.
+  - Three prediction errors, each an extra red or one fewer. M-63 reddens the
+    ended connection's check too: a binary checked as UTF-8 ends the connection
+    in its first step, and the check's second read is refused. S-1 leaves
+    P-KEEP green: the waiting read fails before it can be kept. S-3 reddens a
+    send after the end: an empty close left unanswered leaves the connection
+    open.
+- **S-8 survives, an equivalent mutant.** It checks a binary's end as UTF-8. A
+  binary never feeds the checker, whose state is whole whenever a message
+  ends.
+- **Every check has its killers, each at least one by value.** Fifteen mutants
+  still redden some check through a raise.

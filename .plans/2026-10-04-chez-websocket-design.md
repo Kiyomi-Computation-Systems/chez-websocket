@@ -117,7 +117,9 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   (§5.4). A continuation with no message begun, or a new message begun before the
   last has ended, fails 1002.
 - **The cap** is 1 MiB by default (0001 item 1). A data frame whose announced length
-  would take its message past it fails 1009, before any of its payload is held.
+  would take its message past it fails 1009, before any of its payload is held. A
+  message's buffer grows as its bytes arrive, never with what a header announces,
+  so what a client makes the server hold follows what it sends.
 - **Text is checked as UTF-8 as it arrives**, so a bad byte fails 1007 at once
   (§8.1). A message may end only on a whole character.
 - **Control frames** may come between a message's fragments (§5.4). A ping is answered
@@ -221,7 +223,9 @@ there. A handler may give `websocket-accept` limits of its own.
 Durations are in seconds, as the server's are. A value is a whole number in ASCII
 digits, nothing else. Each has a least value: a cap and a queue of 1, since a cap
 of 0 would stop reading for good; a pong timeout of 1 s, since one of 0 would pass
-as its ping went; 0 for the rest. A low water above the high water is refused.
+as its ping went; 0 for the rest. Each is a fixnum at most, since the server's
+transport arms a deadline only for a fixnum of ms. A low water above the high water
+is refused.
 
 ## 8. Testing
 
