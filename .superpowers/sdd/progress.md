@@ -406,3 +406,46 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the base64 r
 `make test` green on main: five suites, 78 expected passes, every pin ok.
 
 NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
+
+---
+
+M2.1, STEP 1 — THE HEADER. Branch `feat/m2.1-decode-1-header`, cut from main at d1e6547. 2026-10-05.
+
+On the owner's "start M2, the frame codec". M2.1 was built whole, then cut in two by form ("Two stacked PRs"): this step is the header, and step 2, stacked on it, the payload. Each step was proved green on its own, in a scratch worktree of main with its files laid in, with its mutants run on its own tree.
+
+**`(websocket frame)`**, an incremental decoder of the frames a client sends, in `(rnrs)` alone. This step reads headers:
+- `make-frame-decoder`, a decoder before any byte;
+- `frame-read-header! : FrameDecoder Bytevector Nat Nat -> (Values (U 'more 'header 'refused) Nat)`, which reads a header's bytes and answers once the header is whole, or once a byte refuses the frame;
+- `frame-fin?`, `frame-kind`, `frame-length` and `frame-left`, which tell the header, and `frame-refusal`, which answers `(1002 why)`.
+
+So the protocol (M3) can judge a frame by its header, its cap among the rules, before any payload is held (decision 0001).
+- **The refusals of design §4**, each with 1002: a reserved bit set, an unknown opcode, a control frame not final, an unmasked frame, a control frame over 125 bytes, a length not in its shortest form, and a 64-bit length with its top bit set. Each comes at the first byte that shows it, as the UTF-8 checker's do: a 64-bit length whose first six bytes are zero is under 65,536, and is refused at the sixth. A refusal is final.
+- **Two assertion violations** naming `frame-read-header!`: a range outside its bytevector, and a header read while a payload is unfinished. Their checks come with the payload read, in step 2.
+
+**`tests/test-frame.sps`, 16 checks**, built from tables: 63 headers and 53 refusal cases.
+- RFC 6455 §5.7's unmasked frames are refused at their second byte.
+- Every kind of header at each length form's edges: whole, a byte at a time, split at every byte (495 cuts) and at every pair of bytes (2,052), with an empty piece inside, and without its last byte, when it answers nothing yet. The length forms at the plan's edges, 125, 126, 65,535 and 65,536, and 2^63 − 1, written out by hand.
+- Each refusal at its index, with 1002: whole, a byte at a time, and split at every byte. A refusal is final.
+
+The suite builds its own headers by §5.2. It stops with a provenance failure, exit 3, unless they are the length forms' edges written out by hand.
+
+The import audit reads the new library with no change: four checks.
+
+**The oracles.** RFC 6455's raw text, and Node's ws 7.5.10, a server's decoder found on this machine (nothing was downloaded). A shim logged every decoder the suite made, 3,441, and ws was fed each one's bytes in the same pieces. No answer disagreed (m2-mutations.md). Where the two differ, the difference is ws's own:
+- it accepts a length not in its shortest form (62 cases);
+- it caps a length at 2^53 − 1, with 1009, so a top-bit length gets 1009 where ours gets 1002 (34);
+- it judges a header only once it holds two bytes, and a 64-bit length once it holds all eight.
+
+Where both refused a stream fed a byte at a time, both refused at the same byte.
+
+**Taken without a form:**
+- A refusal at the first byte that shows it. RFC 6455 does not say when, and the peers read a whole field first.
+- `frame-refusal` names its reason, for the protocol's log.
+
+**Tests first.** The suite ran red before the library existed (`library (websocket frame) not found`, exit 255), and all 16 checks were red against a stub that decodes nothing.
+
+**36 mutants and a baseline** (m2-mutations.md), each red set named before the run, and all matched. D-35 and D-37 survive this step: they mutate a header read's two assertions, whose checks come in step 2.
+
+`make test` green before the commit (Darwin arm64): six suites, 95 expected passes, every pin ok. `make prod` green.
+
+NEXT: step 2, the payload, stacked on this.

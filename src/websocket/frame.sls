@@ -1,0 +1,167 @@
+#!r6rs
+;;; (websocket frame) — the frame codec (RFC 6455 §5.2): an incremental
+;;; decoder of the frames a client sends.
+;;;
+;;; A frame arrives in pieces of any size, and its header can straddle two
+;;; (design §4).  The decoder reads a header's bytes as they come, and
+;;; answers the header once it is whole: its FIN, its kind and its payload's
+;;; length, so the protocol can judge the frame before any of its payload is
+;;; held.
+;;;
+;;; It refuses, with 1002, what no client may send (design §4): a reserved
+;;; bit set, since no extension is ever negotiated; an unknown opcode; an
+;;; unmasked frame (§5.1); a length not in its shortest form, or a 64-bit
+;;; length with its top bit set (§5.2); and a control frame over 125 bytes,
+;;; or not final (§5.5).  Like the UTF-8 checker, it refuses at the first
+;;; byte that shows the fault: the first with which no frame a client may
+;;; send begins.  A 64-bit length whose first six bytes are zero is under
+;;; 65,536, so it is refused at the sixth.  A refusal is final.
+;;;
+;;; What a message may be is the protocol's to judge (M3): a continuation
+;;; with no message begun, a message past its cap, text that is not UTF-8.
+;;;
+;;; A length is an exact integer: a fixnum below 2^60, and a bignum only past
+;;; any cap the protocol could set.
+(library (websocket frame)
+  (export make-frame-decoder frame-read-header!
+          frame-fin? frame-kind frame-length frame-left frame-refusal)
+  (import (rnrs))
+
+  ;; kinds : (Vectorof (U Symbol #f))
+  ;; Each opcode's kind (§5.2), or #f for one reserved.
+  (define kinds
+    '#(continuation text binary #f #f #f #f #f close ping pong #f #f #f #f #f))
+
+  ;; A decoder.  `stage` is where in a header its next byte falls: 0 and 1
+  ;; for the first two bytes, 2 and 3 for a 16-bit length's, 4 to 11 for a
+  ;; 64-bit length's, and 12 to 15 for the masking key's.  `first` is the
+  ;; header's first byte, `length` its payload's length (as much of it as
+  ;; has been read), and `key` its masking key.  `left` is the payload's
+  ;; bytes not yet read.  `refusal` is why the decoder refused, or #f.
+  (define-record-type (decoder new-decoder decoder?)
+    (fields (mutable stage) (mutable first) (mutable length) (immutable key)
+            (mutable left) (mutable refusal)))
+
+  ;; make-frame-decoder : -> FrameDecoder
+  ;; A decoder before any byte, which reads a header first.
+  (define (make-frame-decoder)
+    (new-decoder 0 0 0 (make-bytevector 4 0) 0 #f))
+
+  ;; check-range : Symbol Bytevector Nat Nat -> Unspecified
+  ;; An assertion violation, naming `who`, unless start to end is a range of
+  ;; the bytevector.
+  (define (check-range who bv start end)
+    (unless (and (<= 0 start end) (<= end (bytevector-length bv)))
+      (assertion-violation who "not a range of the bytevector" start end)))
+
+  ;; control? : Byte -> Boolean
+  ;; Whether a header's first byte has a control frame's opcode (§5.5).
+  (define (control? first)
+    (fx>=? (fxand first 15) 8))
+
+  ;; next! : FrameDecoder Nat -> #f
+  ;; Moves the decoder to the header's next stage.
+  (define (next! d stage)
+    (decoder-stage-set! d stage)
+    #f)
+
+  ;; refuse! : FrameDecoder Symbol -> 'refused
+  (define (refuse! d why)
+    (decoder-refusal-set! d why)
+    'refused)
+
+  ;; header-byte! : FrameDecoder Byte -> (U #f 'header 'refused)
+  ;; Reads one byte of a header: #f when the header goes on, 'header when it
+  ;; is whole, and 'refused when no frame a client may send goes on with it.
+  (define (header-byte! d b)
+    (let ((stage (decoder-stage d)))
+      (cond
+        ((fx=? stage 0)
+         (cond ((not (fx=? 0 (fxand b #x70))) (refuse! d 'reserved-bit))
+               ((not (vector-ref kinds (fxand b 15))) (refuse! d 'unknown-opcode))
+               ((and (control? b) (fx=? 0 (fxand b #x80))) (refuse! d 'control-not-final))
+               (else (decoder-first-set! d b) (next! d 1))))
+        ((fx=? stage 1)
+         (let ((n (fxand b 127)))
+           (cond ((fx=? 0 (fxand b #x80)) (refuse! d 'unmasked))
+                 ((and (control? (decoder-first d)) (fx>? n 125)) (refuse! d 'control-too-long))
+                 ((fx=? n 126) (decoder-length-set! d 0) (next! d 2))
+                 ((fx=? n 127) (decoder-length-set! d 0) (next! d 4))
+                 (else (decoder-length-set! d n) (next! d 12)))))
+        ((fx<? stage 4)                 ; a 16-bit length
+         (let ((n (fx+ (fx* (decoder-length d) 256) b)))
+           (decoder-length-set! d n)
+           (cond ((fx=? stage 2) (next! d 3))
+                 ((fx<? n 126) (refuse! d 'not-shortest))
+                 (else (next! d 12)))))
+        ((fx<? stage 12)                ; a 64-bit length
+         (if (and (fx=? stage 4) (fx>=? b 128))
+             (refuse! d 'length-top-bit)
+             (let ((n (+ (* (decoder-length d) 256) b)))
+               (decoder-length-set! d n)
+               (if (and (fx=? stage 9) (eqv? n 0))
+                   (refuse! d 'not-shortest)
+                   (next! d (fx+ stage 1))))))
+        (else                           ; the masking key
+         (bytevector-u8-set! (decoder-key d) (fx- stage 12) b)
+         (if (fx<? stage 15)
+             (next! d (fx+ stage 1))
+             (begin
+               (decoder-stage-set! d 0)
+               (decoder-left-set! d (decoder-length d))
+               'header))))))
+
+  ;; frame-read-header! : FrameDecoder Bytevector Nat Nat -> (Values (U 'more 'header 'refused) Nat)
+  ;; Reads a header's bytes from start toward end, and answers what came of
+  ;; them, and the index of the first byte it did not read:
+  ;;   'more     the bytes ended before the header was whole;
+  ;;   'header   the header is whole: frame-fin?, frame-kind and
+  ;;             frame-length tell it, and its payload, if it has one,
+  ;;             comes next;
+  ;;   'refused  the byte before the index refused the frame, and
+  ;;             frame-refusal says why.
+  ;; Once refused, it reads nothing more.  A range outside the bytevector,
+  ;; or a call while a payload is unfinished, is an assertion violation.
+  (define (frame-read-header! d bv start end)
+    (check-range 'frame-read-header! bv start end)
+    (unless (eqv? 0 (decoder-left d))
+      (assertion-violation 'frame-read-header! "a payload is unfinished" (decoder-left d)))
+    (if (decoder-refusal d)
+        (values 'refused start)
+        (let loop ((i start))
+          (if (fx=? i end)
+              (values 'more i)
+              (let ((what (header-byte! d (bytevector-u8-ref bv i))))
+                (if what
+                    (values what (fx+ i 1))
+                    (loop (fx+ i 1))))))))
+
+  ;; frame-fin? : FrameDecoder -> Boolean
+  ;; Whether the frame whose header was answered last ends its message
+  ;; (§5.2's FIN).  This and the next three hold from the header's answer
+  ;; until the next header is begun.
+  (define (frame-fin? d)
+    (fx=? 128 (fxand (decoder-first d) 128)))
+
+  ;; frame-kind : FrameDecoder -> (U 'continuation 'text 'binary 'close 'ping 'pong)
+  ;; The kind of the frame whose header was answered last, by its opcode.
+  (define (frame-kind d)
+    (vector-ref kinds (fxand (decoder-first d) 15)))
+
+  ;; frame-length : FrameDecoder -> Nat
+  ;; The payload length of the frame whose header was answered last.
+  (define (frame-length d)
+    (decoder-length d))
+
+  ;; frame-left : FrameDecoder -> Nat
+  ;; How many of that frame's payload bytes are still to be read.
+  (define (frame-left d)
+    (decoder-left d))
+
+  ;; frame-refusal : FrameDecoder -> (U #f (List 1002 Symbol))
+  ;; The close code and the reason the decoder refused, or #f: reserved-bit,
+  ;; unknown-opcode, control-not-final, unmasked, control-too-long,
+  ;; not-shortest or length-top-bit.
+  (define (frame-refusal d)
+    (let ((why (decoder-refusal d)))
+      (and why (list 1002 why)))))
