@@ -93,3 +93,18 @@ Taken without a form, each with its source:
 `make test` green before the commit (Darwin arm64): one suite, 4 expected passes, every pin ok. Nothing tested changed.
 
 NEXT: M1.1, SHA-1, when the owner asks; the three PRs first go through review and the closing ritual. CI stays red at its token step until the owner adds `SUBMODULES_READ_TOKEN` here.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the planning record, M0 and the design and plan, as three stacked PRs** (the three entries above), bottom-up.
+- **#1, the planning record,** as 8b05b85. Its tree is c7932e7's, and its parent is 27ad906, the license. It kept its branch, since #2 was based on it. It had no CI: docs only, with the workflow arriving in #2.
+- **#2, M0 and its `make prod` fix,** as 3e6ca8b. It was retargeted to main and rebased from c7932e7: its two commits now sit on 8b05b85 at 6d81e2e, which has the tested tree (4f44296's). The squash has the same tree, and its parent is 8b05b85.
+- **#3, the design and the plan,** as b4ebf9c. It was retargeted and rebased from 4f44296 to cde6d08, which has the tested tree (06423bb's). Then, before the merge, 7d223cb corrected one sentence of decision 0001: it had said the quiet-client ping works as websockets' does, but websockets pings every 20 s whether the client is quiet or not, and only the numbers are the same. The squash has 7d223cb's tree, and its parent is 3e6ca8b.
+- **CI.** Each merged on `linux` SUCCESS at its head: #2 on 6d81e2e (run 37291030695) and #3 on 7d223cb (run 37291382024; cde6d08's, 37291194670, had passed too). Each run had 1 suite, 4 expected passes, and the six pins checked in two steps.
+- **Main's own runs.** The run on #2's squash, 37291161874, was main's first. It built Chez from source, since a PR's cache is not visible to main. #3 merged only after it had finished, so it was not cancelled. The run on #3's squash, 37291611106, was green too, and this reflect was pushed after it.
+- **Branches.** All three deleted, local and remote. No PR is open.
+- **The ritual's script.** The server's `move-up.sh` checks that a rebased tip's parent is main, which fails for a PR of two commits. Its copy here checks that the branch's commits sit on main, by count, beside the tree.
+
+`make test` green on main: one suite, 4 expected passes, every pin ok.
+
+NEXT: M1.1, SHA-1 (`(websocket sha1)`, RFC 3174's vectors and RFC 6455's example digest; `make check-imports` begins), when the owner asks.
