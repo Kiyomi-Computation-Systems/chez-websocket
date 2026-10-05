@@ -140,3 +140,14 @@ One survives by construction: a length field written as 32 bits agrees below 512
 `make test` green before the commit (Darwin arm64): three suites, 17 expected passes, every pin ok. `make prod` green.
 
 NEXT: M1.2, base64, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M1.1** (the entry above), from #4, as 53fa639.
+- **The squash** has 6feb8ba's tree (719688a), the head CI tested, and its parent is 33534e7.
+- **CI.** #4 merged on `linux` SUCCESS at 6feb8ba (run 37294481730): three suites, 17 expected passes, the allocation check among them green on Linux as on the laptop. Main's run on the squash, 37295886274, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m1.1-sha1` deleted, local and remote. No PR is open.
+
+`make test` green on main: three suites, 17 expected passes, every pin ok.
+
+NEXT: M1.2, base64 (`(websocket base64)`: RFC 4648 §10's vectors both ways, a decode's refusals, then RFC 6455's accept value), when the owner asks.
