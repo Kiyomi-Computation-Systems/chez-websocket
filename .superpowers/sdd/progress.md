@@ -108,3 +108,35 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the planning
 `make test` green on main: one suite, 4 expected passes, every pin ok.
 
 NEXT: M1.1, SHA-1 (`(websocket sha1)`, RFC 3174's vectors and RFC 6455's example digest; `make check-imports` begins), when the owner asks.
+
+---
+
+M1.1 — SHA-1. Branch `feat/m1.1-sha1`. 2026-10-05.
+
+**`(websocket sha1)`**: `sha1 : Bytevector -> Bytevector`, RFC 3174 over a padded copy of the message, in `(rnrs)` alone. It is for the accept value only (RFC 6455 §4.2.2).
+
+**`tests/test-sha1.sps`, twelve checks:**
+- RFC 3174 §7.3's four test cases, each pattern repeated as its driver repeats it;
+- RFC 6455 §4.2.2's digest of its example key and the GUID;
+- six inputs at the padding's edges, 0, 55, 56, 63, 64 and 65 bytes, whose digests are two peers' that agreed, Perl's Digest::SHA and OpenSSL;
+- what a hash allocates, which the plan did not ask for (below).
+
+**`make check-imports` starts**, as the plan says. It is a suite, `tests/test-imports.sps`, which `make test` runs with the others and the target runs alone. It reads each library under `src/` with Chez's own reader, and holds its imports to `(rnrs ...)` and pure `(websocket ...)` libraries, named plainly. Every library is pure until M4 brings the binding. It has one check per library, one today.
+
+**Tests first.** The suite ran red before the library existed (`library (websocket sha1) not found`, exit 255). Then all eleven vector checks were red against a stub that returned twenty zero bytes (exit 1). Then green.
+
+**Departed from the plan: the allocation check.** Measuring the first version found 5,888 bytes allocated for each block: Chez 10.4.1 allocates for a `+` or a bitwise call of four or more arguments, which the schedule's xor and the step's sum were. They are now nested calls of three. A hash allocates its padded copy, its schedule and its digest, and nothing else: 832 bytes for the 60-byte key and GUID, down from 12,608. The twelfth check holds the slope: ten blocks more allocate exactly their padded copy's 640 bytes more.
+
+**A source garbled.** A summarizing fetch of RFC 3174 printed TEST3's digest wrong (`3C CD 4C DA` for `3C D4 C4 DA`). So every vector was read from the RFCs' raw text, and both peers agree with each published digest.
+
+**Thirty-two mutants** (`m1-mutations.md`), each with the checks it would redden named before the run, and every one matched:
+- the padding off by one each way reddens the 55-byte check alone, and the two 56-byte checks;
+- hashing only the first block reddens exactly the eight inputs of two blocks or more;
+- three allocation mutants redden the allocation check alone;
+- eight import mutants: six imports refused, an empty `src/` exits 2, and a file that is not a library is named.
+
+One survives by construction: a length field written as 32 bits agrees below 512 MiB, recorded as a scope statement.
+
+`make test` green before the commit (Darwin arm64): three suites, 17 expected passes, every pin ok. `make prod` green.
+
+NEXT: M1.2, base64, when the owner asks.

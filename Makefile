@@ -48,7 +48,7 @@ TESTS := $(wildcard tests/test-*.sps)
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
 SUITE_TIMEOUT ?= 120
 
-.PHONY: help check-help submodules check-pins deps build dev run test prod clean
+.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod clean
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -90,6 +90,13 @@ check-pins: ## Verify the server sits at its pin, and each pin it carries where 
 	    echo "PIN DIRTY: $$d has local edits to tracked files" >&2; fail=1; fi; \
 	done; \
 	exit $$fail
+
+# The import audit is a suite, tests/test-imports.sps, which `make test` runs
+# with the others: it reads each library under src/ with Chez's own reader
+# and holds its imports to the pure ones (design §2).  This target runs it
+# alone.
+check-imports: build ## Check each library under src/ imports only (rnrs ...) and pure (websocket ...) ones
+	CHEZSCHEMELIBDIRS=$(LIBDIRS) $(CHEZ) --program tests/test-imports.sps
 
 deps: submodules ## Build chez-libuv's shim and link SRFI-64 onto the path
 	$(MAKE) -C $(LIBUV_DIR) build
