@@ -6,7 +6,9 @@
 ;;; (design §4).  The decoder reads a header's bytes as they come, and
 ;;; answers the header once it is whole: its FIN, its kind and its payload's
 ;;; length, so the protocol can judge the frame before any of its payload is
-;;; held.
+;;; held.  Then it unmasks the payload as it arrives (§5.3), into a
+;;; destination the caller gives it, and reads the next header once the
+;;; payload is done.
 ;;;
 ;;; It refuses, with 1002, what no client may send (design §4): a reserved
 ;;; bit set, since no extension is ever negotiated; an unknown opcode; an
@@ -21,9 +23,14 @@
 ;;; with no message begun, a message past its cap, text that is not UTF-8.
 ;;;
 ;;; A length is an exact integer: a fixnum below 2^60, and a bignum only past
-;;; any cap the protocol could set.
+;;; any cap the protocol could set.  A decoder's state is fixnums in a
+;;; record, so reading allocates nothing.
+;;; A payload is unmasked four bytes at a time, read as one word: a fixnum
+;;; on any 64-bit Chez.  Chez 10.4.1 calls its 32-bit bytevector accessors
+;;; out of line, and still a word at a time took 1.85 ns a byte, where a
+;;; byte at a time took 4.6 (measured in M2.1).
 (library (websocket frame)
-  (export make-frame-decoder frame-read-header!
+  (export make-frame-decoder frame-read-header! frame-read-payload!
           frame-fin? frame-kind frame-length frame-left frame-refusal)
   (import (rnrs))
 
@@ -37,15 +44,16 @@
   ;; 64-bit length's, and 12 to 15 for the masking key's.  `first` is the
   ;; header's first byte, `length` its payload's length (as much of it as
   ;; has been read), and `key` its masking key.  `left` is the payload's
-  ;; bytes not yet read.  `refusal` is why the decoder refused, or #f.
+  ;; bytes not yet unmasked, and `offset` the key's index for the next of
+  ;; them (§5.3).  `refusal` is why the decoder refused, or #f.
   (define-record-type (decoder new-decoder decoder?)
     (fields (mutable stage) (mutable first) (mutable length) (immutable key)
-            (mutable left) (mutable refusal)))
+            (mutable left) (mutable offset) (mutable refusal)))
 
   ;; make-frame-decoder : -> FrameDecoder
   ;; A decoder before any byte, which reads a header first.
   (define (make-frame-decoder)
-    (new-decoder 0 0 0 (make-bytevector 4 0) 0 #f))
+    (new-decoder 0 0 0 (make-bytevector 4 0) 0 0 #f))
 
   ;; check-range : Symbol Bytevector Nat Nat -> Unspecified
   ;; An assertion violation, naming `who`, unless start to end is a range of
@@ -109,6 +117,7 @@
              (begin
                (decoder-stage-set! d 0)
                (decoder-left-set! d (decoder-length d))
+               (decoder-offset-set! d 0)
                'header))))))
 
   ;; frame-read-header! : FrameDecoder Bytevector Nat Nat -> (Values (U 'more 'header 'refused) Nat)
@@ -116,8 +125,8 @@
   ;; them, and the index of the first byte it did not read:
   ;;   'more     the bytes ended before the header was whole;
   ;;   'header   the header is whole: frame-fin?, frame-kind and
-  ;;             frame-length tell it, and its payload, if it has one,
-  ;;             comes next;
+  ;;             frame-length tell it, and its payload, if it has one, is
+  ;;             read next, with frame-read-payload!;
   ;;   'refused  the byte before the index refused the frame, and
   ;;             frame-refusal says why.
   ;; Once refused, it reads nothing more.  A range outside the bytevector,
@@ -135,6 +144,53 @@
                 (if what
                     (values what (fx+ i 1))
                     (loop (fx+ i 1))))))))
+
+  ;; key-word : Bytevector Nat -> Fixnum
+  ;; The masking key from its byte `offset` on, round to the start, as four
+  ;; bytes read little-endian: the word that four payload bytes, read the
+  ;; same way, are xored with (§5.3).
+  (define (key-word key offset)
+    (fxior (bytevector-u8-ref key offset)
+           (fx* (bytevector-u8-ref key (fxand (fx+ offset 1) 3)) 256)
+           (fx* (bytevector-u8-ref key (fxand (fx+ offset 2) 3)) 65536)
+           (fx* (bytevector-u8-ref key (fxand (fx+ offset 3) 3)) 16777216)))
+
+  ;; frame-read-payload! : FrameDecoder Bytevector Nat Nat Bytevector Nat -> Nat
+  ;; Unmasks the payload's next bytes, from start toward end, into the
+  ;; destination from `at` (§5.3): as many as both the bytes and the payload
+  ;; have.  Answers how many.  frame-left then says how many the payload
+  ;; still has; at 0, the frame is done.  A range outside the bytevector, a
+  ;; destination without room for them from `at`, or a call with no payload
+  ;; left, is an assertion violation, and nothing is read or written.
+  (define (frame-read-payload! d bv start end dst at)
+    (check-range 'frame-read-payload! bv start end)
+    (let ((left (decoder-left d)))
+      (when (eqv? left 0)
+        (assertion-violation 'frame-read-payload! "no payload is left to read"))
+      (let ((n (if (< (fx- end start) left) (fx- end start) left)))
+        (unless (and (fixnum? at) (fx<=? 0 at) (fx<=? (fx+ at n) (bytevector-length dst)))
+          (assertion-violation 'frame-read-payload! "no room for the payload's bytes" at n))
+        (let* ((key (decoder-key d))
+               (offset (decoder-offset d))
+               (whole (fx- n (fxand n 3))))
+          ;; Whole words of four bytes first: four bytes bring the key back
+          ;; to `offset`, so each is xored with the same word.
+          (unless (fx=? whole 0)
+            (let ((word (key-word key offset)))
+              (do ((i 0 (fx+ i 4)))
+                  ((fx=? i whole))
+                (bytevector-u32-set! dst (fx+ at i)
+                  (fxxor (bytevector-u32-ref bv (fx+ start i) (endianness little)) word)
+                  (endianness little)))))
+          ;; Then the bytes left, one at a time.
+          (do ((i whole (fx+ i 1)))
+              ((fx=? i n))
+            (bytevector-u8-set! dst (fx+ at i)
+              (fxxor (bytevector-u8-ref bv (fx+ start i))
+                     (bytevector-u8-ref key (fxand (fx+ offset i) 3)))))
+          (decoder-offset-set! d (fxand (fx+ offset n) 3))
+          (decoder-left-set! d (- left n))
+          n))))
 
   ;; frame-fin? : FrameDecoder -> Boolean
   ;; Whether the frame whose header was answered last ends its message
