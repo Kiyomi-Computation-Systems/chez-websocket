@@ -44,7 +44,9 @@ By form, the recommended answer to each of three questions:
      cap's worth of bytes, reading stops until the handler takes one.
    - A ping is answered at once.
    - A client that has sent nothing for 20 s is pinged. If no pong comes within 20 s,
-     the connection fails with 1011, as websockets' 20 s/20 s does.
+     the connection fails with 1011. These are websockets' numbers, but websockets
+     pings every 20 s whether the client is quiet or not; here only a quiet client
+     is pinged.
    - `CHEZ_WS_PING_INTERVAL` and `CHEZ_WS_PING_TIMEOUT` override the times; an
      interval of 0 turns pinging off.
 3. **`websocket-receive` returns a whole message**: text as a string, binary as a
