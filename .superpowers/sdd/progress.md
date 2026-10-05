@@ -689,3 +689,24 @@ The final run had 0 mismatches. S-8 survives, an equivalent mutant. M2's 98 fram
 `make test` green before the commit (Darwin arm64): eight suites, 186 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: the closing ritual for #16, #17 and this, on the owner's word; then M3.2, the closing handshake, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05: **M3.1, messages and limits, and M3.1's review** (the three entries above), from the stacked #16, #17 and #18, as 4451059, e5fe824 and e2258f1. #16 merged on the owner's "squash merge 16", and #17 and #18 on "do closing ritual".
+- **The squashes.** Each has the tree of the head CI tested:
+  - 4451059 has 4d6afaa's, on 71d6626;
+  - e5fe824 has 4d967a1's, on 4451059;
+  - e2258f1 has 1b5c34d's, on e5fe824.
+
+  #17 was rebased onto 4451059 from c38c973, and #18 onto e5fe824 from a4af357. Neither tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #16 at 4d6afaa (run 37370400287): seven suites, 135 expected passes;
+  - #17, rebased onto #16's squash, at 4d967a1 (run 37375982588): eight suites, 182;
+  - #18, rebased onto #17's squash, at 1b5c34d (run 37377285363): eight suites, 186.
+
+  Main's runs on 4451059 (37375592089) and e5fe824 (37377254756) finished before the next merge. Main's run on e2258f1, 37377490495, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m3.1-1-limits`, `feat/m3.1-2-protocol` and `fix/m3.1-review` deleted, local and remote. No PR is open.
+
+`make test` green on main: eight suites, 186 expected passes, every pin ok.
+
+NEXT: M3.2, the closing handshake (a close sent, closes crossing, the close timeout, the stream's end), when the owner asks.
