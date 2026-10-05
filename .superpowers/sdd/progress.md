@@ -482,3 +482,18 @@ The suite's `in-pieces` now reads payloads, and `merged` joins a frame's payload
 `make test` green before the commit (Darwin arm64): six suites, 109 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
 
 NEXT: M2.2, the encoder, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M2.1, the frame decoder** (the two entries above), from the stacked #12 and #13, as eb949fc and bd1062c.
+- **The squashes.** Each has the tree of the head CI tested: eb949fc has 5e39a0b's, on d1e6547, and bd1062c has 0ff2014's, on eb949fc. #13 was rebased onto eb949fc from 14c72c7, and its tree did not change.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #12 at 5e39a0b (run 37352340826): six suites, 95 expected passes;
+  - #13, rebased onto #12's squash, at 0ff2014 (run 37355046214): six suites, 109.
+
+  Main's run on bd1062c, 37355178558, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m2.1-decode-1-header` and `feat/m2.1-decode-2-payload` deleted, local and remote. No PR is open.
+
+`make test` green on main: six suites, 109 expected passes, every pin ok.
+
+NEXT: M2.2, the encoder (the server's frames, unmasked and in shortest form: §5.7's unmasked examples byte for byte, and a decode of each encode, masked first), when the owner asks.
