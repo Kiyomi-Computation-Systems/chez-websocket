@@ -449,3 +449,36 @@ Where both refused a stream fed a byte at a time, both refused at the same byte.
 `make test` green before the commit (Darwin arm64): six suites, 95 expected passes, every pin ok. `make prod` green.
 
 NEXT: step 2, the payload, stacked on this.
+
+---
+
+M2.1, STEP 2 — THE PAYLOAD. Branch `feat/m2.1-decode-2-payload`, stacked on `feat/m2.1-decode-1-header`. 2026-10-05.
+
+**`frame-read-payload! : FrameDecoder Bytevector Nat Nat Bytevector Nat -> Nat`** unmasks the payload's next bytes into a destination the caller gives it, as many as both the bytes and the payload have: design §4's "then its payload as it arrives, unmasked (§5.3) into the core's buffer". A range outside its bytevector, a payload read with none left, and a destination without room are assertion violations naming it, and nothing is read or written.
+
+**`tests/test-frame.sps`, 30 checks**, 14 of them new:
+- RFC 6455 §5.7's masked text and pong decode to "Hello".
+- After a whole frame in the same piece, each refusal comes a frame later.
+- Payloads unmasked at every offset, split at every byte and every pair, and into any place of a destination. Frames back to back, of every kind, split at every byte and fed a byte at a time. §5.7's 256-byte and 64 KiB messages, masked.
+- The API: ranges, reads out of turn and a destination's room, for both reads; the bytes read left as they were; and two decoders at once.
+- What decoding allocates: nothing, per call or per byte, on 1,051,344 bytes of 80 frames.
+
+The suite's `in-pieces` now reads payloads, and `merged` joins a frame's payload pieces, so each check of step 1 runs through changed helpers. The provenance check holds the suite's masked frames to §5.7's too.
+
+**The oracles.** ws 7.5.10 was fed every decoder of the whole suite, 4,034, as in step 1, and again no answer disagreed (m2-mutations.md).
+
+**Taken without a form:** the decoder's shape, two reads with the destination the caller's.
+
+**Departed from the plan:**
+- **The allocation check**, as in each of M1's slices, since the decoder runs on every byte the server reads.
+- **The word path.** The first library unmasked a byte at a time, at 4.64 ns a byte. Of three shapes measured, a word at a time was fastest, at 1.85, though Chez 10.4.1 calls its 32-bit bytevector accessors out of line (m2-mutations.md). A read of fewer than four bytes builds no key word.
+
+**Found and recorded for M2.2.** The plan's M2.2 asks for "a decode of each encode". The decoder refuses an unmasked frame (§5.1), and the server's frames are unmasked. So M2.2's check must mask each encode before decoding it, with the suite's own masking, which its provenance check holds to §5.7.
+
+**Tests first.** Against step 1's library, the suite stopped at once (`attempt to reference unbound identifier frame-read-payload!`, exit 255). With a payload read that reads nothing, step 1's 16 checks passed and all 14 new ones failed.
+
+**55 mutants and a baseline** (m2-mutations.md), each red set named before the run, on this step's tree: step 1's 36 again, since the helpers changed, and this step's 19. The first run had one mismatch, a prediction error (D-32). D-35 and D-37, which survive step 1, are red here. W-5 survives by design: without the word path the answers are the same, only slower, and the speed is measured, not checked.
+
+`make test` green before the commit (Darwin arm64): six suites, 109 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
+
+NEXT: M2.2, the encoder, when the owner asks.

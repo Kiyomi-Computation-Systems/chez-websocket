@@ -2,19 +2,27 @@
 ;;; (websocket frame)'s decoder against its oracles (M2.1).
 ;;;
 ;;; The oracles are RFC 6455's, read from its raw text: §5.2's framing,
-;;; §5.1's rule that a client masks every frame, §5.5's control frames, and
-;;; §5.7's examples.  A refusal's index is the first byte with which no
-;;; frame a client may send begins.  The suite builds its own headers by
-;;; §5.2, and stops with a provenance failure unless they are the length
-;;; forms' written out by hand.  Node's ws 7.5.10, a server's decoder, was
-;;; fed every case in its pieces (m2-mutations.md).
+;;; §5.3's masking, §5.1's rule that a client masks every frame, §5.5's
+;;; control frames, and §5.7's examples.  A refusal's index is the first
+;;; byte with which no frame a client may send begins.  The suite builds its
+;;; own frames by §5.2 and §5.3, and stops with a provenance failure unless
+;;; they are §5.7's bytes and the length forms' written out by hand.  Node's
+;;; ws 7.5.10, a server's decoder, was fed every case in its pieces
+;;; (m2-mutations.md).
 ;;;
-;;; - §5.7's unmasked examples are refused.
+;;; - §5.7's examples: the masked ones decode, the unmasked ones are refused.
 ;;; - Headers of every kind at each length form's edges, whole and a byte at
 ;;;   a time, split at every byte and every pair of bytes, and with an empty
 ;;;   piece inside.
 ;;; - Each refusal of design §4 at its index, with its 1002: whole, a byte at
-;;;   a time, and split at every byte.  A refusal is final.
+;;;   a time, split at every byte, and after a whole frame in the same piece.
+;;;   A refusal is final.
+;;; - Payloads unmasked at every offset and into any place of a destination;
+;;;   frames back to back split at every byte; §5.7's 256-byte and 64 KiB
+;;;   messages, masked.
+;;; - The API: ranges, reads out of turn, a destination's room, the bytes
+;;;   left as they were, and two decoders at once.
+;;; - What decoding allocates: nothing, per call or per byte.
 (import (rnrs) (srfi :64) (ws-testing) (websocket frame))
 
 ;; range : Nat Nat -> (Listof Nat)
@@ -22,15 +30,37 @@
 (define (range from to)
   (if (>= from to) '() (cons from (range (+ from 1) to))))
 
+;; sub : Bytevector Nat Nat -> Bytevector
+;; A copy of the bytes from `from` up to `to`.
+(define (sub bv from to)
+  (let ((out (make-bytevector (- to from))))
+    (bytevector-copy! bv from out 0 (- to from))
+    out))
+
+;; repeat : Nat Any -> (Listof Any)
+;; A list of n of x.
+(define (repeat n x)
+  (if (= n 0) '() (cons x (repeat (- n 1) x))))
+
 ;; concat : (Listof (Listof Any)) -> (Listof Any)
 ;; The lists, one after another.
 (define (concat lists)
   (fold-right append '() lists))
 
-;; --- the suite's headers, by RFC 6455 §5.2 --------------------------------
+;; ascii : String -> (Listof Byte)
+(define (ascii s)
+  (map char->integer (string->list s)))
 
-;; §5.7's masking key.
+;; pattern : Nat -> (Listof Byte)
+;; n bytes, byte i being i x 37 mod 256: every value, in no simple order.
+(define (pattern n)
+  (map (lambda (i) (mod (* i 37) 256)) (range 0 n)))
+
+;; --- the suite's frames, by RFC 6455 §5.2 and §5.3 --------------------------
+
+;; §5.7's masking key, and the "Hello" its examples carry.
 (define key '(#x37 #xFA #x21 #x3D))
+(define hello '(#x48 #x65 #x6C #x6C #x6F))
 
 ;; big-endian : Nat Nat -> (Listof Byte)
 ;; n as k bytes, the most significant first: §5.2's network byte order.
@@ -48,8 +78,30 @@
                 (else (cons 255 (big-endian n 8))))
           key))
 
+;; masked : (Listof Byte) -> (Listof Byte)
+;; The bytes masked with the key: byte i xor the key's byte i mod 4.
+(define (masked bytes)
+  (let loop ((bytes bytes) (i 0) (out '()))
+    (if (null? bytes)
+        (reverse out)
+        (loop (cdr bytes) (+ i 1) (cons (bitwise-xor (car bytes) (list-ref key (mod i 4))) out)))))
+
+;; A spec is a frame as the suite knows it: (first fin kind payload), its
+;; first byte, what a decoder answers for that byte, and its payload bytes.
+
+;; frame : Spec -> (Listof Byte)
+;; The spec's whole frame, masked.
+(define (frame spec)
+  (append (header (car spec) (length (cadddr spec))) (masked (cadddr spec))))
+
+;; stream : (Listof Spec) -> (Listof Byte)
+;; The frames back to back.
+(define (stream specs)
+  (concat (map frame specs)))
+
 ;; RFC 6455 §5.7's examples, as its text prints them.
 (define rfc-masked-text '(#x81 #x85 #x37 #xFA #x21 #x3D #x7F #x9F #x4D #x51 #x58))
+(define rfc-masked-pong '(#x8A #x85 #x37 #xFA #x21 #x3D #x7F #x9F #x4D #x51 #x58))
 (define rfc-unmasked
   (list '(#x81 #x05 #x48 #x65 #x6C #x6C #x6F)    ; text, "Hello"
         '(#x01 #x03 #x48 #x65 #x6C)              ; text, "Hel", not final
@@ -57,6 +109,8 @@
         '(#x89 #x05 #x48 #x65 #x6C #x6C #x6F)    ; ping, "Hello"
         '(#x82 #x7E #x01 #x00)                   ; the 256-byte binary message's header
         '(#x82 #x7F #x00 #x00 #x00 #x00 #x00 #x01 #x00 #x00)))  ; the 64 KiB one's
+(define text-hello (list #x81 #t 'text hello))
+(define pong-hello (list #x8A #t 'pong hello))
 
 ;; The length forms' headers at their edges (§5.2), written out by hand.
 (define length-edges
@@ -71,16 +125,17 @@
 ;; in-pieces : (Listof Byte) (Listof Nat) -> (Listof (U (Listof Event) Stop))
 ;; The bytes fed to a fresh decoder as pieces of one bytevector, cut at each
 ;; point (ascending; a point given twice makes an empty piece), as the
-;; protocol feeds it a header's bytes, to frame-read-header!.  For each
-;; piece, what it answered, in order:
+;; protocol feeds it: a header's bytes to frame-read-header!, and a
+;; payload's to frame-read-payload!, unmasked into a destination at 3.  For
+;; each piece, what it answered, in order:
 ;;   (header Fin Kind Length)   a header, once whole;
+;;   (payload Bytevector)       the payload's bytes the piece carried;
 ;;   (refused Code Why Index)   a refusal, at the index of the byte that
 ;;                              showed it.
 ;; Then where the decoder stopped: between frames, in-header, or (left n)
-;; before a payload.  A refusal ends the feeding: no later piece is fed, and
-;; no stop follows.  So does a payload's first byte, which this suite does
-;; not read, answering payload.  So that a decoder that reads nothing cannot
-;; loop, a read that goes nowhere answers stuck, and ends the feeding too.
+;; in a payload.  A refusal ends the feeding: no later piece is fed, and no
+;; stop follows.  So that a decoder that reads nothing cannot loop, a read
+;; that goes nowhere answers stuck, and ends the feeding too.
 (define (in-pieces bytes cuts)
   (let ((bv (u8-list->bytevector bytes))
         (d (make-frame-decoder)))
@@ -95,7 +150,12 @@
               (reverse (cons (reverse (cons event events)) out)))
             (cond
               ((= i (car ends)) (piece i (cdr ends) (cons (reverse events) out) in-header?))
-              ((> (frame-left d) 0) (end-with 'payload))
+              ((> (frame-left d) 0)
+               (let* ((dst (make-bytevector (+ 3 (- (car ends) i)) 0))
+                      (n (frame-read-payload! d bv i (car ends) dst 3)))
+                 (if (<= n 0)
+                     (end-with 'stuck)
+                     (go (+ i n) (cons (list 'payload (sub dst 3 (+ 3 n))) events) #f))))
               (else
                (let-values (((what next) (frame-read-header! d bv i (car ends))))
                  (cond
@@ -108,6 +168,21 @@
                         #f))
                    (else (go next events #t)))))))))))
 
+;; payload? : Any -> Boolean
+(define (payload? x)
+  (and (pair? x) (eq? (car x) 'payload)))
+
+;; joined : (Listof Bytevector) -> Bytevector
+;; The bytevectors, one after another.
+(define (joined parts)
+  (let ((out (make-bytevector (fold-left + 0 (map bytevector-length parts)))))
+    (let loop ((parts parts) (at 0))
+      (if (null? parts)
+          out
+          (begin
+            (bytevector-copy! (car parts) 0 out at (bytevector-length (car parts)))
+            (loop (cdr parts) (+ at (bytevector-length (car parts)))))))))
+
 ;; piece? : (U (Listof Event) Stop) -> Boolean
 ;; Whether in-pieces answered it for a piece: a list of events, each a pair,
 ;; and not a stop such as (left n).
@@ -115,12 +190,20 @@
   (and (list? p) (or (null? p) (pair? (car p)))))
 
 ;; merged : (Listof (U (Listof Event) Stop)) -> (Listof (U Event Stop))
-;; The pieces' events in order, and then the stop, if there is one.
+;; The pieces' events in order, each run of payload pieces joined into one,
+;; and then the stop, if there is one.
 (define (merged pieces)
-  (concat (map (lambda (p) (if (piece? p) p (list p))) pieces)))
+  (let loop ((items (concat (map (lambda (p) (if (piece? p) p (list p))) pieces))) (out '()))
+    (cond ((null? items) (reverse out))
+          ((payload? (car items))
+           (let run ((items items) (parts '()))
+             (if (and (pair? items) (payload? (car items)))
+                 (run (cdr items) (cons (cadar items) parts))
+                 (loop items (cons (list 'payload (joined (reverse parts))) out)))))
+          (else (loop (cdr items) (cons (car items) out))))))
 
 ;; decoded : (Listof Byte) (Listof Nat) -> (Listof (U Event Stop))
-;; What a decoder answers for the bytes in those pieces, in one list.
+;; What a decoder answers for the bytes in those pieces, joined.
 (define (decoded bytes cuts)
   (merged (in-pieces bytes cuts)))
 
@@ -132,6 +215,67 @@
 ;; The cuts that make a piece of every byte.
 (define (bytewise bytes)
   (range 1 (length bytes)))
+
+;; --- what a decoder should answer, from the specs -------------------------
+
+;; header-event : Spec -> Event
+(define (header-event spec)
+  (list 'header (cadr spec) (caddr spec) (length (cadddr spec))))
+
+;; positioned : (Listof Spec) -> (Listof (Pair Nat Event))
+;; Each event the frames back to back should answer, with the index of the
+;; byte that makes it: a header at its last byte, and each payload byte at
+;; itself, as (payload Byte).
+(define (positioned specs)
+  (let loop ((specs specs) (at 0) (out '()))
+    (if (null? specs)
+        (reverse out)
+        (let* ((spec (car specs))
+               (h (length (header (car spec) (length (cadddr spec)))))
+               (bytes (cadddr spec)))
+          (loop (cdr specs)
+                (+ at h (length bytes))
+                (append (reverse (map (lambda (b i) (cons (+ at h i) (list 'payload b)))
+                                      bytes (range 0 (length bytes))))
+                        (list (cons (+ at h -1) (header-event spec)))
+                        out))))))
+
+;; expected-pieces : (Listof Spec) (Listof Nat) -> (Listof (U (Listof Event) Stop))
+;; What in-pieces should answer for the frames back to back, cut at each
+;; point: each event in the piece that holds its byte, a piece's payload bytes
+;; joined, and then between, since every frame is whole.
+(define (expected-pieces specs cuts)
+  (let piece ((events (positioned specs))
+              (ends (append cuts (list (length (stream specs)))))
+              (out '()))
+    (if (null? ends)
+        (reverse (cons 'between out))
+        (let take ((events events) (acc '()))
+          (if (and (pair? events) (< (caar events) (car ends)))
+              (take (cdr events) (cons (cdar events) acc))
+              (piece events (cdr ends) (cons (join-payload (reverse acc)) out)))))))
+
+;; join-payload : (Listof Event) -> (Listof Event)
+;; The events, each run of (payload Byte) made one (payload Bytevector).
+(define (join-payload events)
+  (let loop ((events events) (out '()))
+    (cond ((null? events) (reverse out))
+          ((eq? (caar events) 'payload)
+           (let run ((events events) (bytes '()))
+             (if (and (pair? events) (eq? (caar events) 'payload))
+                 (run (cdr events) (cons (cadar events) bytes))
+                 (loop events (cons (list 'payload (u8-list->bytevector (reverse bytes))) out)))))
+          (else (loop (cdr events) (cons (car events) out))))))
+
+;; expected : (Listof Spec) -> (Listof (U Event Stop))
+;; What decoded should answer for the frames back to back, however cut.
+(define (expected specs)
+  (merged (expected-pieces specs '())))
+
+;; expected-events : (Listof Spec) -> (Listof Event)
+;; The same, without the stop.
+(define (expected-events specs)
+  (filter pair? (expected specs)))
 
 ;; --- the tables -------------------------------------------------------------
 
@@ -202,13 +346,44 @@
 ;; refused : Symbol Nat -> Event
 (define (refused why at) (list 'refused 1002 why at))
 
+;; The frames of a stream, back to back: every kind, the 7- and 16-bit
+;; length forms, and payloads whose lengths are not multiples of four, as
+;; two whole messages between control frames.
+(define back-to-back
+  (list text-hello
+        (list #x89 #t 'ping '())
+        (list #x02 #f 'binary (pattern 126))
+        (list #x80 #t 'continuation '(#xFF))
+        pong-hello
+        (list #x01 #f 'text (ascii "Hello, world!"))
+        (list #x00 #f 'continuation '())
+        (list #x80 #t 'continuation (ascii "goodbye"))
+        (list #x88 #t 'close '(#x03 #xE8))))
+
+;; §5.7's 256-byte and 64 KiB binary messages, masked.
+(define rfc-256 (list #x82 #t 'binary (pattern 256)))
+(define rfc-64k (list #x82 #t 'binary (pattern 65536)))
+
+;; assertion-by : (-> Any) -> (U Symbol 'accepted 'not-an-assertion)
+;; Who an assertion violation names, when the thunk raises one.
+(define (assertion-by thunk)
+  (guard (e ((assertion-violation? e) (if (who-condition? e) (condition-who e) 'no-who))
+            (#t 'not-an-assertion))
+    (thunk)
+    'accepted))
+
 (run-suite "frame"
   (lambda ()
-    ;; The suite's headers must be RFC 6455's before any check reads them.
-    (unless (for-all (lambda (edge) (equal? (header #x82 (car edge)) (cadr edge))) length-edges)
-      (provenance-failure "the suite's headers are not RFC 6455's: the length forms' edges"))
+    ;; The suite's frames must be RFC 6455's before any check reads them.
+    (unless (and (equal? (frame text-hello) rfc-masked-text)
+                 (equal? (frame pong-hello) rfc-masked-pong)
+                 (for-all (lambda (edge) (equal? (header #x82 (car edge)) (cadr edge))) length-edges))
+      (provenance-failure "the suite's frames are not RFC 6455's: §5.7's masked examples, or the length forms' edges"))
 
     ;; RFC 6455 §5.7
+    (test-equal "RFC 6455's masked text and pong decode to their Hello"
+      (list (expected (list text-hello)) (expected (list pong-hello)))
+      (list (decoded rfc-masked-text '()) (decoded rfc-masked-pong '())))
     (test-equal "RFC 6455's unmasked frames are refused at their second byte, with 1002"
       (map (lambda (f) (list (refused 'unmasked 1))) rfc-unmasked)
       (map (lambda (f) (decoded f '())) rfc-unmasked))
@@ -260,6 +435,10 @@
       (concat
         (map (lambda (c) (map (lambda (k) (decoded (cddr c) (list k))) (range 1 (length (cddr c)))))
              refusal-cases)))
+    (test-equal "after a whole frame in the same piece, each refusal comes a frame later"
+      (map (lambda (c) (append (expected-events (list text-hello)) (list (refused (car c) (+ 11 (cadr c))))))
+           refusal-cases)
+      (map (lambda (c) (decoded (append rfc-masked-text (cddr c)) '())) refusal-cases))
     (test-equal "a refusal is final: fed on, a decoder reads nothing and stays refused"
       '(refused 2 refused 4 (1002 unmasked) refused 9 (1002 unmasked))
       (let ((d (make-frame-decoder))
@@ -267,4 +446,153 @@
         (let*-values (((what next) (frame-read-header! d bv 0 2))
                       ((what2 next2) (frame-read-header! d bv 4 9))
                       ((what3 next3) (frame-read-header! d bv 9 13)))
-          (list what next what2 next2 (frame-refusal d) what3 next3 (frame-refusal d)))))))
+          (list what next what2 next2 (frame-refusal d) what3 next3 (frame-refusal d)))))
+
+    ;; Payloads
+    (let* ((spec (list #x82 #t 'binary (pattern 13)))
+           (bytes (frame spec))
+           (n (length bytes))
+           (ones (map list (range 0 (+ n 1))))
+           (pairs (concat (map (lambda (k1) (map (lambda (k2) (list k1 k2)) (range k1 (+ n 1))))
+                                     (range 0 (+ n 1))))))
+      (test-equal "a payload is unmasked at every offset: split at every byte, and at every pair of bytes"
+        (map (lambda (cuts) (expected-pieces (list spec) cuts)) (append ones pairs))
+        (map (lambda (cuts) (in-pieces bytes cuts)) (append ones pairs)))
+      (test-equal "a frame fed a byte at a time answers each payload byte in its own piece"
+        (expected-pieces (list spec) (bytewise bytes))
+        (in-pieces bytes (bytewise bytes))))
+    (test-equal "a payload is unmasked into any place of its destination, and nothing else there is written"
+      (map (lambda (at) (append (repeat at #xEE) hello '(#xEE #xEE))) (range 0 4))
+      (map (lambda (at)
+             (let ((d (make-frame-decoder))
+                   (bv (u8-list->bytevector rfc-masked-text))
+                   (dst (make-bytevector (+ at 7) #xEE)))
+               (frame-read-header! d bv 0 6)
+               (frame-read-payload! d bv 6 11 dst at)
+               (bytevector->u8-list dst)))
+           (range 0 4)))
+    (let* ((bytes (stream back-to-back))
+           (cuts (map list (range 0 (+ (length bytes) 1)))))
+      (test-equal "frames back to back, of every kind, decode whole and split at every byte"
+        (cons (expected back-to-back) (map (lambda (c) (expected-pieces back-to-back c)) cuts))
+        (cons (decoded bytes '()) (map (lambda (c) (in-pieces bytes c)) cuts)))
+      (test-equal "frames back to back fed a byte at a time"
+        (expected-pieces back-to-back (bytewise bytes))
+        (in-pieces bytes (bytewise bytes))))
+    (let* ((specs (list rfc-256 rfc-64k))
+           (bytes (stream specs))
+           (edges (append (range 1 20) (range 262 290) (range (- (length bytes) 20) (length bytes)))))
+      (test-equal "RFC 6455's 256-byte and 64 KiB binary messages, masked, decode whole, split near each edge, and a byte at a time"
+        (list (expected specs)
+              (map (lambda (k) (expected-pieces specs (list k))) edges)
+              (expected-pieces specs (bytewise bytes)))
+        (list (decoded bytes '())
+              (map (lambda (k) (in-pieces bytes (list k))) edges)
+              (in-pieces bytes (bytewise bytes)))))
+
+    ;; The API
+    (let ((bv (u8-list->bytevector rfc-masked-text)))
+      (test-equal "a range outside its bytevector is an assertion naming frame-read-header!, or frame-read-payload!"
+        '(frame-read-header! frame-read-header! frame-read-header! frame-read-header!
+          frame-read-payload! frame-read-payload! frame-read-payload! frame-read-payload!)
+        (append
+          (map (lambda (r) (assertion-by (lambda () (frame-read-header! (make-frame-decoder) bv (car r) (cadr r)))))
+               '((1 0) (0 12) (-1 2) (12 12)))
+          (map (lambda (r)
+                 (let ((d (make-frame-decoder)))
+                   (frame-read-header! d bv 0 6)
+                   (assertion-by (lambda () (frame-read-payload! d bv (car r) (cadr r) (make-bytevector 16) 0)))))
+               '((7 6) (6 12) (-1 7) (12 12)))))
+      (test-equal "reading a header with a payload unfinished, or a payload with none left, is an assertion naming the read"
+        '(frame-read-header! frame-read-payload! frame-read-payload!)
+        (list (let ((d (make-frame-decoder)))
+                (frame-read-header! d bv 0 6)
+                (assertion-by (lambda () (frame-read-header! d bv 6 11))))
+              (assertion-by (lambda () (frame-read-payload! (make-frame-decoder) bv 0 11 (make-bytevector 16) 0)))
+              (let ((d (make-frame-decoder)))
+                (frame-read-header! d bv 0 6)
+                (frame-read-payload! d bv 6 11 (make-bytevector 5) 0)
+                (assertion-by (lambda () (frame-read-payload! d bv 11 11 (make-bytevector 5) 0))))))
+      (test-equal "a destination without room is an assertion naming frame-read-payload!, and nothing is read or written"
+        (list 'frame-read-payload! 'frame-read-payload! 'frame-read-payload! 5 '(#xEE #xEE #xEE #xEE) hello)
+        (let ((d (make-frame-decoder))
+              (dst (make-bytevector 4 #xEE)))
+          (frame-read-header! d bv 0 6)
+          (let* ((short (assertion-by (lambda () (frame-read-payload! d bv 6 11 dst 0))))
+                 (late (assertion-by (lambda () (frame-read-payload! d bv 6 7 dst 4))))
+                 (negative (assertion-by (lambda () (frame-read-payload! d bv 6 7 dst -1))))
+                 (left (frame-left d))
+                 (untouched (bytevector->u8-list dst))
+                 (whole (make-bytevector 5 0)))
+            (frame-read-payload! d bv 6 11 whole 0)
+            (list short late negative left untouched (bytevector->u8-list whole))))))
+    (test-equal "the bytes a decoder reads are left as they were"
+      (list rfc-masked-text (stream back-to-back))
+      (map (lambda (bytes)
+             (let ((bv (u8-list->bytevector bytes))
+                   (d (make-frame-decoder))
+                   (dst (make-bytevector 200)))
+               (let loop ((i 0))
+                 (cond ((= i (bytevector-length bv)) (bytevector->u8-list bv))
+                       ((> (frame-left d) 0)
+                        (let ((n (frame-read-payload! d bv i (bytevector-length bv) dst 0)))
+                          (if (> n 0) (loop (+ i n)) 'stuck)))
+                       (else (let-values (((what next) (frame-read-header! d bv i (bytevector-length bv))))
+                               (if (and (eq? what 'header) (> next i)) (loop next) (bytevector->u8-list bv))))))))
+           (list rfc-masked-text (stream back-to-back))))
+    ;; The pong is masked with a key of its own, 01 02 03 04, by hand.
+    (test-equal "two decoders at once are each their own"
+      (list (list '(header #t text 5) hello) (list '(header #t pong 5) hello))
+      (let ((a (make-frame-decoder)) (b (make-frame-decoder))
+            (text (u8-list->bytevector rfc-masked-text))
+            (pong (u8-list->bytevector '(#x8A #x85 #x01 #x02 #x03 #x04 #x49 #x67 #x6F #x68 #x6E)))
+            (from-a (make-bytevector 5 0)) (from-b (make-bytevector 5 0)))
+        (frame-read-header! a text 0 3)
+        (frame-read-header! b pong 0 4)
+        (frame-read-header! a text 3 6)
+        (let ((a-header (list 'header (frame-fin? a) (frame-kind a) (frame-length a))))
+          (frame-read-header! b pong 4 6)
+          (frame-read-payload! a text 6 8 from-a 0)
+          (frame-read-payload! b pong 6 9 from-b 0)
+          (frame-read-payload! a text 8 11 from-a 2)
+          (frame-read-payload! b pong 9 11 from-b 3)
+          (list (list a-header (bytevector->u8-list from-a))
+                (list (list 'header (frame-fin? b) (frame-kind b) (frame-length b)) (bytevector->u8-list from-b))))))
+
+    ;; What decoding allocates: §5.7's text, a 16-bit and a 64-bit binary
+    ;; frame, a ping and a close, 16 times over, about a mebibyte.
+    (let* ((specs (concat (repeat 16 (list text-hello (list #x82 #t 'binary (pattern 126)) rfc-64k
+                                                    (list #x89 #t 'ping '()) (list #x88 #t 'close '(#x03 #xE8))))))
+           (bv (u8-list->bytevector (stream specs)))
+           (n (bytevector-length bv))
+           (d (make-frame-decoder))
+           (dst (make-bytevector 65536))
+           ;; feed : Nat -> Integer
+           ;; Feeds the stream in pieces of `step` bytes: answers the headers
+           ;; read, times 2^30, plus the sum of the payload bytes unmasked;
+           ;; or, at a refusal or a read that goes nowhere, -1.
+           (feed (lambda (step)
+                   (let loop ((i 0) (headers 0) (sum 0))
+                     (if (= i n)
+                         (+ (* headers 1073741824) sum)
+                         (let ((end (min n (+ i step))))
+                           (let piece ((j i) (headers headers) (sum sum))
+                             (cond ((= j end) (loop end headers sum))
+                                   ((> (frame-left d) 0)
+                                    (let ((k (frame-read-payload! d bv j end dst 0)))
+                                      (let add ((m 0) (sum sum))
+                                        (cond ((<= k 0) -1)
+                                              ((= m k) (piece (+ j k) headers sum))
+                                              (else (add (+ m 1) (+ sum (bytevector-u8-ref dst m))))))))
+                                   (else
+                                    (let-values (((what next) (frame-read-header! d bv j end)))
+                                      (cond ((or (eq? what 'refused) (<= next j)) -1)
+                                            ((eq? what 'header) (piece next (+ headers 1) sum))
+                                            (else (piece next headers sum))))))))))))
+           (whole (lambda () (feed n)))
+           (one-by-one (lambda () (feed 1))))
+      (test-equal "decoding allocates nothing, per call or per byte"
+        (let ((answer (+ (* (length specs) 1073741824)
+                         (fold-left + 0 (concat (map cadddr specs))))))
+          (list answer answer 0 0))
+        (list (whole) (one-by-one) (allocated whole) (allocated one-by-one))))))
