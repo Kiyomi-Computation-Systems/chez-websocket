@@ -82,7 +82,8 @@ Read 2026-10-04 and recorded with sources in the server's 0022:
 - **The server.** An idle connection holds about 20 KB (its CHANGELOG's `[0.1.0]`),
   and a parked `await` 3,637 to 3,644 B (its design §5.2).
 - **Neither SHA-1 nor base64** exists in the server or its dependencies, so this
-  library writes both.
+  library writes both. Outside libraries were weighed later, and declined
+  ([0002](decisions/0002-sha-1-and-base64-are-written-here-not-taken-from-an-outside-library.md)).
 
 ## Milestones
 
