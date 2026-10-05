@@ -221,3 +221,15 @@ The import audit reads the new library with no change: two checks.
 `make test` green before the commit (Darwin arm64): four suites, 42 expected passes, every pin ok.
 
 NEXT: M1.3, the UTF-8 checker, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05: **the `make prod` fix**, from #5, and **M1.2 with decision 0002**, from #6 (the two entries above).
+- **#5, merged by the owner, as d0b6ec3.** It has the tree of its tested head, bcd376b (`linux` SUCCESS), and its parent is 304639d. Main's run on it, 37298523208, was green. Its merge had no reflect of its own, so this records it. Its branch is gone, local and remote.
+- **#6, on the owner's "do closing ritual", as cbf2a7d.** It was rebased onto d0b6ec3 after #5 merged, 2018102 to 1638522. Both had added to this ledger: #5's entry stayed first, and M1.2's follows it. The tree changed by #5's own lines alone. The squash has 1638522's tree (bd7a1a4), and its parent is d0b6ec3.
+- **CI.** #6 merged on `linux` SUCCESS at 1638522 (run 37298771912), after 2018102's had passed too (37297653847): four suites, 42 expected passes. Main's run on d0b6ec3 had finished before #6 merged, so the merge cancelled nothing. Main's run on the squash, 37298896656, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m1.2-base64` deleted, local and remote. No PR is open.
+
+`make test` green on main: four suites, 42 expected passes, every pin ok.
+
+NEXT: M1.3, the UTF-8 checker (`(websocket utf8)`: RFC 3629 §4's grammar at its edges, the refusals, and a character split across pieces at every byte), when the owner asks.
