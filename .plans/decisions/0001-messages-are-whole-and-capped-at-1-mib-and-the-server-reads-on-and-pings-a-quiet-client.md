@@ -2,7 +2,8 @@
 
 Date: 2026-10-04
 Status: accepted (user decision, 2026-10-04, by form: "1 MiB", "Read on, ping",
-"Whole messages", each the recommended)
+"Whole messages", each the recommended). Amended 2026-10-05 by form (M3.1):
+"Also 16 messages", the recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §5–§7
 
 ## Context
@@ -80,3 +81,38 @@ By form, the recommended answer to each of three questions:
   - reading only inside `websocket-receive`, as coder, gorilla and tungstenite do:
     one message at most, but pings answered only then, and no keepalive possible;
   - whole messages plus a streaming read, which means more API and more states in v1.
+
+## Amendment of 2026-10-05 (M3.1): the queue counts messages too
+
+Building M3.1 found what item 2 left open. Reading stopped once the queue held a
+cap's worth of bytes, and an empty message adds no bytes. So while a handler is
+busy, or waits in a send to a client that does not read, a client could queue
+empty messages without end. Measured on a prototype of the core (Darwin arm64,
+Chez 10.4.1):
+- an empty masked text frame is 6 bytes (RFC 6455 §5.2: two of header, four of
+  key);
+- one read of 16 KiB, the server's read buffer, carries 2,730 of them;
+- the prototype queued all 2,730 and never stopped reading, and its step
+  allocated 80 B a message, before the binding queues anything.
+
+Decided by form, the recommended, "Also 16 messages":
+- **Reading also stops once 16 messages are queued**, websockets' `max_queue`
+  (which counts frames). `CHEZ_WS_MAX_QUEUE` overrides it.
+- **Reading starts again once the queue is under both bounds**: under a cap's
+  worth of bytes and under 16 messages. Item 2's "until the handler takes one"
+  is the same whenever one take brings it under both.
+- **The step reads no further than the message that fills the queue.** The rest
+  of that read waits, kept: the server's transport hands a taker each read's
+  bytevector to keep (chez-libuv copies each read into a fresh one). It is read
+  as takes make room, a message at a time, before reading starts again. In the
+  prototype, the read of 2,730 queued 16 and stopped, and each take then read one
+  more.
+
+Weighed and not taken: the same bound with no setting; a floor of 1 KiB a
+message toward the cap's worth, at most 1,024 empty messages at the default;
+and bytes alone, as first decided.
+
+**What one connection can be made to hold** is then two caps' worth at most: the
+queue under a cap's worth, and the message that fills it, up to the cap. While
+reading is stopped, the rest of one read waits too, and no message arrives.
+

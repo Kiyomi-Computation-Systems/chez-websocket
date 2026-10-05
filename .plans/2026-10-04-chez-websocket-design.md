@@ -204,13 +204,17 @@ there. A handler may give `websocket-accept` limits of its own.
 | variable | default | what | source |
 |---|---|---|---|
 | `CHEZ_WS_MAX_MESSAGE_BYTES` | 1048576 | the largest message; past it, 1009 | 0001; websockets |
+| `CHEZ_WS_MAX_QUEUE` | 16 | messages queued before reading stops | 0001's amendment; websockets' `max_queue` |
 | `CHEZ_WS_PING_INTERVAL` | 20 s | quiet time before a ping; 0 turns pinging off | 0001; websockets |
 | `CHEZ_WS_PING_TIMEOUT` | 20 s | time for the pong; past it, 1011 | 0001; websockets |
 | `CHEZ_WS_CLOSE_TIMEOUT` | 10 s | time for the client's close, after the server's | websockets' `close_timeout` |
 | `CHEZ_WS_WRITE_HIGH_WATER` | 262144 | bytes unsent before a send waits | the server's own |
 | `CHEZ_WS_WRITE_LOW_WATER` | 65536 | bytes unsent when it goes on again | the server's own |
 
-Durations are in seconds, as the server's are.
+Durations are in seconds, as the server's are. A value is a whole number in ASCII
+digits, nothing else. Each has a least value: a cap and a queue of 1, since a cap
+of 0 would stop reading for good; a pong timeout of 1 s, since one of 0 would pass
+as its ping went; 0 for the rest. A low water above the high water is refused.
 
 ## 8. Testing
 
