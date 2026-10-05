@@ -233,3 +233,42 @@ MERGED to main on 2026-10-05: **the `make prod` fix**, from #5, and **M1.2 with 
 `make test` green on main: four suites, 42 expected passes, every pin ok.
 
 NEXT: M1.3, the UTF-8 checker (`(websocket utf8)`: RFC 3629 §4's grammar at its edges, the refusals, and a character split across pieces at every byte), when the owner asks.
+
+---
+
+M1.3 — UTF-8, and M1's exit. Branch `feat/m1.3-utf8`. 2026-10-05.
+
+**`(websocket utf8)`**, an incremental checker in `(rnrs)` alone:
+- `utf8-start`, the state before any byte;
+- `utf8-feed : Utf8State Bytevector Nat Nat -> (U Utf8State #f)`, the state after the bytes from start to end, or `#f` at the first of them that cannot go on;
+- `utf8-whole? : Utf8State -> Boolean`.
+
+A state is a fixnum: 0 between characters, and otherwise the bytes a character still needs and the range its next byte must fall in. A byte is refused as soon as no row of RFC 3629 §4 can go on with it. So an overlong form, a surrogate, or a code point past U+10FFFF fails at the byte that shows it, and the connection can fail at once (RFC 6455 §8.1).
+
+**`tests/test-utf8.sps`, 22 checks:**
+- every row of §4 at its edges;
+- the five kinds of refusal at their indexes, fed a byte at a time and as one piece;
+- §7's examples, and a character's first bytes alone, unfinished;
+- a character split at every byte, and §7's text split in two at every byte and fed a byte at a time;
+- the range a feed reads, the start state, and an empty piece;
+- what a feed allocates.
+
+The import audit reads the new library with no change: three checks.
+
+**The oracles.** §4's grammar and §7's examples come from the RFC's raw text. Two incremental decoders were fed every sequence a byte at a time. Node's fatal `TextDecoder` agreed with the grammar on all of them. Python's refuses a surrogate one byte late, at its third, so the checks hold the grammar's index.
+
+**Departed from the plan: the allocation check**, as in M1.1. A feed allocates nothing for each byte, since the checker runs on every byte of every text message. Measured: 1.75 ns a byte on ASCII and 6.27 on §7's text. That is the mean of four feeds of 16 MiB after a warm-up (Darwin arm64, `--program`'s default optimize level).
+
+**Tests first.** The suite ran red before the library existed (`library (websocket utf8) not found`). Then it ran against a stub that kept every state whole: 11 checks failed and 11 passed (the nine rows, §7's examples and the allocation check). Each of those eleven has its own mutant since.
+
+**Twenty-two mutants** (`m1-mutations.md`). The first run had four mismatches with the sets named before it:
+- three named sets missed a check whose inputs hold the changed byte, and were corrected from those inputs;
+- U-20, a four-argument `need`, survives as an equivalent mutant. Chez folds `need`'s constant ranges, as `expand/optimize` shows.
+
+The re-run matched every named set, and U-21 reddens the allocation check.
+
+**M1's exit.** The primitives are done: SHA-1 (M1.1), base64 (M1.2, with decision 0002) and UTF-8. Each is pure and held to its RFC's vectors, with 58 checks among them (12, 24 and 22) and the import audit's three. README.org's status says so.
+
+`make test` green before the commit (Darwin arm64): five suites, 65 expected passes, every pin ok. `make prod` green.
+
+NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.

@@ -193,3 +193,74 @@ Notes:
 - **B-5, B-6 and B-9 redden partly through a raise.** `decoded` answers a byte
   list or `refused`, never `#f`, so a raise cannot pass for a refusal (SRFI-64
   turns a raise into `#f`).
+
+## M1.3 — UTF-8
+
+Platform: Darwin arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-05.
+The runner was M1.2's, and under each mutant it fed sample inputs again outside
+the suite, a byte at a time and whole: no input raised under any of them.
+
+### The oracles
+
+- **RFC 3629 §4's grammar**, from the RFC's raw text: each row's first and last
+  code point, and each refusal's index, the first byte at which no row can go on.
+  Python 3.14.5 encoded each row's edge code points to the bytes the checks use.
+- **RFC 3629 §7's four examples**, from its raw text, and §3's surrogate pair for
+  U+233B4, `ED A1 8C ED BE B4`.
+- **Two incremental decoders**, each fed one byte at a time: Python 3.14.5's
+  `codecs` UTF-8 decoder, and Node 20.10.0's `TextDecoder` with `fatal` and
+  `stream`. Every sequence in the suite went through both, which report the index
+  at which they refuse a byte and whether a valid sequence ends whole.
+  - **Node agreed with the grammar on every sequence.**
+  - **Python agreed on all but the four surrogates.** It refuses them at their third
+    byte, one later than the grammar's second (`ED` takes `80`–`9F` only). The
+    checks hold the grammar's index.
+- **The boundaries in §7's text** (0, 1, 4, 6, 7, 10, 13, 16, 19, 22, 25, 28, 32)
+  are Python's character lengths.
+
+### The mutants
+
+| # | mutation | red |
+|---|----------|-----|
+| U-1 | UTF8-1 ends at `7E` | the UTF8-1 row, alone |
+| U-2 | UTF8-2 starts at `C1`, an overlong lead | the no-lead and overlong refusals |
+| U-3 | UTF8-2 ends at `DE` | the UTF8-2 row, the tail refusal, and the character split |
+| U-4 | `E0`'s first tail from `9F`: an overlong accepted | the overlong refusal, alone |
+| U-5 | the `E1` row ends at `EB` | its row, §7's examples (Korean `EC`), and the three splits |
+| U-6 | `ED`'s first tail to `A0`: U+D800 accepted | the surrogate refusal, alone |
+| U-7 | the `EE` row is `EF` alone | its row, and the character split |
+| U-8 | `F0`'s first tail from `8F`: an overlong accepted | the overlong refusal, alone |
+| U-9 | the `F1` row ends at `F2` | its row, and the character split |
+| U-10 | `F4`'s first tail to `90`: U+110000 accepted | the past-U+10FFFF refusal, alone |
+| U-11 | `F4` starts no character | its row, the tail and past-U+10FFFF refusals, the unfinished check, and the character split |
+| U-12 | a later tail takes any byte from `80` | the tail refusal, alone |
+| U-13 | a two-byte lead needs no tail | 9 checks: its row, the tail refusal, §7's examples, the unfinished check, the three splits, the range and the empty piece |
+| U-14 | whole while one byte is still needed | the unfinished check, the three splits, the range and the empty piece |
+| U-15 | a feed reads from 0, not from `start` | the three splits, the range and the empty piece |
+| U-16 | a feed reads to the bytevector's end, not to `end` | the same five |
+| U-17 | a feed starts from `utf8-start`, not the state it is given | 15 checks: every multi-byte row, the tail refusal, §7's examples, the unfinished check, the three splits and the empty piece |
+| U-18 | UTF8-2's tail starts at `81` | its row, and the character split |
+| U-19 | a later tail ends at `BE` | the seven three- and four-byte rows, §7's examples, the unfinished check and the three splits |
+| U-20 | `need` ors four arguments, its last twice | none: survives, an equivalent mutant (below) |
+| U-21 | a state's count read by dividing, `(floor (/ s 65536))` | the allocation check, alone |
+| U-22 | `utf8.sls` imports `(chezscheme)` too | the audit's check for `utf8.sls` |
+
+Every red was exit 1 with no harness error. All were reverted, and `make test` is
+green afterwards: five suites, 65 expected passes, every pin ok.
+
+Notes:
+- **The first run had four mismatches, named before it and kept here.**
+  - U-3, U-13 and U-19 each reddened one check more than I had named. A check's
+    inputs held the byte they changed: the split check holds `DF BF`, the empty
+    piece a lone `C3`, and the unfinished check `F4 8F BF`. They were prediction
+    errors. Read from those inputs, the named sets were corrected, and the run
+    above matched them.
+  - U-20 survived as first written, `hi 0`, and again as `hi hi`. Chez's
+    optimizer inlines `need`, whose ranges are constants at every call, and folds
+    them. `expand/optimize` shows `(need 2 #xA0 #xBF)` as the constant 172223,
+    and the variable call as a two-argument `fxior`. So no four-argument call is
+    left to allocate: the mutant is equivalent. The allocation check is watched
+    to fail by U-21.
+- **A stub passes eleven checks.** Against a feed that kept every state whole, 11
+  checks failed and 11 passed: the nine rows, §7's examples and the allocation
+  check. Each has its own mutant above.
