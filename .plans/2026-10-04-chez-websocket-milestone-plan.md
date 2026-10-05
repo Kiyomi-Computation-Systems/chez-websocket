@@ -51,13 +51,15 @@ and the door suite.
   - control frames between fragments;
   - the cap at its edge, failing 1009 before any payload is held;
   - UTF-8 failing 1007 at the first bad byte;
-  - reading on: the queue up to a cap, `read-stop`, then `read-start` on `taken`;
-  - the limits read from an environment's strings, malformed values refused.
+  - reading on: the queue up to a cap, or 16 messages (0001's amendment),
+    `read-stop`, then `read-start` on `taken`;
+  - the limits read from an environment's strings, malformed values refused;
+  - a client's close, answered, its code and reason checked, 1005 told: moved here
+    from M3.2 by form on 2026-10-05, since the bytes M3.1 reads can carry one.
 - **M3.2 the closing handshake**:
-  - a close received, sent, and crossing;
-  - its code and reason checked;
+  - a close sent, and closes crossing;
   - the close timeout, by its deadline's kind;
-  - 1005 and 1006 told, never sent.
+  - the stream's end, 1006 told; 1005 and 1006 never sent.
 - **M3.3 the ping clock**:
   - a quiet client pinged when `ping` passes, and failed 1011 when `pong` passes;
   - any bytes received re-arm it;

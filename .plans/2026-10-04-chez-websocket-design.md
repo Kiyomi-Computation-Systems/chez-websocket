@@ -123,10 +123,13 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
 - **Control frames** may come between a message's fragments (§5.4). A ping is answered
   at once with a pong carrying its payload, unless a close has been received
   (§5.5.2). A pong is noted for the ping clock and otherwise ignored (§5.5.3).
-- **Reading on** (0001 item 2). Each delivered message adds its size to the bytes
-  queued for the handler, and `(taken nbytes)` takes them off. Once a cap's worth is
-  queued, the step answers `read-stop`, and `read-start` once the handler has taken
-  one.
+- **Reading on** (0001 item 2, and its amendment of 2026-10-05). Each delivered
+  message is queued for the handler, and `(taken nbytes)` takes one off. Once the
+  queue holds a cap's worth of bytes, or 16 messages, the step answers `read-stop`
+  and reads no further: the rest of the read waits, kept, since the transport
+  hands a taker each read's bytevector to keep. A take that brings the queue under
+  both reads what waits, a message at a time as the queue makes room, then answers
+  `read-start`. A read while reading is stopped is the caller's mistake.
 - **The ping clock** (0001 item 2). After 20 s with nothing received, the step sends
   a ping. If no pong comes within 20 s, it fails 1011. The clock is stopped while
   reading is, since a pong the server has not read is not the client's fault.
@@ -143,8 +146,12 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   - Codes 1005, 1006 and 1015 are never sent (§7.4.1). They are what the handler is
     told when a close carried no code (1005), or when the stream ended without one
     (1006).
-- **Failing** (§7.1.7) sends a close with its code, then closes the stream. Nothing
-  the client sends after it is read.
+- **Failing** (§7.1.7) sends a close with its code, then closes the stream, and
+  logs why. Nothing the client sends after it is read. The handler is told 1006
+  and an empty reason, since no close came (§7.1.5, §7.1.6).
+- **A delivered text is its UTF-8 bytes**, checked, and a close's reason too; the
+  binding decodes them (§6). A send of text gives a string, which the step
+  writes in UTF-8, and a send of binary a bytevector.
 - **Time is a deadline's kind.** The step reads no clock. It names the deadline it
   needs by kind: `ping` (quiet), `pong` or `close`. The binding arms it for that
   kind's time, and its passing comes back as `(deadline-passed)`. This is how the

@@ -605,3 +605,53 @@ The import audit reads the new library with no change: five checks.
 
 NEXT: step 2, the protocol, stacked on this.
 
+---
+
+M3.1, STEP 2 — THE PROTOCOL. Branch `feat/m3.1-2-protocol`, stacked on `feat/m3.1-1-limits`. 2026-10-05.
+
+**DECIDED by form (2026-10-05), the recommended: "Answer it in M3.1".** A client's close can arrive in the bytes M3.1 reads, and the plan had put "a close received" in M3.2. The step answers it here, as design §5 says, and the plan says so. M3.2 keeps the server's own close, closes that cross, the close timeout and the stream's end.
+
+**`(websocket protocol)`**: `make-ws-state` and `ws-step`, design §5's step, pure, in `(rnrs)` and the project's pure libraries.
+- Its events are `(bytes bv start end)`, `(send kind payload)` and `(taken nbytes)`.
+- Its actions are `write`, `deliver`, `read-stop`, `read-start`, `close-stream`, `closed` and `log`.
+- **Messages, whole or fragmented**, each of its first frame's kind. A continuation with no message begun, or a message begun before the last ended, fails 1002.
+- **Control frames between fragments.** A ping is answered at once with its payload, and a pong is answered with nothing.
+- **The cap.** A frame that would take its message past the cap fails 1009 at its header, before its payload is held.
+- **UTF-8.** A text fails 1007 at the read that brings a bad byte, and at its end if it ends mid-character.
+- **A client's close** is answered with its code, or with an empty close, and the stream is closed, cleanly. A close of one byte, or of a code an endpoint may not send, fails 1002, and a reason not UTF-8 fails 1007.
+- **Failing** writes a close with the code, closes the stream, logs why, and tells 1006.
+- **Reading on.** Reading stops once the queue holds a cap's worth of bytes or 16 messages, and the step reads no further. The rest of the read waits, kept: the server's transport hands a taker each read's bytevector to keep. A take that makes room reads it, a message at a time, then answers `read-start`.
+
+**`tests/test-protocol.sps`, 46 checks**, from tables of its oracles' cases:
+- messages whole, fragmented, back to back, and cut at every point and every pair of points;
+- the fragment rules, control frames, the cap at its edge and at the default, and UTF-8 at the bad byte and at the message's end;
+- every decoder refusal, a client's close and its checks, and sending;
+- reading on, by bytes and by count, and what waits;
+- the API, the bytes left as they were, what reading allocates, what a connection keeps, and two connections at once.
+
+The import audit reads the new library with no change: six checks.
+
+**The oracles.** RFC 6455's raw text: §5.4–§5.7, §7.1.4–§7.1.7, §7.4.1 and §7.4.2, and §8.1. RFC 3629 §4's grammar. Decision 0001 and its amendment, and the design's §5. Node's ws 7.5.10, a server's receiver, was fed every connection the suite made, 563, each read in the same pieces. 527 answered the same, 13 read nothing, and no answer disagreed. The rest are ws's own:
+- 18 judge UTF-8 only at a message's end;
+- 3 accept close codes 1012 to 1014, which §7.4.1 does not define and IANA's registry added later;
+- 2 are M2.1's, a length not in its shortest form and a top-bit length.
+
+**Taken without a form:**
+- **A delivered text is its UTF-8 bytes**, and a close's reason too: the binding decodes them, since Chez's decoders drop a leading U+FEFF (design §6). A text is sent from a string. `string->utf8` keeps U+FEFF, measured: `EF BB BF 41`.
+- **A failure tells 1006 and an empty reason**, since no close came (§7.1.5, §7.1.6), and logs `(log failed code why)`.
+- **The caller's mistakes are assertion violations** naming `ws-step`: a read while reading is stopped, a read or a send after the end, a take of a message not queued, and an event out of the vocabulary or of the wrong shape.
+- **Reading starts again once the queue is under both bounds.** Decision 0001's "until the handler takes one" is the same whenever one take brings it under.
+- **The close codes are §7.4.1's list**, as the design has it.
+
+**Departed from the plan:**
+- **The client's close**, by form (above), and **the queue's count**, by step 1's.
+- **The allocation check**, as in each of M1's and M2's slices. A message read in one frame is read into the bytevector it is delivered in, and a fragmented one into a buffer that doubles, never past the cap. Grown by each fragment alone, one-byte fragments to 1 MiB would copy about 2^39 bytes on the server's one loop.
+- **What a connection keeps**, checked with a guardian: no message once delivered, and no read once its bytes are read. A connection lives as long as its WebSocket.
+
+**Tests first.** The suite ran red before the library existed (`library (websocket protocol) not found`, exit 255). Against a stub whose step answers nothing and refuses nothing, 45 checks failed and one passed: the bytes left as they were, which M-82 kills. The first library run was green. Then writing the mutants found gaps, and checks for them came after: what a connection keeps, the buffer's doublings, a take while reading, events of the wrong shape, two connections' control frames, and a take after the end with reading stopped. Each was watched to fail under its mutants. Five lines no check could tell from their absence were shown redundant and taken out (m3-mutations.md).
+
+**124 rows** (m3-mutations.md), each red set named before the run, on this step's tree: step 1's 35 again, with the protocol's checks in their red sets, and this step's 89. The first run had 11 mismatches, all prediction errors: each an extra red, and none a survivor. The final run on this commit's blobs had 0 mismatches. Every check has a killer that reddens it by value. No mutant survives.
+
+`make test` green before the commit (Darwin arm64): eight suites, 182 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: M3.2, the closing handshake (a close sent, closes crossing, the close timeout, the stream's end), when the owner asks; the two PRs first go through review and the closing ritual.
