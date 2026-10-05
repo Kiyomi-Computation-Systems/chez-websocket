@@ -1,14 +1,16 @@
 #!r6rs
-;;; (websocket frame)'s decoder against its oracles (M2.1).
+;;; (websocket frame)'s decoder and encoder against their oracles (M2.1,
+;;; M2.2).
 ;;;
 ;;; The oracles are RFC 6455's, read from its raw text: §5.2's framing,
-;;; §5.3's masking, §5.1's rule that a client masks every frame, §5.5's
-;;; control frames, and §5.7's examples.  A refusal's index is the first
-;;; byte with which no frame a client may send begins.  The suite builds its
-;;; own frames by §5.2 and §5.3, and stops with a provenance failure unless
-;;; they are §5.7's bytes and the length forms' written out by hand.  Node's
-;;; ws 7.5.10, a server's decoder, was fed every case in its pieces
-;;; (m2-mutations.md).
+;;; §5.3's masking, §5.1's rules that a client masks every frame and a
+;;; server none, §5.5's control frames, and §5.7's examples.  A refusal's
+;;; index is the first byte with which no frame a client may send begins.
+;;; The suite builds its own frames by §5.2 and §5.3, and stops with a
+;;; provenance failure unless they are §5.7's bytes and the length forms'
+;;; written out by hand.  Node's ws 7.5.10, a server's decoder, was fed
+;;; every case in its pieces, and its encoder was given every payload the
+;;; suite encodes (m2-mutations.md).
 ;;;
 ;;; - §5.7's examples: the masked ones decode, the unmasked ones are refused.
 ;;; - Headers of every kind at each length form's edges, whole and a byte at
@@ -23,6 +25,13 @@
 ;;; - The API: ranges, reads out of turn, a destination's room, the bytes
 ;;;   left as they were, and two decoders at once.
 ;;; - What decoding allocates: nothing, per call or per byte.
+;;; - The encoder: §5.7's unmasked frames a server sends, byte for byte, and
+;;;   every kind it sends at each length form's edges, each one final frame,
+;;;   unmasked, its length in its shortest form; a decode of each, masked
+;;;   first; a payload from a range; what it refuses: a kind a server never
+;;;   sends, a continuation among them, a control frame over 125 bytes, and
+;;;   anything but a range of a bytevector; the payload left as it was; and
+;;;   what an encode allocates: its frame, and nothing else.
 (import (rnrs) (srfi :64) (ws-testing) (websocket frame))
 
 ;; range : Nat Nat -> (Listof Nat)
@@ -120,6 +129,22 @@
         (list 65536 (append '(#x82 #xFF #x00 #x00 #x00 #x00 #x00 #x01 #x00 #x00) key))
         (list 9223372036854775807 (append '(#x82 #xFF #x7F #xFF #xFF #xFF #xFF #xFF #xFF #xFF) key))))
 
+;; plain-header : Byte Nat -> (Listof Byte)
+;; A server's frame's header (§5.1): its first byte, then the length in its
+;; shortest form, the mask bit clear and no key.
+(define (plain-header first n)
+  (cons first
+        (cond ((< n 126) (list n))
+              ((< n 65536) (cons 126 (big-endian n 2)))
+              (else (cons 127 (big-endian n 8))))))
+
+;; The same edges unmasked, as a server sends them, written out by hand.
+(define plain-edges
+  (list (list 125 '(#x82 #x7D))
+        (list 126 '(#x82 #x7E #x00 #x7E))
+        (list 65535 '(#x82 #x7E #xFF #xFF))
+        (list 65536 '(#x82 #x7F #x00 #x00 #x00 #x00 #x00 #x01 #x00 #x00))))
+
 ;; --- what a decoder answers -----------------------------------------------
 
 ;; in-pieces : (Listof Byte) (Listof Nat) -> (Listof (U (Listof Event) Stop))
@@ -215,6 +240,11 @@
 ;; The cuts that make a piece of every byte.
 (define (bytewise bytes)
   (range 1 (length bytes)))
+
+;; take : (Listof Any) Nat -> (Listof Any)
+;; The list's first k elements.
+(define (take l k)
+  (if (= k 0) '() (cons (car l) (take (cdr l) (- k 1)))))
 
 ;; --- what a decoder should answer, from the specs -------------------------
 
@@ -364,6 +394,44 @@
 (define rfc-256 (list #x82 #t 'binary (pattern 256)))
 (define rfc-64k (list #x82 #t 'binary (pattern 65536)))
 
+;; Each kind of frame a server sends, by its first byte (§5.2): final, since
+;; each message is one frame (design §4).
+(define sent-kinds '((#x81 text) (#x82 binary) (#x88 close) (#x89 ping) (#x8A pong)))
+
+;; Every frame the suite encodes: each kind at each length form's edges, as
+;; (first kind length), its payload that many bytes of the pattern.  A
+;; payload of 2^32 bytes or more is not encoded: it would not fit in a
+;; test's memory.
+(define sent
+  (concat
+    (map (lambda (k)
+           (map (lambda (n) (list (car k) (cadr k) n))
+                (if (memq (cadr k) '(close ping pong)) control-lengths '(0 1 125 126 127 65535 65536))))
+         sent-kinds)))
+
+;; encoded : (List Byte Symbol Nat) -> (Listof Byte)
+;; What frame-encode answers for the kind and its payload.
+(define (encoded s)
+  (bytevector->u8-list (frame-encode (cadr s) (u8-list->bytevector (pattern (caddr s))))))
+
+;; plain : (List Byte Symbol Nat) -> (Listof Byte)
+;; The frame a server sends for it, by §5.2.
+(define (plain s)
+  (append (plain-header (car s) (caddr s)) (pattern (caddr s))))
+
+;; masked-first : (Listof Byte) -> (Listof Byte)
+;; A server's frame masked as a client masks its own (§5.3), so that a
+;; decoder, which refuses an unmasked frame (§5.1), reads it: the mask bit
+;; set, the key after the length, and the payload masked with it.  The
+;; length's form is read from the frame's own second byte.
+(define (masked-first bytes)
+  (let* ((n (bitwise-and (cadr bytes) 127))
+         (h (cond ((< n 126) 2) ((= n 126) 4) (else 10))))
+    (append (list (car bytes) (bitwise-ior 128 (cadr bytes)))
+            (take (cddr bytes) (- h 2))
+            key
+            (masked (list-tail bytes h)))))
+
 ;; assertion-by : (-> Any) -> (U Symbol 'accepted 'not-an-assertion)
 ;; Who an assertion violation names, when the thunk raises one.
 (define (assertion-by thunk)
@@ -377,8 +445,13 @@
     ;; The suite's frames must be RFC 6455's before any check reads them.
     (unless (and (equal? (frame text-hello) rfc-masked-text)
                  (equal? (frame pong-hello) rfc-masked-pong)
-                 (for-all (lambda (edge) (equal? (header #x82 (car edge)) (cadr edge))) length-edges))
-      (provenance-failure "the suite's frames are not RFC 6455's: §5.7's masked examples, or the length forms' edges"))
+                 (for-all (lambda (edge) (equal? (header #x82 (car edge)) (cadr edge))) length-edges)
+                 (equal? (append (plain-header #x81 5) hello) (list-ref rfc-unmasked 0))
+                 (equal? (append (plain-header #x89 5) hello) (list-ref rfc-unmasked 3))
+                 (equal? (plain-header #x82 256) (list-ref rfc-unmasked 4))
+                 (equal? (plain-header #x82 65536) (list-ref rfc-unmasked 5))
+                 (for-all (lambda (edge) (equal? (plain-header #x82 (car edge)) (cadr edge))) plain-edges))
+      (provenance-failure "the suite's frames are not RFC 6455's: §5.7's examples, or the length forms' edges"))
 
     ;; RFC 6455 §5.7
     (test-equal "RFC 6455's masked text and pong decode to their Hello"
@@ -595,4 +668,65 @@
         (let ((answer (+ (* (length specs) 1073741824)
                          (fold-left + 0 (concat (map cadddr specs))))))
           (list answer answer 0 0))
-        (list (whole) (one-by-one) (allocated whole) (allocated one-by-one))))))
+        (list (whole) (one-by-one) (allocated whole) (allocated one-by-one))))
+
+    ;; The encoder (M2.2).  §5.7's fragmented message is the one unmasked
+    ;; example a server never sends: each of its messages is one frame.
+    (test-equal "RFC 6455's unmasked frames a server sends are encoded byte for byte: Hello as text and as a ping, and the 256-byte and 64 KiB binary messages"
+      (list (list-ref rfc-unmasked 0) (list-ref rfc-unmasked 3)
+            (append (list-ref rfc-unmasked 4) (pattern 256))
+            (append (list-ref rfc-unmasked 5) (pattern 65536)))
+      (map (lambda (kind bytes) (bytevector->u8-list (frame-encode kind (u8-list->bytevector bytes))))
+           '(text ping binary binary)
+           (list hello hello (pattern 256) (pattern 65536))))
+    (test-equal "the length forms at their edges, unmasked: 125 in 7 bits, 126 and 65,535 in 16, 65,536 in 64"
+      (map (lambda (edge) (list (cadr edge) (+ (length (cadr edge)) (car edge)))) plain-edges)
+      (map (lambda (edge)
+             (let ((bytes (bytevector->u8-list (frame-encode 'binary (make-bytevector (car edge) 0)))))
+               (list (take bytes (length (cadr edge))) (length bytes))))
+           plain-edges))
+    (test-equal "every kind a server sends, at each length form's edges, is one final frame, unmasked, its length in its shortest form"
+      (map plain sent)
+      (map encoded sent))
+    (test-equal "a decode of each encode, masked first, answers its kind, its length and its payload"
+      (map (lambda (s) (expected (list (list (car s) #t (cadr s) (pattern (caddr s)))))) sent)
+      (map (lambda (s) (decoded (masked-first (encoded s)) '())) sent))
+    (let ((bv (u8-list->bytevector (pattern 12))))
+      (test-equal "a payload from a range of its bytevector is encoded from those bytes alone"
+        (list (append (plain-header #x82 5) (take (list-tail (pattern 12) 3) 5))
+              (plain-header #x82 0)
+              (plain-header #x81 0)
+              (append (plain-header #x82 12) (pattern 12)))
+        (map (lambda (args) (bytevector->u8-list (apply frame-encode args)))
+             (list (list 'binary bv 3 8) (list 'binary bv 0 0) (list 'text bv 12 12) (list 'binary bv 0 12))))
+      (test-equal "a continuation, or any kind but the five a server sends, is an assertion naming frame-encode: each message is one final frame"
+        '(frame-encode frame-encode frame-encode frame-encode)
+        (map (lambda (kind) (assertion-by (lambda () (frame-encode kind bv))))
+             '(continuation reserved #f 1)))
+      (test-equal "a control frame over 125 bytes is an assertion naming frame-encode"
+        '(frame-encode frame-encode frame-encode frame-encode)
+        (map (lambda (kind n) (assertion-by (lambda () (frame-encode kind (make-bytevector n 0)))))
+             '(close ping pong close)
+             '(126 126 126 65536)))
+      (test-equal "a range outside its bytevector, or no bytevector, is an assertion naming frame-encode"
+        '(frame-encode frame-encode frame-encode frame-encode frame-encode frame-encode frame-encode)
+        (append (map (lambda (r) (assertion-by (lambda () (frame-encode 'binary bv (car r) (cadr r)))))
+                     '((1 0) (0 13) (-1 2) (13 13) (0.0 2)))
+                (list (assertion-by (lambda () (frame-encode 'text "Hello")))
+                      (assertion-by (lambda () (frame-encode 'text "Hello" 0 0)))))))
+    (test-equal "an encode leaves its payload's bytevector as it was"
+      (map (lambda (s) (pattern (caddr s))) sent)
+      (map (lambda (s)
+             (let ((bv (u8-list->bytevector (pattern (caddr s)))))
+               (frame-encode (cadr s) bv)
+               (bytevector->u8-list bv)))
+           sent))
+    (test-equal "an encode allocates its frame, and nothing else"
+      (map (lambda (s)
+             (let ((size (length (plain s))))
+               (allocated (lambda () (keep! (make-bytevector size))))))
+           sent)
+      (map (lambda (s)
+             (let ((bv (u8-list->bytevector (pattern (caddr s)))))
+               (allocated (lambda () (keep! (frame-encode (cadr s) bv))))))
+           sent))))
