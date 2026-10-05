@@ -815,3 +815,36 @@ ws 7.5.10 was fed every connection, 660. 584 answered the same and 36 stepped no
 `make test` green before the commit (Darwin arm64): eight suites, 201 expected passes, every pin ok. `make prod` green.
 
 NEXT: step 3, the stream's end, stacked on this.
+
+---
+
+M3.2, STEP 3 — THE STREAM'S END. Branch `feat/m3.2-3-stream-end`, stacked on `feat/m3.2-2-close-timeout`. 2026-10-05.
+
+**`(websocket protocol)`**:
+- **`(end why)`, the stream's end** with no close received, 'eof or the errno. The stream is closed, nothing is written, and 1006 is told, not cleanly (§7.1.5). The deadline is disarmed if the server's close was sent. After the end, it answers nothing.
+- **1005 and 1006 are never written.** No close the step sends carries them: its codes refuse them. Nothing is written at the stream's end.
+
+**`tests/test-protocol.sps`, 68 checks**, 5 of them new:
+- the stream's end at once, in a frame, between fragments, and while reading is stopped, at the end of file or an error;
+- the stream's end after the server's close;
+- what an ended connection answers to it;
+- its shape;
+- what an ended connection keeps.
+
+**Found while writing the checks:** the end's shape check passed against step 2's library, which refuses every end. It now has rows an end must pass, at the end of file and at an error.
+
+**The oracles.** RFC 6455 §7.1.5: with no close received, the code is 1006. §7.1.7: a close may be left out when the other side cannot read it.
+
+ws 7.5.10 was fed every connection, 676. 596 answered the same and 38 stepped nothing. 4 are "ours waits for a take; ws reads on", and the rest are ws's own, as in step 1. Of the 72 connections that step a close, the stream's end or a deadline, 67 answered the same, 4 wait for a take, and 1 is ws's unanswered ping. No answer disagreed. On the stream's end, ws too writes nothing and tells 1006.
+
+**Tests first.** The step's suite against step 2's library (4f944ea) gave 63 passes, and the 5 new checks red.
+
+**185 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- step 2's 179, each red set grown by this step's checks it also reddens;
+- this step's 6.
+
+0 mismatches. Every check has a killer that reddens it by value.
+
+`make test` green before the commit (Darwin arm64): eight suites, 206 expected passes, every pin ok. `make prod` green.
+
+NEXT: M3.3, the ping clock (a quiet client pinged, and failed 1011 when the pong is late; any bytes re-arm it; stopped while reading is), when the owner asks; the three PRs first go through review and the closing ritual.

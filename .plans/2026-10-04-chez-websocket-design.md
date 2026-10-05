@@ -150,6 +150,8 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
     timeout.
   - A close sent and not answered within 10 s closes the stream anyway, writing
     nothing, and 1006 is told: websockets' `close_timeout`.
+  - The stream's end with no close received closes the stream, writes nothing, and
+    tells 1006 (§7.1.5), as websockets and ws do.
   - Codes 1005, 1006 and 1015 are never sent (§7.4.1). They are what the handler is
     told when a close carried no code (1005), or when the stream ended without one
     (1006).

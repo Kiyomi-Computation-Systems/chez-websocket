@@ -17,6 +17,7 @@
 ;;;                                   binary with a bytevector
 ;;;            (close code reason)    the server's close: a code an
 ;;;                                   endpoint may send, a reason a string
+;;;            (end why)              the stream's end: 'eof, or the errno
 ;;;            (taken nbytes)         the handler took a delivered message
 ;;;                                   of nbytes
 ;;;            (deadline-passed)      the deadline armed has passed
@@ -62,12 +63,14 @@
 ;;;   close ends the handshake.  If the deadline passes first, the stream is
 ;;;   closed anyway, and 1006 told.  Once a close is sent, a send is the
 ;;;   caller's mistake (§5.5.1), and another close answers nothing.
+;;; - The stream's end with no close received closes the stream and tells
+;;;   1006 (§7.1.5).  Nothing is written, since nothing reads it.
 ;;; - Time is a deadline's kind: the step reads no clock, names the deadline
 ;;;   it needs, close, and disarms it if the connection ends before it
 ;;;   passes.  A deadline passing with none armed is the caller's mistake.
 ;;; - Once the connection has ended, failed or closed, nothing more is read,
 ;;;   the rest of a read among it, and a ping is not answered (§5.5.2).  A
-;;;   close then answers nothing.
+;;;   close or the stream's end then answers nothing.
 ;;; - Reading on (0001, and its amendment).  Each delivered message is
 ;;;   queued for the handler until it is taken.  Once the queue holds a
 ;;;   cap's worth of bytes, or max-queue messages, the step answers
@@ -381,6 +384,17 @@
             (list (list 'write (frame-encode 'close body)) '(arm-deadline close)))
           '())))
 
+  ;; stream-end! : WsState Any -> (Listof Action)
+  ;; The stream's end, 'eof or the errno, with no close received: the stream
+  ;; closed and 1006 told (§7.1.5).  Nothing is written, since nothing reads
+  ;; it.  After the connection has ended, it answers nothing.
+  (define (stream-end! s why)
+    (unless (symbol? why)
+      (assertion-violation 'ws-step "not why a stream ended" why))
+    (if (eq? (ws-state-phase s) 'ended)
+        '()
+        (reverse (end! s (list '(close-stream) (unclean)) '()))))
+
   ;; passed! : WsState -> (Listof Action)
   ;; The deadline armed has passed: the close sent was not answered in
   ;; time, so the stream is closed anyway, and 1006 told.
@@ -409,6 +423,9 @@
       ((close)
        (event-of! event 3)
        (values s (close! s (cadr event) (caddr event))))
+      ((end)
+       (event-of! event 2)
+       (values s (stream-end! s (cadr event))))
       ((deadline-passed)
        (event-of! event 1)
        (values s (passed! s)))

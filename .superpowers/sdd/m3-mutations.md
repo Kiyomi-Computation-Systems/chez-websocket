@@ -972,3 +972,96 @@ did not have.
 
 Every check, 15 in the limits suite and 63 in the protocol suite, has a killer that
 reddens it by value.
+
+## M3.2, step 3 — the stream's end
+
+The blobs: `protocol.sls` 325e797, and `test-protocol.sps` ab33121, 68 checks; the
+rest as step 1's.
+
+### The oracles
+
+- **RFC 6455 §7.1.5**: with no close received, the code is 1006. §7.1.7: a close may
+  be left out when the other side cannot read it, and the stream's end is that.
+- **websockets 17.2**: an end of the stream fails with 1006 and sends no close
+  frame (`protocol.py`, `fail`).
+- **ws 7.5.10**, as in step 1, the stream's end pushed as the socket's end, or as a
+  destroy for an errno: 676 connections. 596 answered the same and 38 stepped
+  nothing. 4 are "ours waits for a take; ws reads on", and the rest are the
+  categories of step 1. Of the 72 that step a close, the stream's end or a deadline,
+  67 answered the same, 4 wait for a take, and 1 is ws's unanswered ping. No answer
+  disagreed.
+
+### The test-first runs
+
+The step's suite against step 2's library (4f944ea): 63 passes, and the 5 new checks
+red. One of them first passed there: the end's shape check, since step 2's library
+refuses every end. It now has rows an end must pass, at the end of file and at an
+error.
+
+### The mutants
+
+The new checks' keys:
+
+| key | check |
+|---|---|
+| C-END | the stream's end with no close received closes the stream, and 1006 is told, not cleanly (§7.1.5)… |
+| C-ENDCLOSING | the stream's end after the server's close, before the client's… |
+| C-ENDED3 | once the connection has ended, the stream's end answers nothing… |
+| C-API3 | an end of the wrong shape, or whose why is not a symbol, is an assertion naming ws-step… |
+| C-KEEPWAIT3 | once the stream's end has ended the connection, it keeps no read that waited for the queue |
+
+On this step's tree, 185 rows, 0 mismatches: step 2's 179 and this step's 6.
+
+**Rows whose red sets grew** by this step's checks. The other 146 are red as in step
+2:
+
+| # | mutation | red besides |
+|---|---|---|
+| L-34 | websocket-limits-with ignores its overrides | C-END |
+| M-2 | the end does not end the connection | C-ENDED3 |
+| M-3 | the end's actions in the reverse order | C-END, C-ENDCLOSING, C-ENDED3 |
+| M-4 | a failing close's code little-endian | C-ENDED3 |
+| M-5 | 1000 told where no close came | C-END, C-ENDCLOSING, C-ENDED3 |
+| M-6 | told clean where no close came | C-END, C-ENDCLOSING, C-ENDED3 |
+| M-7 | a failure logged without why | C-ENDED3 |
+| M-8 | a failure leaves the stream open | C-ENDED3 |
+| M-9 | 1000 not sendable | C-ENDCLOSING, C-ENDED3 |
+| M-29 | a client's close told unclean, an empty one among them | C-ENDED3 |
+| M-34 | max-queue messages queued do not stop reading | C-END |
+| M-36 | no count bound on the queue | C-END |
+| M-41 | a message not counted | C-END |
+| M-42 | read-stop not answered | C-END |
+| M-44 | every data frame ends its message | C-END |
+| M-58 | reading goes on past a full queue | C-END |
+| M-60 | a refusal's reason not logged | C-ENDED3 |
+| M-79 | an event's shape not checked | C-API3 |
+| M-82 | the read's payload unmasked in place | C-KEEPWAIT3 |
+| F-1 | frame-control? leaves out a close | C-ENDED3 |
+| C-1 | the end disarms nothing | C-ENDCLOSING |
+| C-2 | the end disarms, armed or not | C-END, C-ENDED3 |
+| C-4 | the end keeps a read that waits | C-KEEPWAIT3 |
+| C-5 | a new connection's deadline armed | C-END, C-ENDED3 |
+| C-7 | failing never writes a close | C-ENDED3 |
+| C-9 | a client's close never answered | C-ENDED3 |
+| C-19 | the server's close's code little-endian | C-ENDCLOSING, C-ENDED3 |
+| C-23 | a close after the end written | C-ENDED3 |
+| C-25 | the server's close arms no deadline in its state | C-ENDCLOSING, C-ENDED3 |
+| C-26 | the arm left out of the server's close's actions | C-ENDCLOSING, C-ENDED3 |
+| C-27 | the deadline armed named ping | C-ENDCLOSING, C-ENDED3 |
+| C-34 | the passed deadline disarmed again | C-ENDED3 |
+| C-35 | the close timeout leaves the stream open | C-ENDED3 |
+
+**This step's own:**
+
+| # | mutation | red |
+|---|---|---|
+| C-28 | the stream's end not checked for a symbol | C-API3 |
+| C-29 | the stream's end after the end answers again | C-ENDED3 |
+| C-30 | the stream's end ignored | C-END, C-ENDCLOSING, C-ENDED3, C-KEEPWAIT3 |
+| C-31 | the stream's end writes a close of 1006 | C-END, C-ENDCLOSING, C-ENDED3 |
+| C-32 | the stream's end leaves the stream open | C-END, C-ENDCLOSING, C-ENDED3 |
+| C-37 | an end of the wrong shape | C-API3 |
+
+C-31 writes a close of 1006 at the stream's end: the plan's "1005 and 1006 never
+sent", held by C-END, C-ENDCLOSING and C-ENDED3. Every check, 15 in the limits suite
+and 68 in the protocol suite, has a killer that reddens it by value.
