@@ -107,13 +107,16 @@ suites, 17 expected passes, every pin ok.
 
 Notes:
 - **M1-24 survives by construction.** A length in bits passes 32 bits only at
-  512 MiB, so a 32-bit field agrees with the 64-bit one below that. The library
-  hashes 60 bytes, and a check would have to hash 512 MiB. That is the scope
-  statement: the field is written as RFC 3174 §4 says, and nothing tests its
-  top half.
+  512 MiB, so a 32-bit field agrees with the 64-bit one below that. This note
+  first said that nothing else of the field went untested; M1.1's review (below)
+  found these inputs set only bits 3 to 10, 12, 17 and 19 to 22 of it, so a field
+  cut to 23 bits survived as well. The review added an input that sets every bit
+  from 3 to 24. Bits 25 to 63, which only inputs of 4 MiB and more set, are the
+  scope statement.
 - **No mutant reddens 63, 64 or 65 bytes alone.** The padded copy makes a block's
-  end no special case here. The three hold an implementation that pads only its
-  last block, as the plan asks.
+  end no special case here. For an implementation that pads only its last block,
+  the three hold its block ends with at most one whole block before them: no
+  input has whole blocks followed by a tail of 2 to 63 bytes (M1.1's review).
 - **The audit reads, it does not load.** MI-3 and MI-4 name libraries that do not
   exist yet, and the audit refuses them all the same. MI-6 is refused by design:
   an import must name its library plainly.
@@ -311,3 +314,122 @@ Notes:
   `#f` for `#f`.
 - **A stub passed eleven of the first suite's checks**: the nine rows, §7's
   examples and the allocation check. Each has its own mutant above.
+
+## M1.1's review — SHA-1
+
+Platform: Darwin arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-05.
+A code review of the merged SHA-1 code (53fa639, PR #4) reported 15 findings. All
+were in the suite, the records and the import audit; the library's digests were
+right. Each mutant below ran its suite with the mutated library or harness first on
+the library path, a copy kept outside the repository, and each audit mutant ran in
+a scratch copy of the tree. Every red set was named before the run.
+
+### What changed
+
+- **The library** works its words with R6RS's fixnum operations and rotates with
+  `fxrotate-bit-field`. A 60-byte hash went from 4,384 to 2,789 ns, and a mebibyte
+  from 33.8 to 21.2 ms (three alternating runs, each the least of seven trials).
+  It allocates the same.
+- **`tests/test-sha1.sps`** has 16 checks: four new, and one replaced.
+  - 4 MiB less a byte, whose length in bits sets every bit of the length field
+    from 3 to 24. Its digest, `4cb28b705337e4487cc93d13c3e69882120b0750`, is three
+    peers', which agreed: Python 3.14.5's `hashlib`, OpenSSL 3.6.3 and Perl's
+    Digest::SHA 6.02.
+  - Two digests held at once, the message left as it was, and a hash run inside
+    another from a timer interrupt.
+  - What a hash allocates, at 0, 55, 56, 64, 640 and 128,000 bytes. It must equal
+    what the test allocates for RFC 3174's three objects: the padded message (§4),
+    the 80-word schedule (§6.1) and the 20-byte digest. This replaces M1.1's
+    ten-block slope, which a cost paid once a call cancelled.
+- **`(ws-testing)`** exports the measure both suites now share, `allocated`:
+  - the least of three counts, each made from its own depth of the stack, 100
+    frames apart;
+  - less an empty thunk's count, since a reading allocates 160 bytes of its own;
+  - after a check of the counter: a bytevector 1,024 bytes longer must count
+    1,024 bytes more.
+
+  A failed check's line is now followed by what it expected and what it got, and
+  a harness error names what was raised.
+- **The import audit** reads every form in a file, and every extension Chez looks
+  for a library under. It passes over names that begin with ".", and refuses
+  `(rnrs eval)`.
+
+### Why three depths
+
+A count also takes in a new stack segment, about 64 KiB, when the measured call's
+stack reaches past the end of the current one. That happens from some depths
+only, and at every call from them. The probe ran M1.1's check (ten blocks against
+one) k frames deeper, for each k from 0:
+
+| library | measure | depths that read other than 640 |
+|---|---|---|
+| main's | M1.1's: one count | 75 of 40,001, reading 66,416 or 66,544 |
+| main's | three counts, all from one depth | 15 of 9,001 |
+| main's | three counts, from depths 100 frames apart | 0 of 40,001 |
+| this branch's | the same | 0 of 40,001 |
+
+The review had proposed three counts from one depth, which the second row refuses.
+
+### The mutants
+
+"The 14 digest checks" are the twelve vectors, the two held digests and the
+nested hash.
+
+| # | mutation | red |
+|---|----------|-----|
+| M1-1 | the padded size takes len + 9 | 55 bytes, and the allocation check |
+| M1-2 | the padded size takes len + 7 | TEST2, 56 bytes, the held digests, the allocation check |
+| M1-3 | the length field counts bytes, not bits | the 14 digest checks but 0 bytes |
+| M1-4 | the length field little-endian | the same 13 |
+| M1-5 to M1-16 | the padding's bit, its place, the words' order, the schedule's rotation and its W(t−14), each function, K, H0, the rotation's field one bit short, 79 steps | each, the 14 digest checks |
+| M1-17 | a step's sum not masked to 32 bits | all 16, through a raise: `fx+` overflows |
+| M1-18 | H0 not added back after a block | the 14 digest checks |
+| M1-19 | only the first block is hashed | the 11 digest checks of two blocks or more |
+| M1-20 | the digest's first word little-endian | the 14 digest checks |
+| M1-21 | a step's sum as one generic `+` of five | the allocation check, alone |
+| M1-22 | the schedule's xor as one generic `bitwise-xor` of four | the allocation check, alone |
+| M1-23 | a rotation by the generic `bitwise-rotate-bit-field` | the allocation check, alone |
+| M1-24 | the length field written as 32 bits | none: survives (M1.1's note, corrected) |
+| P-1 | a digest buffer shared by every call | the held digests, the allocation check |
+| P-2 | a schedule shared by every call | the nested hash, the allocation check |
+| P-3 | a hash zeroes its message after copying it | the message check, alone |
+| A-1 | a four-argument `+` in `pad` | the allocation check, alone |
+| A-2 | the digest built through a list | the allocation check, alone |
+| A-3 | a 64 KiB scratch buffer a hash | the allocation check, alone |
+| A-4 | a block loop that keeps a frame a block | the allocation check, alone: 391,104 bytes at 128,000, for 128,768 |
+| L-23 | the length field masked to 23 bits | 4 MiB, alone |
+| L-24 | the length field masked to 24 bits | 4 MiB, alone |
+| LB-3 to LB-31 | bit k of the length field stuck at 0 | k = 3 to 24: 4 MiB, and each check whose input sets bit k; for 11, 13 to 16, 18, 23 and 24, 4 MiB alone. k = 25 to 31: none, the scope statement |
+| W-1 | the five block-end sums unmasked, so a hash raises | all 16, through a raise, exit 1 |
+| C-1 | a dead counter | the SHA-1 suite: exit 2, its allocation check's expected value raising "the counter does not count a 1,024-byte bytevector"; the UTF-8 suite: its allocation check, through a raise |
+| C-2 | a dead counter, left unchecked | none, in either suite: why the counter is checked |
+| C-3 | an empty thunk's count not taken off | the UTF-8 suite's allocation check, reading 160 for 0; the SHA-1 suite's cancels |
+| C-4 | one count, from one depth | none: survives at the suite's own depth (the probe above) |
+| C-5 | three counts, all from one depth | none: survives at the suite's own depth (the probe above) |
+| MI-1 to MI-10 | M1.1's to M1.3's import mutants | each, as recorded: its file's check; MI-7, exit 2 |
+| IA-1 | a form after `sha1.sls`'s library | the audit's check for `sha1.sls` |
+| IA-2 | an impure `sha1.ss` beside `sha1.sls` | the audit's check for `sha1.ss`, which it now reads |
+| IA-3 | `sha1.sls` imports `(rnrs eval)` too | the audit's check for `sha1.sls` |
+| IA-4 | an editor's lock file, `.#sha1.sls`, a dangling link | none: passed over, as it should be |
+| U-1 to U-21, R-1 to R-21 | M1.3's, against the shared measure | each, as recorded in M1.3's table; U-20 survives |
+
+Every red was exit 1 with no harness error, but C-1's exit 2 and MI-7's, as named
+before the run. A failed check now prints its actual value, and a raise shows as
+`#f`: only M1-17, W-1, C-1 (UTF-8), R-14 and R-15 redden through one. `make test`
+is green afterwards: five suites, 75 expected passes, every pin ok.
+
+Notes:
+- **The first run had one mismatch**, named before it, and it ran against three
+  counts from one depth. M1-17 was predicted to redden the 14 digest checks, as
+  under M1.1's generic arithmetic, where an unmasked sum grew a bignum. Under
+  fixnum operations it overflows within a block and `fx+` raises, as the header
+  says it would, so all 16 checks go red. It was a prediction error. Every other
+  red set matched. After the change to three depths, all 127 matched, M1-17 with
+  its corrected set.
+- **C-2, C-4 and C-5 survive by design.** C-2 shows what the counter's check is
+  for. C-4 and C-5 measure at a depth the suite is not near a segment's end at,
+  and the probe shows the depths that are.
+- **The nested hash needs no thread.** A timer interrupt 500 ticks into TEST4's
+  eleven blocks hashes "abc" from inside it. Under P-2 the outer digest comes out
+  `30fb65e6…`, and the check also holds that the interrupt came before the outer
+  hash returned.
