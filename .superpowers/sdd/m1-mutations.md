@@ -159,7 +159,10 @@ of the five peers accept RFC 6455 §4.1's printed key:
   data-encoding's documentation says it checks trailing bits by default.
 
 The accept value hashes the key as sent, so a client whose encoder set the bits
-still gets the accept value it computes. B-11 holds the choice.
+still gets the accept value it computes. B-11 holds the choice for a last digit
+before two "=". This note first said B-11 held the choice. M1.2's review (below)
+found that nothing held it before one "=": a decode that refused set bits there
+passed every check. The review added "Zm/=", and BR-8 holds it.
 
 ### The mutants
 
@@ -433,3 +436,137 @@ Notes:
   eleven blocks hashes "abc" from inside it. Under P-2 the outer digest comes out
   `30fb65e6…`, and the check also holds that the interrupt came before the outer
   hash returned.
+
+## M1.2's review — base64
+
+Platform: Darwin arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-05.
+A code review of the merged base64 code (cbf2a7d, PR #6) reported six findings.
+The library's answers were right. Two findings were gaps in the suite that
+mutants passed through: the edges of the decode's character ranges, and a set
+last digit before one "=". Four were in the library: the alphabet written twice,
+generic operations called out of line, an encode through a string port, and
+short-group tests run on every group. Each mutant below ran the suite with the
+mutated library first on the library path, a copy kept outside the repository.
+MI-9 ran the audit in a scratch copy of the tree. Every red set was named before
+the run.
+
+### What changed
+
+- **The library.**
+  - The decode's values are `digits` read the other way: a 128-entry table built
+    from the string when the library loads. The alphabet is written once.
+  - A group is put together with `fx*` by powers of two and `fxior`, and split
+    with `fxarithmetic-shift-right` and `fxand`. In Chez 10.4.1's assembly, the
+    generic shifts and `fxarithmetic-shift-left` are calls, and `fx*` by a
+    constant is inline, with an overflow test.
+  - The encode writes into a string of its known length, filled with "=".
+  - Whole groups come first, then the one short group, if any.
+  - It imports `(rnrs mutable-strings)` for `string-set!`, which `(rnrs)` leaves
+    out. The audit allows it, as it does any `(rnrs ...)` but `eval`.
+
+  An encode of a 20-byte digest went from 216 to 87 ns, and a decode of a key
+  from 222 to 126 ns. At 3,000 bytes, an encode went from 26.8 to 11.6 µs and a
+  decode from 36.0 to 21.5 µs. Each is the lower of two alternating runs, and
+  each run the least of seven trials.
+- **`tests/test-base64.sps`** has 27 checks, three of them new.
+  - Each character beside a run of the alphabet in ASCII is refused: `*`, `,`,
+    `.`, `:`, `@`, `[`, `` ` `` and `{`. So are DEL and U+0080, either side of
+    ASCII's end. The runs are `+`, `/` to `9`, `A` to `Z` and `a` to `z`.
+  - "Zm/=" decodes to "fo", whose last digit sets both of its unused bits. The
+    bytes are three peers': Python 3.14.5's `base64` with `validate=True`, Perl's
+    MIME::Base64 3.16 and OpenSSL 3.6.3.
+  - What each allocates: encodes of 0, 1, 2, 3, 16, 20, 48 and 3,000 bytes, and
+    decodes of strings of as many bytes. Each must equal what the test allocates
+    for the string or bytevector of RFC 4648 §4's length.
+
+### The mutants
+
+Test-first, against main's library, with the review's suite:
+
+| # | mutation | red |
+|---|----------|-----|
+| BR-0 | none: main's library as it is | the allocation check, alone: the encode's string port |
+| BR-1 | the capitals' run starts at `@` | the edge check, through a raise (`@` takes −1), and the allocation check |
+| BR-2 | the capitals' run ends at `[` | the edge check, and the allocation check |
+| BR-3 | the small letters' run starts at `` ` `` | the same |
+| BR-4 | the small letters' run ends at `{` | the same |
+| BR-5 | the numerals' run ends at `:` | the same |
+| BR-6 | the numerals' run starts at `/` | the alphabet's decode, "Zm/=", and the allocation check |
+| BR-7 | a last digit's unused bits must be zero before one "=" | "Zm/=", and the allocation check |
+
+Against the review's library:
+
+| # | mutation | red |
+|---|----------|-----|
+| B-1 | the table swaps `+` and `/` | the alphabet both ways, and the accept value |
+| B-2 | the table's `q` is a `Q` | the alphabet both ways, both RFC 6455 keys, and the allocation check |
+| B-3 | one byte left: its third digit written, not padded | `f`, `foob` and the bytes 1 to 16, encoded |
+| B-4 | two bytes left: their fourth digit written, not padded | `fo`, `fooba` and the accept value, encoded |
+| B-5 | the encode's loop runs one group past its whole ones | every encode, and the allocation check, through a raise |
+| B-6 | the decode's length check dropped | the wrong-length refusal, alone, through a raise |
+| B-7 | a character outside the alphabet decodes as 0 | the alphabet, edge, padding and three-padding refusals |
+| B-8 | the decode takes the URL alphabet's `-` and `_` too | the alphabet refusal, alone |
+| B-9 | three padding characters counted as padding | the three-padding refusal, alone, through a raise |
+| B-10 | `=` decodes as 0 | the padding and three-padding refusals |
+| B-11 | a last digit's unused bits must be zero before two "=" | RFC 6455's client example, as printed, alone |
+| B-12 | the decode's size ignores the padding | the seven padded decodes |
+| B-13 | a whole group's second byte shifted by 7, not 8 | the seven decodes with a whole group |
+| B-13b | a short group's second byte shifted by 7, not 8 | the three decodes that end in one "=" |
+| B-14 | every digit's value one high | every decode but the empty one |
+| B-15 | a whole group's second digit shifted by 13, not 12 | the seven encodes with a whole group |
+| B-15b | a short group's second digit shifted by 13, not 12 | five of the six encodes with a short group (below) |
+| B-16 | the empty string refused | `""` decoded, alone |
+| MI-9 | `base64.sls` imports `(chezscheme)` too | the audit's check for `base64.sls` |
+| BR-8 | a last digit's unused bits must be zero before one "=" | "Zm/=", alone |
+| BR-9 | the ASCII test lets U+0080 through | the edge check, alone, through a raise |
+| BR-10 | the table one short, DEL past its end | the edge check, alone, through a raise |
+| BR-11 | no ASCII test before the table | the alphabet and edge refusals, through a raise |
+| BR-12 | the encode's string handed back through a string port | the allocation check, alone |
+| BR-13a | a decode's whole group ors its four values with `bitwise-ior` | none: equivalent (below) |
+| BR-13 | a decode's whole group put together with the generic shifts and one four-argument `bitwise-ior` | the allocation check, alone |
+| BR-14a | an encode's whole group ors its three values with `bitwise-ior` | none: equivalent (below) |
+| BR-14 | an encode's whole group put together with the generic shifts and one three-argument `bitwise-ior` | none: survives, the scope statement (below) |
+| BR-15 | the decode table built at every lookup | the allocation check, alone |
+| BR-16 | the decode's whole groups take a padded last group too | the seven padded decodes, and the allocation check, through a raise |
+| BR-17 | a padded last group not decoded | the seven padded decodes |
+| BR-18 | a short last group not encoded | the six encodes with a short group |
+| BR-19 | the encode's whole groups stop a group early | the seven encodes with a whole group |
+| BR-20 | the encode's string not filled with "=" | the six encodes with a short group |
+| BR-21 | a padded last group always reads its third digit | the four decodes that end in two "=", and the allocation check, through a raise |
+| BR-22 | the encode's string has no room for a short last group | the six encodes with a short group, and the allocation check, through a raise |
+
+M1.2's B-1 to B-16 and MI-9 are re-cut for the new library. B-13 and B-15 are
+split in two, since a whole group and a short one now have their own code. B-14
+was a range's offset, and is now a value in the table. Every red was exit 1 with
+no harness error, as named before the run: 44 runs, 8 against main's library and
+36 against the review's. `make test` is green afterwards: five suites, 78
+expected passes, every pin ok.
+
+Notes:
+- **The first runs had eight mismatches, from two prediction errors.**
+  - Main's library fails the allocation check unmutated (BR-0), so every
+    test-first mutant reddens it too. The first run's sets left it out, so all
+    seven mismatched. With it named, all eight matched.
+  - BR-13 was first cut as BR-13a and predicted red. A four-argument
+    `bitwise-ior` allocates 32 bytes a call when Chez cannot type its
+    arguments. Here Chez's type pass knew three of them came from `fx*`, tested
+    the fourth with `fixnum?`, and compiled `fxior`, which allocates nothing
+    (`expand/optimize`). BR-13 is the re-cut, with the generic shifts, whose
+    results it cannot type. BR-14a is equivalent the same way, since all three
+    of its arguments are known.
+
+  After the re-cuts, all 44 matched.
+- **The suite missed these before the review.** BR-1 to BR-5 and BR-7 redden
+  only checks the review added, so M1.2's suite passed them. The review ran four
+  of them (BR-1, BR-2, BR-4 and BR-5) and BR-7 against it. The sixth edge, BR-6,
+  was held already: `/` is in the alphabet, and decodes as 51 under it.
+- **The decode allocated only its bytes already.** On main's library, the
+  allocation check's decode half matched. The red was the encode's port: an
+  encode of nothing allocated 160 bytes, for 0, and one of 3,000 bytes 33,008,
+  for 16,016.
+- **B-15b leaves the bytes 1 to 16 green.** Their last byte, 16, gives the same
+  second digit shifted by 12 or by 13.
+- **BR-14 survives by design.** The generic shifts and a three-argument
+  `bitwise-ior` are calls, but they allocate nothing. The checks hold what a
+  call allocates, not whether it runs inline. The speed above is measured, not
+  checked.
