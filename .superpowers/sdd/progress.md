@@ -347,3 +347,19 @@ The first run had one mismatch, a prediction error: an unmasked step sum now ove
 `make test` green before the commit (Darwin arm64): five suites, 75 expected passes, every pin ok. Each allocation suite was green over 30 runs. `make prod` green.
 
 NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the SHA-1 review's fix** (the entry above), from the stacked #8, #9 and #10, as fc0a363, d6c393b and bed354e.
+- **The squashes.** Each has the tree of the head CI tested, and each sits on the one before: fc0a363 on 85e51c0, d6c393b on fc0a363, bed354e on d6c393b.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #8 at 2e8c9be (run 37336474865), 71 expected passes;
+  - #9, rebased onto #8's squash, at 9167159 (run 37337229296), 75;
+  - #10, rebased onto #9's, at ea3fbf7 (run 37337401681), 75.
+
+  Main's run on bed354e, 37337545541, was green too, and this reflect was pushed after it.
+- **Branches.** `fix/sha1-review-1-measure`, `fix/sha1-review-2-sha1` and `fix/sha1-review-3-audit` deleted, local and remote. No PR is open.
+
+`make test` green on main: five suites, 75 expected passes, every pin ok.
+
+NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
