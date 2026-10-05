@@ -363,3 +363,35 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **the SHA-1 re
 `make test` green on main: five suites, 75 expected passes, every pin ok.
 
 NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
+
+---
+
+FIX — THE BASE64 REVIEW. Branch `fix/base64-review`, cut from main at 1d3792f. 2026-10-05.
+
+On the owner's "fix them". A code review of the merged base64 code (cbf2a7d, PR #6) reported six findings. The library's answers were right. Two findings were gaps in the suite, and four were in the library.
+
+**`tests/test-base64.sps`, 27 checks**, three of them new:
+- Each character beside a run of the alphabet in ASCII is refused, and so are the two either side of ASCII's end. Five of the decode's six range edges had no check. Mutants that took `[`, `` ` ``, `{` or `:` for a digit, or raised on `@`, passed every check.
+- "Zm/=" decodes to "fo", the three peers' answer. The choice to accept a last digit's set bits was held only before two "=".
+- What each allocates: an encode its string and a decode its bytes, from 0 to 3,000 bytes. Main's encode failed this through its string port.
+
+**`(websocket base64)`:**
+- one table: the decode's values come from the encode's alphabet;
+- groups worked with fixnum operations, and put together with `fx*`, since Chez 10.4.1 calls `fxarithmetic-shift-left` out of line;
+- the encode writes into a string of its known length;
+- whole groups first, then the one short group.
+
+An encode of a digest takes 87 ns, down from 216, and a decode of a key 126 ns, down from 222. Each allocates only its answer.
+
+**44 mutants** (`m1-mutations.md`, M1.2's review), each red set named before the run:
+- eight test-first, against main's library;
+- M1.2's 17, re-cut, two of them split in two;
+- the review's 17.
+
+The first runs had two prediction errors. The test-first sets left out the allocation check, which main's library fails unmutated. BR-13, as first cut, was equivalent: Chez's type pass compiled its `bitwise-ior` as `fxior`. After the re-cut, all 44 matched. BR-13a and BR-14a survive as equivalents. BR-14 survives as the scope statement: the speed is measured, not checked.
+
+**Records.** M1.2's note that B-11 held the set-bits choice is corrected: it held it only before two "=".
+
+`make test` green before the commit (Darwin arm64): five suites, 78 expected passes, every pin ok. The base64 suite was green over 30 runs. `make prod` green.
+
+NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
