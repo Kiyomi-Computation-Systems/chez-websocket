@@ -295,3 +295,15 @@ For M4, the design and plan now note that Chez's decoders drop a leading U+FEFF.
 `make test` green before the commit (Darwin arm64): five suites, 71 expected passes, every pin ok. `make prod` green.
 
 NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M1.3 and M1's exit** (the entry above), from #7, as 3de361b. **M1 is complete.**
+- **The squash** has 2f57f4f's tree (6d25208), the head CI tested, and its parent is 7b4d51d.
+- **CI.** #7 merged on `linux` SUCCESS at 2f57f4f (run 37311050241): five suites, 71 expected passes, the allocation checks among them. 66379d1, the head before the review, had passed too (37300352629). Main's run on 7b4d51d had finished before #7 merged. Main's run on the squash, 37311901827, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m1.3-utf8` deleted, local and remote. No PR is open.
+- **M1 in all.** SHA-1 (#4), base64 with decision 0002 (#6) and UTF-8 (#7), with #5's `make prod` fix between them: 64 checks among the three libraries and the import audit's three, and 92 mutants, each named before its run.
+
+`make test` green on main: five suites, 71 expected passes, every pin ok.
+
+NEXT: M2, the frame codec, starting with M2.1's decode (`(websocket frame)`: headers whole and split at every byte, the three length forms at their edges, unmasking at every offset, each refusal with its 1002, RFC 6455 §5.7's examples), when the owner asks.
