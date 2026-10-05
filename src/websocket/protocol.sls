@@ -45,9 +45,10 @@
 ;;;   is answered at once with a pong carrying its payload, a pong is
 ;;;   answered with nothing, and a close as below.
 ;;; - Failing (§7.1.7) writes a close with its code, unless the server's
-;;;   close was sent, closes the stream, logs why, and tells 1006 and an
-;;;   empty reason, since no close came (§7.1.5, §7.1.6).  The frame
-;;;   decoder's refusals fail 1002 with its reason.
+;;;   close was sent, closes the stream, logs why, with the code of the
+;;;   close it wrote, or #f if it wrote none, and tells 1006 and an empty
+;;;   reason, since no close came (§7.1.5, §7.1.6).  The frame decoder's
+;;;   refusals fail 1002 with its reason.
 ;;; - A client's close (§5.5.1; 0001's amendment of 2026-10-05, by form) is
 ;;;   answered with a close of its code, or with an empty close when it has
 ;;;   none, unless the server's close was sent, and the stream is closed: a
@@ -57,14 +58,20 @@
 ;;;   (§7.4.1, §7.4.2), and its body is not one byte, or it fails 1002; its
 ;;;   reason not UTF-8 fails 1007.
 ;;; - The server's close (§7.1.2) is written with its code and reason, and
-;;;   arms the close deadline.  Reading goes on as before: a message that
-;;;   comes after it is delivered (decided by form, 2026-10-05), and a ping
-;;;   answered, since no close has been received (§5.5.2).  The client's
-;;;   close ends the handshake.  If the deadline passes first, the stream is
-;;;   closed anyway, and 1006 told.  Once a close is sent, a send is the
-;;;   caller's mistake (§5.5.1), and another close answers nothing.
+;;;   arms the close deadline.  Its reason is measured in UTF-8, not
+;;;   encoded, until the close is written.  Reading goes on as before: a
+;;;   message that comes after it is delivered (decided by form,
+;;;   2026-10-05), and a ping answered, since no close has been received
+;;;   (§5.5.2).  The client's close ends the handshake.  If the deadline
+;;;   passes first, the stream is closed anyway, and 1006 told.  Once a close
+;;;   is sent, a send is the caller's mistake (§5.5.1), and another close
+;;;   answers nothing.
 ;;; - The stream's end with no close received closes the stream and tells
 ;;;   1006 (§7.1.5).  Nothing is written, since nothing reads it.
+;;; - At the stream's end, or when the deadline passes, no more bytes will
+;;;   come, so what waits for the queue is read first, whatever the queue
+;;;   holds: at most the rest of one read.  A client's close among it ends
+;;;   the connection as any close does, cleanly, with its code.
 ;;; - Time is a deadline's kind: the step reads no clock, names the deadline
 ;;;   it needs, close, and disarms it if the connection ends before it
 ;;;   passes.  A deadline passing with none armed is the caller's mistake.
@@ -116,14 +123,14 @@
   ;; end! : WsState (Listof Action) (Listof Action) -> (Listof Action)
   ;; Ends the connection with `last`, its last actions, in order, after
   ;; disarming the deadline armed, and lets go of an unfinished message's
-  ;; bytes and of a read that waits: a connection lives as long as its
-  ;; WebSocket, and nothing reads it after its end.
+  ;; bytes: a connection lives as long as its WebSocket, and nothing reads
+  ;; it after its end.  Nothing waits for the queue by then: an end comes
+  ;; in a read, which takes what waits first, or in finish!.
   (define (end! s last acts)
     (let ((armed (ws-state-deadline s)))
       (ws-state-phase-set! s 'ended)
       (ws-state-deadline-set! s #f)
       (ws-state-buffer-set! s #f)
-      (ws-state-waiting-set! s #f)
       (append (reverse last) (if armed (cons '(disarm-deadline) acts) acts))))
 
   ;; unclean : -> Action
@@ -132,21 +139,22 @@
   (define (unclean)
     (list 'closed 1006 (make-bytevector 0) #f))
 
-  ;; code-bytes : Nat -> Bytevector
-  ;; A close's code, as its body begins (§5.5.1): two bytes, big-endian.
-  (define (code-bytes code)
-    (let ((b (make-bytevector 2)))
-      (bytevector-u16-set! b 0 code (endianness big))
-      b))
+  ;; close-frame : Nat Bytevector -> Bytevector
+  ;; The server's close (§5.5.1): its body the code, two bytes big-endian,
+  ;; then the reason's bytes.
+  (define (close-frame code reason)
+    (let* ((n (bytevector-length reason)) (body (make-bytevector (fx+ 2 n))))
+      (bytevector-u16-set! body 0 code (endianness big))
+      (bytevector-copy! reason 0 body 2 n)
+      (frame-encode 'close body)))
 
   ;; fail! : WsState Nat Symbol (Listof Action) -> (Listof Action)
   ;; Fails the connection (§7.1.7).
   (define (fail! s code why acts)
-    (end! s (append (if (eq? (ws-state-phase s) 'open)
-                        (list (list 'write (frame-encode 'close (code-bytes code))))
-                        '())
-                    (list '(close-stream) (list 'log 'failed code why) (unclean)))
-          acts))
+    (let ((open? (eq? (ws-state-phase s) 'open)))
+      (end! s (append (if open? (list (list 'write (close-frame code #vu8()))) '())
+                      (list '(close-stream) (list 'log 'failed (and open? code) why) (unclean)))
+            acts)))
 
   ;; sendable? : Nat -> Boolean
   ;; Whether an endpoint may send the code (§7.4.1, §7.4.2).
@@ -276,16 +284,16 @@
                 (ws-state-buffer-set! s (make-bytevector 0))
                 (if (eqv? n 0) (data-end! s acts) acts)))))))
 
-  ;; read! : WsState Bytevector Nat Nat (Listof Action) -> (Listof Action)
-  ;; Reads the bytes from start to end, until the connection ends, or the
-  ;; queue fills and the rest waits.
-  (define (read! s bv start end acts)
+  ;; read! : WsState Bytevector Nat Nat Boolean (Listof Action) -> (Listof Action)
+  ;; Reads the bytes from start to end, until the connection ends, or, if
+  ;; `bounded?`, the queue fills and the rest waits.
+  (define (read! s bv start end bounded? acts)
     (let ((d (ws-state-decoder s)))
       (let loop ((i start) (acts acts))
         (cond
           ((eq? (ws-state-phase s) 'ended) acts)
           ((fx=? i end) acts)
-          ((full? s)
+          ((and bounded? (full? s))
            (ws-state-waiting-set! s bv)
            (ws-state-waiting-start-set! s i)
            (ws-state-waiting-end-set! s end)
@@ -330,7 +338,7 @@
       (assertion-violation 'ws-step "a read after the connection has ended"))
     (unless (ws-state-reading? s)
       (assertion-violation 'ws-step "a read while reading is stopped"))
-    (reverse (read! s bv start end '())))
+    (reverse (read! s bv start end #t '())))
 
   ;; send! : WsState Any Any -> (Listof Action)
   (define (send! s kind payload)
@@ -355,7 +363,7 @@
                (acts (if bv
                          (begin
                            (ws-state-waiting-set! s #f)
-                           (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) '()))
+                           (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) #t '()))
                          '())))
           (if (and (not (eq? (ws-state-phase s) 'ended)) (not (full? s)))
               (begin
@@ -364,45 +372,76 @@
               (reverse acts)))
         '()))
 
+  ;; fits-close? : String -> Boolean
+  ;; Whether the string's UTF-8 is at most 123 bytes, the most a close holds
+  ;; past its code (§5.5): its characters counted by RFC 3629 §3's rows,
+  ;; reading no further than the 124th byte, and encoding nothing.
+  (define (fits-close? reason)
+    (let ((len (string-length reason)))
+      (let loop ((i 0) (n 0))
+        (cond ((fx>? n 123) #f)
+              ((fx=? i len) #t)
+              (else
+               (let ((c (char->integer (string-ref reason i))))
+                 (loop (fx+ i 1)
+                       (fx+ n (cond ((fx<? c #x80) 1) ((fx<? c #x800) 2) ((fx<? c #x10000) 3) (else 4))))))))))
+
   ;; close! : WsState Any Any -> (Listof Action)
   ;; The server's close (§7.1.2): its code one an endpoint may send, and its
-  ;; reason a string of at most 123 bytes in UTF-8, the most a close holds
-  ;; past its code (§5.5).  Sent while open, it arms the close deadline; once
-  ;; a close was sent, or the connection has ended, it answers nothing.
+  ;; reason a string that fits a close.  Sent while open, it arms the close
+  ;; deadline; once a close was sent, or the connection has ended, it
+  ;; answers nothing.
   (define (close! s code reason)
-    (unless (and (fixnum? code) (sendable? code) (string? reason))
+    (unless (and (fixnum? code) (sendable? code) (string? reason) (fits-close? reason))
       (assertion-violation 'ws-step "not a close the server may send" code reason))
-    (let* ((r (string->utf8 reason)) (n (bytevector-length r)))
-      (unless (fx<=? n 123)
-        (assertion-violation 'ws-step "a close's reason is over 123 bytes" reason))
-      (if (eq? (ws-state-phase s) 'open)
-          (let ((body (make-bytevector (fx+ 2 n))))
-            (bytevector-u16-set! body 0 code (endianness big))
-            (bytevector-copy! r 0 body 2 n)
-            (ws-state-phase-set! s 'closing)
-            (ws-state-deadline-set! s 'close)
-            (list (list 'write (frame-encode 'close body)) '(arm-deadline close)))
-          '())))
+    (if (eq? (ws-state-phase s) 'open)
+        (begin
+          (ws-state-phase-set! s 'closing)
+          (ws-state-deadline-set! s 'close)
+          (list (list 'write (close-frame code (string->utf8 reason))) '(arm-deadline close)))
+        '()))
+
+  ;; finish! : WsState (Listof Action) -> (Listof Action)
+  ;; Reads what waits for the queue, if anything does, whatever the queue
+  ;; holds: no more bytes will come, so a close the client sent is read, not
+  ;; lost.  It is the rest of one read at most.
+  (define (finish! s acts)
+    (let ((bv (ws-state-waiting s)))
+      (if bv
+          (begin
+            (ws-state-waiting-set! s #f)
+            (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) #f acts))
+          acts)))
+
+  ;; lost! : WsState (Listof Action) -> (Listof Action)
+  ;; What waits read, then the connection ended with no close received,
+  ;; unless it has ended, by what waited or before: the stream closed, and
+  ;; 1006 told.
+  (define (lost! s acts)
+    (let ((acts (finish! s acts)))
+      (if (eq? (ws-state-phase s) 'ended)
+          acts
+          (end! s (list '(close-stream) (unclean)) acts))))
 
   ;; stream-end! : WsState Any -> (Listof Action)
-  ;; The stream's end, 'eof or the errno, with no close received: the stream
-  ;; closed and 1006 told (§7.1.5).  Nothing is written, since nothing reads
-  ;; it.  After the connection has ended, it answers nothing.
+  ;; The stream's end, 'eof or the errno: what waits read, then, with no
+  ;; close received, the stream closed and 1006 told (§7.1.5).  Nothing is
+  ;; written for it, since nothing reads it.  After the connection has
+  ;; ended, it answers nothing.
   (define (stream-end! s why)
     (unless (symbol? why)
       (assertion-violation 'ws-step "not why a stream ended" why))
-    (if (eq? (ws-state-phase s) 'ended)
-        '()
-        (reverse (end! s (list '(close-stream) (unclean)) '()))))
+    (reverse (lost! s '())))
 
   ;; passed! : WsState -> (Listof Action)
-  ;; The deadline armed has passed: the close sent was not answered in
-  ;; time, so the stream is closed anyway, and 1006 told.
+  ;; The deadline armed has passed: what waits read, then, if the close
+  ;; sent was not answered there either, the stream closed anyway, and 1006
+  ;; told.
   (define (passed! s)
     (unless (ws-state-deadline s)
       (assertion-violation 'ws-step "a deadline passed with none armed"))
     (ws-state-deadline-set! s #f)
-    (reverse (end! s (list '(close-stream) (unclean)) '())))
+    (reverse (lost! s '())))
 
   ;; ws-step : WsState Event -> (values WsState (Listof Action))
   ;; The connection after the event, and what the binding is to do, in

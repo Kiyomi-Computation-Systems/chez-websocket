@@ -153,3 +153,10 @@ message the client sent before seeing the close would be lost, unlike both peers
 
 The form said 16 messages were queued. The probe it rested on had run with a queue
 of 2. It was run again at the default, 16, after the answer, with the same outcome.
+
+M3.2's review (2026-10-05) changed what the close timeout does with the held-back
+close. The timeout, and the stream's end, now read what waits before they end, the
+queue's bound aside: at most the rest of one read. So in the probe above, when the
+timeout passes, the 17th message is delivered and the client's close is told with its
+code, cleanly, where it had been 1006. The decision stands: messages after the
+server's close are delivered as before, and the wait is the close timeout.

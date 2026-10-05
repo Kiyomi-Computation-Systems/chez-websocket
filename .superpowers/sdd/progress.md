@@ -850,3 +850,40 @@ ws 7.5.10 was fed every connection, 676. 596 answered the same and 38 stepped no
 **Recorded on the owner's word (2026-10-05): a close the transport cannot force** (design §9, for M4). The server's `transport-close!` waits for every write to be written (chez-http-server v0.3.0, `taker-close!`, `taker-wrote!`). So when the close timeout's `close-stream` reaches a client that stopped reading, the connection stays open until the server drains. Today only a raise in a taker's call closes such a stream at once, and the server logs it as `taker-failed`. M4 decides by form: a door change in the server, or a bound of the binding's own.
 
 NEXT: M3.3, the ping clock (a quiet client pinged, and failed 1011 when the pong is late; any bytes re-arm it; stopped while reading is), when the owner asks; the three PRs first go through review and the closing ritual.
+
+---
+
+M3.2'S REVIEW. Branch `fix/m3.2-review`, stacked on `feat/m3.2-3-stream-end` (#21). 2026-10-05.
+
+The owner's `/code-review high` of the M3.2 stack, #19 to #21, found seven things, and all seven are fixed, on the owner's "fix all" (m3-mutations.md has each):
+- **What waits is read at the close timeout and at the stream's end** (findings 1 and 2). Both ended the connection with the rest of a read still unread, though it may hold the client's close: told 1006 where the client had closed. Now each reads what waits first, whatever the queue holds, since no more bytes will come: at most the rest of one read. A client's close among it is told with its code, cleanly. In the default queue's stall, the timeout now delivers the 17th message and tells the client's code, cleanly, where it told 1006.
+- **A failure logs only the code of a close it wrote** (finding 3). Once the server's close is sent, failing writes no close, and the log said 1002 or 1007 or 1009 all the same. It now logs #f for the code.
+- **A close's reason is measured, not encoded** (finding 4). The reason was encoded to be measured even for a close that answers nothing. It is now counted by RFC 3629 §3's rows, reading no further than its 124th byte. It is encoded only when the close is written, by one `close-frame`, which builds a failure's close too. Measured: a close once one is sent allocated 112 B for a 100-byte reason, and now 0.
+- **The suite's duplicates** (findings 5 and 6). `run` and `any-pieces` are `run-from` and `any-pieces-from` with no events. One `let-go` and one `footprint` serve every retention check. `let-go` answers `kept`, so M3.1's P-KEEP now reddens by value too.
+- **An end after the server's close lets go of an unfinished message** (finding 7). It held already, unchecked. The gap mutant R-15 passes #21's suite, and fails the new check.
+
+Two lines no check could tell from their absence were taken out:
+- `end!`'s release of the read that waits: every end now reads what waits first;
+- `stream-end!`'s own check for an ended connection: `lost!` answers nothing once the connection has ended.
+
+**Tests first.** The review's suite against #21's library (325e797) gave 66 passes. Six checks were red:
+- the stall at the default queue, and the stream's end while reading is stopped;
+- what waits read at the end, a new check;
+- a client's bad close and failing after the server's close: the log's code;
+- a close once one is sent allocating nothing: `(112 112)` for `(0 0)`.
+
+The other new checks pass there. The reason's measure and the end's release behaved the same in #21; their mutants hold them.
+
+**199 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree:
+- step 3's 185, re-cut where the review rewrote their lines, less four withdrawn;
+- the review's 18.
+
+The first run had four mismatches:
+- M-22's replacement named `code-bytes`, which the review took out: a harness error, re-cut;
+- three prediction errors. `allocated` takes the least of three calls, so a mutant that writes a close only at the first call, moving the state to closing, measures 0.
+
+The final run had 0 mismatches, and every check has a killer that reddens it by value. ws 7.5.10 was fed the suite's 698 connections, and no answer disagreed. 8 are the new log: ws reports the failure's code where ours wrote no close.
+
+`make test` green before the commit (Darwin arm64): eight suites, 210 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: the closing ritual for #19, #20, #21 and this, on the owner's word; then M3.3, the ping clock, when the owner asks.
