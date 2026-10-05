@@ -138,8 +138,10 @@ test: build check-pins ## Run every tests/test-*.sps (status 0/1/2/3, keep-going
 # relinks it whenever a build asks for the other flavor. So the suite runs with
 # FLAVOR=prod, which make hands down to chez-libuv's build; and since check-prod
 # reads whatever shim the last build left, the second one proves the suite ran
-# on the prod shim, not on a dev one rebuilt under it.
-prod: ## Rebuild chez-libuv's shim optimized, run the suite on it, and check it is still the prod one
+# on the prod shim, not on a dev one rebuilt under it. The first line enters
+# chez-libuv, inside the server's checkout, before test's build would clone
+# either, so prod names submodules itself.
+prod: submodules ## Rebuild chez-libuv's shim optimized, run the suite on it, and check it is still the prod one
 	$(MAKE) -C $(LIBUV_DIR) prod
 	$(MAKE) test FLAVOR=prod
 	$(MAKE) -C $(LIBUV_DIR) check-prod

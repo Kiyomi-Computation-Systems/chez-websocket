@@ -151,3 +151,42 @@ MERGED to main on 2026-10-05, on the owner's "do closing ritual": **M1.1** (the 
 `make test` green on main: three suites, 17 expected passes, every pin ok.
 
 NEXT: M1.2, base64 (`(websocket base64)`: RFC 4648 §10's vectors both ways, a decode's refusals, then RFC 6455's accept value), when the owner asks.
+
+---
+
+FIX — `make prod` ON A FRESH CLONE. Branch `fix/prod-on-fresh-clone`, cut from main at 304639d. 2026-10-05.
+
+On the owner's ask. chez-http-server's #136 fixed the same gap there, and its entry found it here.
+
+**Measured first** (Darwin arm64, Apple M1; GNU Make 3.81, git 2.50.1, Chez 10.4.1, libuv 1.52.1). A fresh worktree of main at 304639d, its submodule never cloned (`git submodule status` shows `vendor/chez-http-server` with a leading `-`). `make prod` stopped at its first line: `make: *** vendor/chez-http-server/vendor/chez-libuv: No such file or directory.  Stop.`, then `make: *** [prod] Error 2`, exit 2. Nothing was cloned or built. 53fa639, before the reflect above landed, gave the same; its Makefile is the same blob.
+- `prod` had no prerequisite, and its first line enters chez-libuv, inside the server's checkout.
+- `test` reaches `submodules` only through `build` and `deps`, after that line.
+- No other rule enters a submodule first: `deps` names `submodules`, the rest reach it through `build`, and `clean`'s chez-libuv line ignores its error.
+
+**Fixed.** `prod` depends on `submodules`, as the server's does. The comment above it gains one sentence saying why. The three recipe lines are unchanged; the first, `$(MAKE) -C $(LIBUV_DIR) prod`, stays on the owner's word.
+
+**Green**, exit 0 in 9 s, in the same worktree with the fixed Makefile laid in (blob 0a3fd1f, this commit's):
+- `submodules` cloned six checkouts, each at its pin: the server, chez-libuv, chez-httparse with byte-machine under it, uriparse and chez-srfi;
+- chez-libuv's `prod` linked the shim once, at `-O2`, and its `check-prod` passed;
+- the suite ran on that shim: three suites, 17 expected passes (door 4, imports 1, SHA-1 12), every pin ok;
+- the closing `check-prod` passed.
+
+No relink-guard line appears anywhere in the run, and nothing is linked between the two `check-prod` runs. On the prod shim the count is the same as `make test`'s, each measured: no suite here reads chez-libuv's counters, so none skips a check, as six of the server's do.
+
+**On a cloned checkout** (this worktree, once `make test` had cloned it), `make prod` passed too, exit 0 in 3 s. `submodules` printed its three commands and cloned nothing. The rest ran as above.
+
+**Watched to fail.** One mutant of the fixed Makefile, cut by exact match: the cut refuses a string found other than once. It ran with `make -f` in a second fresh worktree of 304639d, never cloned, with the fixed Makefile laid in.
+
+| mutant | the edit | result |
+|---|---|---|
+| FC | `prod`'s `submodules` prerequisite removed | red, exit 2: `make: *** vendor/chez-http-server/vendor/chez-libuv: No such file or directory.  Stop.` at the first line; nothing cloned or built |
+
+FC is the rule as it stood, with the new comment: its red is the one measured first. CI runs `make submodules` as a step of its own, then check-pins, build, test and check-help, and never `make prod`. So CI would not see FC: only `make prod` on a fresh clone does.
+
+**Shared state.** No `git submodule deinit`: in a linked worktree it edits the common `.git/config`, which the main checkout reads. The never-cloned checkouts were fresh worktrees in this session's scratchpad, each keeping its submodules' git directories under its own `.git/worktrees/<name>/modules`, and both were removed with `git worktree remove --force`. The common config's `submodule.*` lines were the same before and after.
+
+**Records.** This entry only. No CHANGELOG entry: tooling only. README.org does not name `make prod`.
+
+`make test` green before the commit (Darwin arm64): three suites, 17 expected passes, every pin ok. `make check-help` green.
+
+NEXT: M1.2, base64, when the owner asks; this PR first goes through review and the closing ritual.
