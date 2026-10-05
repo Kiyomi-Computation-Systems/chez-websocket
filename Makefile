@@ -127,9 +127,15 @@ test: build check-pins ## Run every tests/test-*.sps (status 0/1/2/3, keep-going
 	if [ $$fail -eq 0 ]; then echo "ALL SUITES PASSED"; else echo "SUITE FAILED"; fi; \
 	exit $$fail
 
-prod: ## Rebuild chez-libuv's shim optimized, then run the suite
+# chez-libuv builds its shim dev (debug counters, -O0) unless FLAVOR=prod, and
+# relinks it whenever a build asks for the other flavor. So the suite runs with
+# FLAVOR=prod, which make hands down to chez-libuv's build; and since check-prod
+# reads whatever shim the last build left, the second one proves the suite ran
+# on the prod shim, not on a dev one rebuilt under it.
+prod: ## Rebuild chez-libuv's shim optimized, run the suite on it, and check it is still the prod one
 	$(MAKE) -C $(LIBUV_DIR) prod
-	$(MAKE) test
+	$(MAKE) test FLAVOR=prod
+	$(MAKE) -C $(LIBUV_DIR) check-prod
 
 clean: ## Remove our build artifacts and the vendored shim
 	rm -rf $(BUILD_DIR)

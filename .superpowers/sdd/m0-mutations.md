@@ -24,9 +24,11 @@ check-pins changed (below), with the same results.
 | M0-9 | door: a read's bytes, then its end | the server hands the transport a procedure that drops the end | exit 1; that check alone fails, 3 pass |
 | M0-10 | door: `await` refused before `register` | the server's `await` calls `register` before it asks for a coroutine | exit 1; that check alone fails, 3 pass |
 | M0-11 | door: the refusal names `await` | the server's refusal names another verb | exit 1; that check alone fails, 3 pass |
+| M0-13 | `make prod`, its closing `check-prod` | the suite runs without `FLAVOR=prod`, as first written | exit 2; chez-libuv relinks a dev shim before the suite (`relink-guard: shim provenance changed (flavor=dev …)`), and the closing `check-prod: FAIL: the counters moved …` |
 
-All twelve were reverted; `make test` is green afterwards (one suite, 4
-expected passes, every pin ok).
+All thirteen were reverted; `make test` is green afterwards (one suite, 4
+expected passes, every pin ok), and so is `make prod`, whose two `check-prod`
+runs pass with no relink between them.
 
 Notes:
 - **M0-4 is caught twice.** A carried pin that moves also makes the server's
@@ -40,6 +42,16 @@ Notes:
   `.git` first, and the dirty check skips a checkout that has none. The run
   above is after that change. chez-http-server's check-pins has the same
   shape.
+- **M0-13 is a bug the targets' first run found.** `make prod` was the
+  server's: build and check chez-libuv's prod shim, then `make test`. But the
+  test's own build asks chez-libuv for its default flavor, dev, and chez-libuv
+  relinks a shim built at another flavor. So the suite ran on a dev shim, and
+  nothing said so. `prod` now runs the suite with `FLAVOR=prod`, and ends with
+  chez-libuv's `check-prod`, which reads whatever shim the last build left. A
+  first fix also passed `FLAVOR` on in `deps`. Its mutant, M0-12, survived:
+  make hands a command-line `FLAVOR=prod` to every sub-make by itself, so that
+  line was a redundant guard, and it went. M0-6 was run again, since `prod`'s
+  help text changed. chez-http-server's `make prod` has the same shape.
 - **M0-7 to M0-11 mutate the vendored server**, as chez-http-server's own M0
   mutated a vendored constant: each is the drift the pin guards against, read
   through the verbs the binding will call.
