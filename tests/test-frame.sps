@@ -29,9 +29,10 @@
 ;;;   every kind it sends at each length form's edges, each one final frame,
 ;;;   unmasked, its length in its shortest form; a decode of each, masked
 ;;;   first; a payload from a range; what it refuses: a kind a server never
-;;;   sends, a continuation among them, a control frame over 125 bytes, and
-;;;   anything but a range of a bytevector; the payload left as it was; and
-;;;   what an encode allocates: its frame, and nothing else.
+;;;   sends, a continuation among them, a control frame over 125 bytes, a
+;;;   close of one byte, and anything but a range of a bytevector; the
+;;;   payload left as it was; and what an encode allocates, whole or from a
+;;;   range: its frame, and nothing else.
 (import (rnrs) (srfi :64) (ws-testing) (websocket frame))
 
 ;; range : Nat Nat -> (Listof Nat)
@@ -394,19 +395,27 @@
 (define rfc-256 (list #x82 #t 'binary (pattern 256)))
 (define rfc-64k (list #x82 #t 'binary (pattern 65536)))
 
-;; Each kind of frame a server sends, by its first byte (§5.2): final, since
-;; each message is one frame (design §4).
-(define sent-kinds '((#x81 text) (#x82 binary) (#x88 close) (#x89 ping) (#x8A pong)))
+;; Each kind of frame a server sends, as `kinds` has it: final, since each
+;; message is one frame (design §4), so never a continuation.
+(define sent-kinds
+  (filter (lambda (k) (and (cadr k) (not (eq? (caddr k) 'continuation)))) kinds))
 
-;; Every frame the suite encodes: each kind at each length form's edges, as
-;; (first kind length), its payload that many bytes of the pattern.  A
-;; payload of 2^32 bytes or more is not encoded: it would not fit in a
-;; test's memory.
+;; sent-lengths : Symbol -> (Listof Nat)
+;; The lengths a kind is encoded at: a data frame's at the length forms'
+;; edges but 2^32 and over, whose payload would not fit in a test's memory;
+;; a control frame's at its own; and a close's with two bytes for one, since
+;; a close's body is empty or begins with its two-byte code (§5.5.1).
+(define (sent-lengths kind)
+  (case kind
+    ((text binary) (filter (lambda (n) (< n 4294967296)) data-lengths))
+    ((close) (map (lambda (n) (if (= n 1) 2 n)) control-lengths))
+    (else control-lengths)))
+
+;; Every frame the suite encodes, as (first kind length), its payload that
+;; many bytes of the pattern.
 (define sent
   (concat
-    (map (lambda (k)
-           (map (lambda (n) (list (car k) (cadr k) n))
-                (if (memq (cadr k) '(close ping pong)) control-lengths '(0 1 125 126 127 65535 65536))))
+    (map (lambda (k) (map (lambda (n) (list (car k) (caddr k) n)) (sent-lengths (caddr k))))
          sent-kinds)))
 
 ;; encoded : (List Byte Symbol Nat) -> (Listof Byte)
@@ -565,17 +574,18 @@
 
     ;; The API
     (let ((bv (u8-list->bytevector rfc-masked-text)))
-      (test-equal "a range outside its bytevector is an assertion naming frame-read-header!, or frame-read-payload!"
-        '(frame-read-header! frame-read-header! frame-read-header! frame-read-header!
-          frame-read-payload! frame-read-payload! frame-read-payload! frame-read-payload!)
+      (test-equal "a range outside its bytevector, or no bytevector, is an assertion naming frame-read-header!, or frame-read-payload!"
+        (append (repeat 7 'frame-read-header!) (repeat 7 'frame-read-payload!))
         (append
-          (map (lambda (r) (assertion-by (lambda () (frame-read-header! (make-frame-decoder) bv (car r) (cadr r)))))
-               '((1 0) (0 12) (-1 2) (12 12)))
+          (map (lambda (r) (assertion-by (lambda () (frame-read-header! (make-frame-decoder) (car r) (cadr r) (caddr r)))))
+               (list (list bv 1 0) (list bv 0 12) (list bv -1 2) (list bv 12 12)
+                     (list bv 0.0 2) (list bv 0 2.0) (list "Hello" 0 5)))
           (map (lambda (r)
                  (let ((d (make-frame-decoder)))
                    (frame-read-header! d bv 0 6)
-                   (assertion-by (lambda () (frame-read-payload! d bv (car r) (cadr r) (make-bytevector 16) 0)))))
-               '((7 6) (6 12) (-1 7) (12 12)))))
+                   (assertion-by (lambda () (frame-read-payload! d (car r) (cadr r) (caddr r) (make-bytevector 16) 0)))))
+               (list (list bv 7 6) (list bv 6 12) (list bv -1 7) (list bv 12 12)
+                     (list bv 6.0 11) (list bv 6 11.0) (list "Hello" 0 5)))))
       (test-equal "reading a header with a payload unfinished, or a payload with none left, is an assertion naming the read"
         '(frame-read-header! frame-read-payload! frame-read-payload!)
         (list (let ((d (make-frame-decoder)))
@@ -708,10 +718,14 @@
         (map (lambda (kind n) (assertion-by (lambda () (frame-encode kind (make-bytevector n 0)))))
              '(close ping pong close)
              '(126 126 126 65536)))
+      (test-equal "a close of one byte is an assertion naming frame-encode: a close's body begins with its two-byte code"
+        '(frame-encode frame-encode)
+        (list (assertion-by (lambda () (frame-encode 'close (make-bytevector 1 0))))
+              (assertion-by (lambda () (frame-encode 'close bv 3 4)))))
       (test-equal "a range outside its bytevector, or no bytevector, is an assertion naming frame-encode"
-        '(frame-encode frame-encode frame-encode frame-encode frame-encode frame-encode frame-encode)
+        (repeat 8 'frame-encode)
         (append (map (lambda (r) (assertion-by (lambda () (frame-encode 'binary bv (car r) (cadr r)))))
-                     '((1 0) (0 13) (-1 2) (13 13) (0.0 2)))
+                     '((1 0) (0 13) (-1 2) (13 13) (0.0 2) (0 2.0)))
                 (list (assertion-by (lambda () (frame-encode 'text "Hello")))
                       (assertion-by (lambda () (frame-encode 'text "Hello" 0 0)))))))
     (test-equal "an encode leaves its payload's bytevector as it was"
@@ -721,12 +735,20 @@
                (frame-encode (cadr s) bv)
                (bytevector->u8-list bv)))
            sent))
-    (test-equal "an encode allocates its frame, and nothing else"
-      (map (lambda (s)
-             (let ((size (length (plain s))))
-               (allocated (lambda () (keep! (make-bytevector size))))))
-           sent)
-      (map (lambda (s)
-             (let ((bv (u8-list->bytevector (pattern (caddr s)))))
-               (allocated (lambda () (keep! (frame-encode (cadr s) bv))))))
-           sent))))
+    ;; Each frame's size is its header's and its payload's, by §5.2.  The
+    ;; range is the payload with three bytes before it and one after.
+    (test-equal "an encode allocates its frame, and nothing else, from a whole bytevector or a range of one"
+      (let ((sizes (map (lambda (s)
+                          (let ((size (+ (length (plain-header (car s) (caddr s))) (caddr s))))
+                            (allocated (lambda () (keep! (make-bytevector size))))))
+                        sent)))
+        (append sizes sizes))
+      (append
+        (map (lambda (s)
+               (let ((bv (u8-list->bytevector (pattern (caddr s)))))
+                 (allocated (lambda () (keep! (frame-encode (cadr s) bv))))))
+             sent)
+        (map (lambda (s)
+               (let ((bv (u8-list->bytevector (append '(1 2 3) (pattern (caddr s)) '(4)))))
+                 (allocated (lambda () (keep! (frame-encode (cadr s) bv 3 (+ 3 (caddr s))))))))
+             sent)))))

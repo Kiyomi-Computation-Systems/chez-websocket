@@ -442,3 +442,88 @@ Notes:
   through a raise are only E-14's six, E-22's and E-26's four. The decoder's
   ranges have three killers more, E-30 to E-32, and the provenance check three,
   T-3 to T-5.
+
+## M2.2's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05. The owner's `/code-review high` on #14 found ten things, all fixed on
+the owner's "fix all", on a branch stacked on #14. The suite is 41 checks (blob
+cf6181f), and the library blob 80b9faa. The runner was M2.2's, with the checks'
+new names.
+
+### The findings and their fixes
+
+| # | finding | fix |
+|---|---------|-----|
+| 1 | `check-range`'s `(fixnum? end)` was held by no check | both range checks pass a non-fixnum end; the decoder's passes a non-fixnum start and a string too |
+| 2 | a close of one byte was encoded, though a close's body is empty or begins with its two-byte code (§5.5.1) | refused, as an assertion naming `frame-encode`, by a new check; the suite encodes a close of two bytes where it encoded one of one |
+| 3 | the allocation check measured no range | it measures each frame again from a range, with bytes before and after it |
+| 4 | `opcode` held a second copy of `kinds` | the opcode is found in `kinds`, the one table |
+| 5 | E-21's reds rested on bytes the frame never wrote | cut again with the frame filled with zeros first |
+| 6 | the suite's encoder tables repeated `kinds` and `data-lengths` | derived from them |
+| 7 | the allocation check built each frame's list to count it | its size comes from its header's length and its payload's |
+| 8 | the README said the codec writes the server's frames | it builds them |
+| 9 | the 125-byte limit was written twice | `control-max`, which the decoder and the encoder read; cp0 folds it (`expand/optimize` shows `(fx>? n 125)`) |
+| 10 | the length's form was decided twice | once: the second byte's seven bits and how many bytes of length follow, written with `bytevector-uint-set!`, which allocates nothing on fixnums (probed: 0 B over 100,000 calls of 2 and 8 bytes) |
+
+### The test-first runs
+
+- **The review's suite against #14's library:** 40 passes and 1 red, the close of
+  one byte, as named before the run.
+- **The gaps of findings 1 and 3, as mutants of #14's library.** E-45 (the end
+  not checked for a fixnum) and E-46 (a range's payload copied out first) were
+  green under #14's suite, 40 passes each. Under the review's, E-45 reddened both
+  range checks, and E-46 the allocation check. Each also reddened the close of
+  one byte, which that library encodes.
+- **With the fixes:** 41 passes.
+
+### The oracles
+
+ws 7.5.10 again, through the shim: 99 calls, 81 encodes and 18 refusals of ours.
+All 81 are the same bytes as ws's, 32 different kinds and payloads, of 0, 1, 2,
+5, 12, 125, 126, 127, 256, 65,535 and 65,536 bytes. Of the refusals:
+- 4 are the control frames over 125 bytes, which ws's `Sender` refuses too.
+- 2 are the closes of one byte. ws's `Sender.close` writes a two-byte code before
+  any reason, or nothing (`sender.js`, lines 110 to 130), so it never sends one.
+- 4 are kinds and 8 are ranges or payloads, with no counterpart.
+
+### The mutants
+
+99 rows, each red set named before the run, on the blobs above: 0 mismatches,
+on the first run. A check of every cut, made before the run, found D-8's stale:
+its 125 is `control-max` now. It was cut again before any row ran.
+
+M2.1's rows are as M2.2 records them, but for these:
+- **D-8, D-9 and D-10** are cut on `control-max`.
+- **D-42** no longer reddens the decode of each encode. The table is one, so a
+  ping written as a pong is read as a ping again. §5.7's frames and every kind
+  go red instead.
+
+Of M2.2's rows, E-1 to E-5 are retired with the `case` they cut, and E-17 is
+merged into E-16: the length is one write now. E-6, E-7, E-10 to E-16, E-18,
+E-19, E-21 and E-23 to E-26 are cut again on the review's code, each with the
+same fault. E-22 now reddens the close of one byte and the allocation check too:
+its payload runs past a range's bytevector. These are new:
+
+| # | mutation | red |
+|---|----------|-----|
+| E-35 | text and binary swapped in the one table | §5.7's masked frames, the four header checks, the length forms' edges, the refusals after a frame, the payloads split and fed a byte at a time, frames back to back both ways, §5.7's long messages, two decoders; and §5.7's frames, the edges, every kind and a range. Not the decode, whose round trip agrees |
+| E-36 | the search stops before the pong | every kind, the decode, the payload left as it was, and the allocation check, through a raise |
+| E-37 | a 16-bit length announced as 64-bit | §5.7's frames, the edges, every kind, and the decode |
+| E-38 | a 16-bit length written in eight bytes | the same, and the allocation check |
+| E-39 | the control limit 126, read and written | the over-125 refusals, the refusals split and after a frame, and the control frames refused |
+| E-40 | the control limit 124, read and written | the four header checks, every kind, the decode, the payload left as it was, and the allocation check |
+| E-41 | a close of one byte encoded | the close of one byte, alone |
+| E-42 | a close of two bytes refused, and of one encoded | the close of one byte, every kind, the decode, the payload left as it was, and the allocation check |
+| E-43 | an empty close refused too | every kind, the decode, the payload left as it was, and the allocation check, through a raise |
+| E-44 | a ping or a pong of one byte refused too | the same |
+| E-45 | an end not checked for a fixnum | the decoder's ranges, and the ranges refused |
+| E-46 | a range's payload copied out first | the allocation check, alone |
+
+Notes:
+- **E-18 still survives by design**, cut on `bytevector-uint-set!`: four zero
+  bytes and 32 bits, as ws writes a 64-bit length.
+- **Every check has its killers, and each goes red by value under one.** The
+  close of one byte has three: E-22, E-41 and E-42. Through a raise are E-14's
+  six, E-22's range and allocation, and the four of E-26, E-36, E-40, E-42, E-43
+  and E-44 each; every one of those checks also goes red by value under another.

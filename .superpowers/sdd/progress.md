@@ -532,3 +532,23 @@ The provenance check holds the suite's unmasked headers to §5.7's frames and to
 `make test` green before the commit (Darwin arm64): six suites, 119 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
 
 NEXT: M3.1, messages and limits, `(websocket protocol)` and `(websocket limits)`, when the owner asks.
+
+---
+
+M2.2'S REVIEW. Branch `fix/m2.2-review`, stacked on `feat/m2.2-encode` (#14). 2026-10-05.
+
+The owner's `/code-review high` on #14 found ten things, and all ten are fixed, on the owner's "fix all" (m2-mutations.md has each):
+- **Checks.** Both range checks now pass a non-fixnum end, which no check held, and the decoder's a non-fixnum start and a string. The allocation check measures each frame again from a range. A new check refuses a close of one byte.
+- **The library.** `frame-encode` refuses a close of one byte (§5.5.1: a close's body is empty, or begins with its two-byte code). Its opcode is found in `kinds`, which the decoder reads: one table. The 125-byte limit is `control-max`, which both read. The length's form is decided once, and written with `bytevector-uint-set!`.
+- **The suite.** Its encoder tables are derived from `kinds` and `data-lengths`, a close encoded at two bytes where it was at one. The allocation check sizes each frame from its lengths, not its list.
+- **The records and the README.** E-21 is cut so its reds no longer rest on unwritten bytes. The README says the codec builds the server's frames: it does not write them.
+
+**Tests first.** The review's suite against #14's library: 40 passes, and the close of one byte red. The gaps of findings 1 and 3, as mutants of #14's library, survived #14's suite and went red under the review's.
+
+**The oracles.** ws 7.5.10 again: the same bytes for all 81 encodes. It refuses the control frames over 125 bytes too, and its `close` can never send one byte.
+
+**98 mutants and a baseline**, each red set named before the run, 0 mismatches on the first run. M2.1's rows again, with D-8 to D-10 cut on `control-max`. M2.2's rows are re-cut on the review's code, with E-1 to E-5 retired with the `case` they cut. 12 rows are new. A check of every cut, before the run, found D-8's stale and it was cut again. E-18 still survives by design.
+
+`make test` green before the commit (Darwin arm64): six suites, 120 expected passes, every pin ok. The frame suite was green over 30 runs. `make prod` green.
+
+NEXT: the closing ritual for #14 and this, on the owner's word; then M3.1, messages and limits, when the owner asks.
