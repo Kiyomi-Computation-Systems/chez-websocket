@@ -1,0 +1,19 @@
+* chez-websocket
+
+WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-http-server][chez-http-server]], in Chez Scheme.
+
+#+begin_quote
+✨ *AI Disclosure:* LLMs are used extensively in the planning and development of this project.
+#+end_quote
+
+** Status
+
+Planning. Nothing here runs yet. The plan: a handler takes a WebSocket
+handshake, and its code reads each message with a call that waits, sends
+messages, and closes, as RFC 6455 asks. No compression and no client.
+[[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]] will hold
+it to the RFC in CI. See [[file:.plans/2026-10-04-chez-websocket-project-brief.md][the project brief]].
+
+** License
+
+BSD 3-Clause; see [[file:LICENSE][LICENSE]].
