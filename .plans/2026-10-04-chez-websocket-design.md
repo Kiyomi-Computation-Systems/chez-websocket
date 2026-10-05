@@ -169,6 +169,11 @@ are stepped through the core in place, and the actions run at once:
 
 - **`websocket-receive`** answers the oldest queued message and steps `(taken
   nbytes)`, or parks on `await` until one comes.
+- **A text message's string keeps a leading U+FEFF.** UTF-8 allows it, and the
+  checker accepts it. But Chez 10.4.1's `utf8->string` and its UTF-8 transcoders
+  drop a leading byte-order mark: `EF BB BF 41` decodes to `"A"`. So the binding
+  decodes text another way, and an echo of `EF BB BF 41` sends those four bytes
+  back (found in M1.3's review).
   - Once the connection has closed, it first answers the messages still queued.
   - After that it raises `&websocket-closed`, with the code, the reason and whether
     the close was clean. It raises again on every later call.

@@ -76,6 +76,8 @@ and the door suite.
   server (design §8), decided by form.
 - **M4.3 the binding** `(websocket private binding)` and the facade:
   - receive, send, close and backpressure;
+  - a text message that begins with U+FEFF delivered with it, since Chez's decoders
+    drop it;
   - the server's drain and the stream's close;
   - a real-socket suite on `127.0.0.1:0`;
   - a connection's cost, measured.

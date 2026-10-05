@@ -240,35 +240,58 @@ M1.3 — UTF-8, and M1's exit. Branch `feat/m1.3-utf8`. 2026-10-05.
 
 **`(websocket utf8)`**, an incremental checker in `(rnrs)` alone:
 - `utf8-start`, the state before any byte;
-- `utf8-feed : Utf8State Bytevector Nat Nat -> (U Utf8State #f)`, the state after the bytes from start to end, or `#f` at the first of them that cannot go on;
-- `utf8-whole? : Utf8State -> Boolean`.
+- `utf8-feed : (U Utf8State #f) Bytevector Nat Nat -> (U Utf8State #f)`, the state after the bytes from start to end, or `#f` at the first of them that cannot go on;
+- `utf8-whole? : (U Utf8State #f) -> Boolean`.
 
 A state is a fixnum: 0 between characters, and otherwise the bytes a character still needs and the range its next byte must fall in. A byte is refused as soon as no row of RFC 3629 §4 can go on with it. So an overlong form, a surrogate, or a code point past U+10FFFF fails at the byte that shows it, and the connection can fail at once (RFC 6455 §8.1).
+- **A refusal is final.** Fed `#f`, a feed answers `#f`, and `#f` is never whole. So `(utf8-whole? (utf8-feed utf8-start bv 0 n))` checks a whole text, such as a close reason, in one call.
+- **A range outside the bytevector is an assertion violation** naming `utf8-feed`.
 
-**`tests/test-utf8.sps`, 22 checks:**
-- every row of §4 at its edges;
-- the five kinds of refusal at their indexes, fed a byte at a time and as one piece;
+**`tests/test-utf8.sps`, 28 checks,** built from tables of the oracles' cases:
+- every row of §4 at its edges, and five kinds of refusal at their indexes, each fed a byte at a time and as one piece, and again after an "A" in the same piece;
+- every row's first tail refused at both edges;
 - §7's examples, and a character's first bytes alone, unfinished;
-- a character split at every byte, and §7's text split in two at every byte and fed a byte at a time;
-- the range a feed reads, the start state, and an empty piece;
-- what a feed allocates.
+- in pieces:
+  - each refusal split after its first byte;
+  - each character split at every byte and at every pair of bytes;
+  - an empty piece inside a character or a refusal;
+  - §7's text split at every byte and fed a byte at a time;
+- the range a feed reads, a range outside its bytevector, the start state, and a refusal, final and never whole;
+- what a feed allocates: nothing, per call or per byte, on a mebibyte the check confirms is whole.
 
 The import audit reads the new library with no change: three checks.
 
-**The oracles.** §4's grammar and §7's examples come from the RFC's raw text. Two incremental decoders were fed every sequence a byte at a time. Node's fatal `TextDecoder` agreed with the grammar on all of them. Python's refuses a surrogate one byte late, at its third, so the checks hold the grammar's index.
+**The oracles.** §4's grammar and §7's examples come from the RFC's raw text. Two incremental decoders were fed every case of every check, in its pieces. The cases were read from the test's own tables. Node's fatal `TextDecoder` agreed with all of them. Python's agreed with all but the surrogate cases, which it refuses a byte late, so the checks hold the grammar's index.
 
-**Departed from the plan: the allocation check**, as in M1.1. A feed allocates nothing for each byte, since the checker runs on every byte of every text message. Measured: 1.75 ns a byte on ASCII and 6.27 on §7's text. That is the mean of four feeds of 16 MiB after a warm-up (Darwin arm64, `--program`'s default optimize level).
+**Departed from the plan: the allocation check**, as in M1.1, since the checker runs on every byte of every text message.
 
-**Tests first.** The suite ran red before the library existed (`library (websocket utf8) not found`). Then it ran against a stub that kept every state whole: 11 checks failed and 11 passed (the nine rows, §7's examples and the allocation check). Each of those eleven has its own mutant since.
+**Speed.** Each figure is the mean of four 16 MiB feeds after a warm-up (Darwin arm64, `--program`'s default optimize level):
 
-**Twenty-two mutants** (`m1-mutations.md`). The first run had four mismatches with the sets named before it:
-- three named sets missed a check whose inputs hold the changed byte, and were corrected from those inputs;
-- U-20, a four-argument `need`, survives as an equivalent mutant. Chez folds `need`'s constant ranges, as `expand/optimize` shows.
+| text | ns a byte |
+|---|---|
+| ASCII | 1.75 |
+| §7's examples repeated, a 32-byte period | 2.67 |
+| a seeded random mix of 1-, 2-, 3- and 4-byte characters, 60/20/15/5% | 4.82 |
+| the same at 25% each | 4.69 |
 
-The re-run matched every named set, and U-21 reddens the allocation check.
+Each byte past a character's first unpacks the state with fixnum shifts, and takes its next state from two constants. The generic shifts M1.3 first used are calls out of line in Chez 10.4.1. On the same four texts that version measured 1.75, 6.28, 6.95 and 7.95. The periodic text is the fastest of the three mixed ones, since the branch predictor learns its period. Character lengths in an unpredictable order cost more.
 
-**M1's exit.** The primitives are done: SHA-1 (M1.1), base64 (M1.2, with decision 0002) and UTF-8. Each is pure and held to its RFC's vectors, with 58 checks among them (12, 24 and 22) and the import audit's three. README.org's status says so.
+**Tests first.** The first suite ran red before the library existed (`library (websocket utf8) not found`). Then it ran against a stub that kept every state whole: 11 checks failed and 11 passed, each since given its own mutant. The review's suite then ran against M1.3's first library: 26 passed and 2 failed, the range assertion and the refusal's finality. Both were red until the library changed.
 
-`make test` green before the commit (Darwin arm64): five suites, 65 expected passes, every pin ok. `make prod` green.
+**The review.** A code review of PR #7 reported 15 findings, and all were fixed here:
+- untested edges and piece shapes, where mutants that accept invalid UTF-8 passed the first suite;
+- the API raising on its own `#f`;
+- an unchecked range;
+- an allocation check that a per-call cost or an early refusal slipped past;
+- the 2x from the shifts;
+- records: raise-reds, unnamed mutants and the periodic corpus.
+
+For M4, the design and plan now note that Chez's decoders drop a leading U+FEFF. M4.3 delivers it, checked by an echo.
+
+**Forty-three mutants** (`m1-mutations.md`): M1.3's own, re-cut, plus 21 from the review. Each red set was named before the run, and all matched. U-20 survives as an equivalent mutant, since Chez folds `need`'s constant ranges. A copy of the harness that names raised checks shows that only R-14 and R-15, whose property is not raising, redden through a raise. M1.3's first run had four mismatches, kept in the log.
+
+**M1's exit.** The primitives are done: SHA-1 (M1.1), base64 (M1.2, with decision 0002) and UTF-8. Each is pure and held to its RFC's vectors: 64 checks among them (12, 24 and 28), and the import audit's three. README.org's status says so.
+
+`make test` green before the commit (Darwin arm64): five suites, 71 expected passes, every pin ok. `make prod` green.
 
 NEXT: M2, the frame codec, starting with M2.1's decode, when the owner asks.
