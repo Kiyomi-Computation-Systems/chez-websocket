@@ -74,7 +74,8 @@ and the door suite.
   - design §3's checks and answers: the pure library is given the method and the
     header fields, so its tests need no server; the facade reads them off the request;
   - subprotocols;
-  - `Origin`, decided by form here (0022).
+  - `Origin`, decided by form here (0022): the request's own host by default, and a
+    wrong version refused 400 (0003).
 - **M4.2 the binding's test driver**: the server's fake shell, or a door change in the
   server (design §8), decided by form.
 - **M4.3 the binding** `(websocket private binding)` and the facade:
@@ -89,7 +90,9 @@ and the door suite.
     (M3.3's review);
   - when the pong's time starts, measured with a throttled reader (design §9);
   - the send side's bound for a client that sends and does not read, by form
-    (design §9).
+    (design §9);
+  - a field split over lines, which the facade reads only the first line of today
+    (design §9; M4.1).
 
 ## M5 — the Autobahn lane
 

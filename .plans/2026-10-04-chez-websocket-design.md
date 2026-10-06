@@ -62,9 +62,20 @@ in this order, answering the first failure:
 | the method is `GET` | 400 |
 | `Upgrade` lists `websocket`, case-insensitively | 400 |
 | `Connection` lists `upgrade`, case-insensitively | 400 |
-| `Sec-WebSocket-Version` is `13` | 426, with `Sec-WebSocket-Version: 13` (§4.2.2 /version/) |
+| `Sec-WebSocket-Version` is `13` | 400, with `Sec-WebSocket-Version: 13` (§4.4; 0003) |
 | `Sec-WebSocket-Key` is the base64 of 16 bytes | 400 |
-| `Origin` is one the handler accepts | 403 (§4.2.2 /origin/; decided in M4) |
+| `Origin` is one the handler accepts | 403 (§4.2.2 /origin/; 0003) |
+
+- **The checks are a pure library's, `(websocket handshake)` (M4.1).**
+  - It is given the method, a reader of the request's fields and the request's host,
+    as the server's `request-method`, `request-header` and `request-host` read them.
+  - It answers either the 101's fields and the subprotocol chosen, or a refusal: its
+    status, its fields, and the check that failed.
+  - A refusal has no body, as the server's own refusals have none.
+- **A wrong version is refused 400, not 426** (0003, by form, "400 with 13"). RFC 9110
+  has a 426 carry `Upgrade`, and a sender of `Upgrade` put `upgrade` in `Connection`.
+  The server lets no response but a 101 say that, and no peer answers a version with
+  426.
 
 - **The server has already refused** what is not HTTP/1.1 and what has a body: an
   upgrade is an HTTP/1.1 request with no body (0016).
@@ -78,7 +89,18 @@ in this order, answering the first failure:
   preference. The first of them the client offered is chosen and sent back. When
   none matches, none is sent and the handshake still succeeds (§4.2.2 /subprotocol/).
   This is coder's and gorilla's way; `websocket-subprotocol` tells the handler which
-  was chosen.
+  was chosen. As built in M4.1:
+  - each name must be a token (RFC 6455 §4.1), or the handshake refuses it as the
+    caller's mistake;
+  - an offer is matched exactly, as a whole element of the client's list, as
+    websockets and gorilla match it (coder ignores case).
+- **Origin** (0003, by form, "Same host").
+  - A handler names `any`, or a list of origins, compared without regard to ASCII
+    case, that may hold `same-host`: an Origin whose host and port, past its
+    scheme's `://`, are the request's host.
+  - A handler that names none gets `same-host`, coder's and gorilla's way.
+  - A request with no `Origin` is accepted whatever the handler names. It is not a
+    browser's, and a client that is not a browser may send any `Origin` it likes.
 - **`Sec-WebSocket-Extensions` is never answered**, so permessage-deflate is
   declined (RFC 7692 §5; 0022).
 
@@ -284,9 +306,23 @@ is refused.
 
 ## 9. Open, and decided later
 
-- **`Origin`** (M4, as 0022 says): what a handler states, and whether to check by
-  default. coder and gorilla require the Origin's host to equal the request's Host;
-  websockets, tungstenite and ws check nothing (the survey).
+- **`Origin`**: decided in M4.1, by form: the request's own host by default (0003,
+  §3).
+- **A field split over lines** (M4.3; found in M4.1).
+  - **The gap.** The server's `request-header` reads only a field's first line. Measured
+    on v0.3.0: the server opens its door to `Connection: keep-alive` and
+    `Connection: Upgrade` on two lines, but `request-header` reads `keep-alive`. So the
+    handshake would refuse 400 a request the server took as an upgrade. The same holds
+    for `Upgrade` and `Sec-WebSocket-Protocol` over two lines.
+  - **Where it reaches.** RFC 9110 lets a list run over lines (§5.2, §5.3). Browsers
+    send each field on one line, and Caddy rewrites `Connection` and `Upgrade` to one
+    line each.
+  - **What a fix needs.** `(websocket handshake)` reads lists. A reader that joins a
+    field's lines with commas needs no change in it, and two `Sec-WebSocket-Key` or
+    `Sec-WebSocket-Version` lines joined are refused 400, as websockets, coder and ws
+    refuse them.
+  - **M4 decides, by form**, with M4.2's door changes, whether the server gives the
+    facade every line.
 - **The binding's test driver** (M4, §8).
 - **What a connection costs:** measured in M4, beside the server's 20 KB for an idle
   connection and 3,637 to 3,644 B for a parked `await`.
