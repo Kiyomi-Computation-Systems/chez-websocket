@@ -1053,3 +1053,29 @@ Every check, 15 in the limits suite and 85 in the protocol suite, has a killer t
 `make test` green before the commit (Darwin arm64): eight suites, 223 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: the closing ritual for #23, #24 and this PR, when the owner asks; then M4.1.
+
+---
+
+MERGED to main on 2026-10-06: **M3.3, the ping clock, the protocol's mutation sweep and M3's exit, and M3.3's review** (the three entries above), from the stacked #23, #24, #25 and #26, as 4b506cc, 53270b6, 9e4e9db and 5c4f602, on the owner's "do closing ritual".
+- **The squashes.** Each has the tree of the head CI tested:
+  - 4b506cc has b68c834's, on e2eadb5;
+  - 53270b6 has 1daeda7's, on 4b506cc;
+  - 9e4e9db has 315e64a's, on 53270b6;
+  - 5c4f602 has 6823e67's, on 9e4e9db.
+
+  #24 was rebased onto 4b506cc from dd532f7, #25 onto 53270b6 from b927c0f, and #26 onto 9e4e9db from a3fc3f8. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #23 at b68c834 (run 37440548682): eight suites, 222 expected passes;
+  - #24, rebased onto #23's squash, at 1daeda7 (run 37494502843): eight suites, 222;
+  - #25, rebased onto #24's squash, at 315e64a (run 37494959966): eight suites, 223;
+  - #26, rebased onto #25's squash, at 6823e67 (run 37495388407): eight suites, 223.
+
+  Main's runs on 4b506cc (37494458004), 53270b6 (37494915633) and 9e4e9db (37495348555) each finished before the next merge. Main's run on 5c4f602, 37495752429, was green too, and this reflect was pushed after it.
+- **The squash bodies of #23 and #24** say "224 mutants and a baseline" and "250", as the review corrected their commits' 225 and 251. #24's also says the review found three guards and branches its sweep missed.
+- **Branches.** `feat/m3.3-1-ping-clock`, `test/m3.3-2-sweep`, `fix/m3.3-review` and `docs/m3.3-review-ledger` were deleted, local and remote. No PR is open.
+
+**M3 is complete on main**: the protocol, `(websocket protocol)` and `(websocket limits)`, with M3.3's review's fixes.
+
+`make test` green on main: eight suites, 223 expected passes, every pin ok.
+
+NEXT: M4.1, the handshake (`(websocket handshake)`: design §3's checks and answers, subprotocols, and `Origin` by form), when the owner asks.
