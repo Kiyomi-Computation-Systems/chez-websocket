@@ -967,3 +967,34 @@ The second run had 0 mismatches. Every check has a killer that reddens it by val
 `make test` green before the commit (Darwin arm64): eight suites, 222 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: step 2, the protocol's mutation sweep, stacked on this.
+
+---
+
+M3.3, STEP 2 — THE PROTOCOL'S MUTATION SWEEP, AND M3'S EXIT. Branch `test/m3.3-2-sweep`, stacked on `feat/m3.3-1-ping-clock`. 2026-10-05.
+
+**The sweep.** The plan's M3.3 ends with the protocol's mutation sweep. Every guard and branch of `(websocket protocol)` and `(websocket limits)` was listed, as M3.1's review swept them, each with the mutants that flip it. There are 110:
+- 84 an earlier mutant of M3's flipped;
+- 18 none flipped, and 3 one way only. The sweep's own mutants, W-1 to W-26, flip each of the 21. They include a close taken for a pong, an empty close read for a code, a data frame ended at every piece, and the reason of a close measured past its end. The sweep also changes five effects no mutant had changed.
+- 4 have no mutant run, each recorded with why. Taking out `read!`'s test for a read's end loops forever, and the other three are dispatches every frame takes both ways.
+- 1 was taken out.
+
+**What it changed:**
+- **`taken!`'s outer test for a full queue is taken out.** No check could tell it from its absence: `read!` stashes what waits again at a full queue, and the inner test asks again. The suite gave 84 passes against step 1's library and against this one.
+- **A send of the wrong shape is checked**, a gap the sweep found. Its mutant, W-10, passed all 84 of step 1's checks. P-SENDAPI gained a row of three arguments, and W-10 now fails it.
+
+**251 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed: step 1's 225, M-74 re-cut and M-79's red set grown, and the sweep's 26.
+- **The first run stopped short.** I edited README.org while it ran, and the runner refuses to report on a tree that changed under it.
+- **Run again untouched**, it had six mismatches, all prediction errors:
+  - M-75 now reaches a take that leaves the queue full;
+  - `allocated` keeps the least of three calls, so W-3's one-shot close measured 0;
+  - three mutants redden P-PURE through its refused second take;
+  - W-8 reddens P-UTF8END through `ended-at`'s byte-at-a-time feed.
+- **The final run had 0 mismatches.** Every check, 15 in the limits suite and 84 in the protocol suite, has a killer that reddens it by value.
+
+ws 7.5.10 was fed the final suite's 731 connections. 623 answered the same, 47 stepped nothing, and 13 are the clock's. No answer disagreed.
+
+**M3's exit.** The protocol is done: whole messages, the cap, UTF-8 as it comes, reading on with a bounded queue, the closing handshake, and the ping clock, as steps that read no clock and do no I/O. README.org's status says so.
+
+`make test` green before the commit (Darwin arm64): eight suites, 222 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: M4.1, the handshake, when the owner asks; first this step and step 1 go through review and the closing ritual.

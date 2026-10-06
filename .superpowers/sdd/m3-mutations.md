@@ -1451,3 +1451,125 @@ C-2 disarms always. The other rows are red as before.
 Every check, 15 in the limits suite and 84 in the protocol suite, has a killer that
 reddens it by value. Each of the 12 new checks has 4 or more, and so do the three
 default-limit checks.
+
+## M3.3, step 2 — the protocol's mutation sweep, and M3's exit
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05.
+
+The blobs:
+- `protocol.sls` 4bc70a8, and `test-protocol.sps` 2e1df50, 84 checks;
+- unchanged: `limits.sls` cdf3ec3, `frame.sls` 1f004d2, `test-limits.sps` 16c37e2
+  and `test-frame.sps` b6c0444.
+
+### The sweep
+
+The plan's M3.3 ends with the protocol's mutation sweep. Every guard and branch of
+`(websocket protocol)` and `(websocket limits)` was listed, as M3.1's review swept
+them, each with the mutants that flip it. There are 110: 99 in the protocol and 11 in
+the limits.
+- **84 were flipped by an earlier mutant** of M3's.
+- **18 were flipped by none**, and now one of the sweep's flips each:
+  - an empty close, and a close in `control!`;
+  - a message's last frame in `room!`;
+  - a control frame's and a data frame's payload whole, in `read!`;
+  - a read's bytevector, its start past its end, and its end past the bytevector;
+  - a send's kind of text, and a binary's bytevector;
+  - something waiting at a take, and at the end;
+  - a close's reason at its end;
+  - a read's, a send's and a take's shape;
+  - the water marks found by name, and an absent variable.
+- **3 were flipped one way only**, and now are both ways: an interval of 0, a
+  delivery while reading has stopped, and `lost!` once ended.
+- **4 have no mutant run**, each for its reason:
+  - `read!`'s test for the read's end: taken out, a read that ends inside a payload
+    loops forever; `(fx>=? i end)` in its place is equivalent, since `i` never
+    passes `end`;
+  - `read!`'s test for a header or a payload: every frame with a payload takes both
+    ways, and flipped, no frame with a payload can be read;
+  - `read!`'s answer to a header not yet whole: the only other answer loops;
+  - `header!`'s dispatch by kind: every kind the suite reads takes its clause. F-1
+    moves a close out of the control kinds, and W-3 moves it in `control!`.
+- **1 was taken out**: `taken!`'s outer test for a full queue (below).
+
+Five effects no mutant had changed got one too: what waits ending at the read's end,
+a take's bytes and its message off the queue, reading recorded as started again, and
+a value's digits read in base 10. `read!`'s refusal code has its equivalent recorded:
+every refusal of the decoder is 1002, so 1002 in its place answers the same.
+
+### What the sweep changed
+
+- **`taken!`'s outer test for a full queue is taken out.** `read!` stashes what
+  waits again at a full queue, and the inner test asks again, so no answer changed.
+  The suite gave 84 passes against step 1's library and against this one. M-74,
+  which flips what is left, was re-cut onto it.
+- **A send of the wrong shape is checked.** P-SENDAPI gained a row, a send of three
+  arguments. W-10, which takes out the send's shape check, passed all 84 of step
+  1's checks, and fails this one.
+
+### The runs
+
+251 rows and a baseline, each red set named before the run and hashed:
+- step 1's 225, M-74 re-cut, and M-79's red set grown by P-SENDAPI's new row;
+- the sweep's 26, W-1 to W-26.
+
+The first run stopped short. `README.org` was edited while it ran, so the runner
+found the tree changed and refused to report. It was run again, the tree untouched,
+and had six mismatches, all prediction errors:
+- **M-75 also reddens P-QSTAY.** With the outer test gone, its read-start reaches a
+  take that leaves the queue full.
+- **W-3 left C-CLOSEALLOC green.** `allocated` keeps the least of three calls, and a
+  close the mutant leaves open writes only at the first.
+- **W-6, W-17 and W-20 also redden P-PURE**, through a raise: its second take is
+  refused once its hello was not delivered.
+- **W-8 also reddens P-UTF8END**: its `ended-at` row feeds a byte at a time, which
+  splits a final frame.
+
+The final run, with those six red sets mended, had 0 mismatches. Every check, 15 in
+the limits suite and 84 in the protocol suite, has a killer that reddens it by value.
+
+**The sweep's own:**
+
+| # | mutation | red |
+|---|---|---|
+| W-1 | an interval of 0 pings too | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-CONT, P-UNFIN, P-PING, P-PONG, P-PINGMID, P-CAP, P-CAPFRAG, P-CAPMAX, P-UTF8OK, P-UTF8AT, P-UTF8SPLIT, P-UTF8END, P-BIN, P-REFUSE, P-AFTER, P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, C-AFTER, C-ENDED1, C-STOP, C-TIMEOUT, C-API2, C-END, C-ENDED3, C-FINISH, K-START, K-OFF, P-SENDMID, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-GROW, P-TWO |
+| W-2 | an empty close read for a code | P-CLOSE0, C-ANSWER |
+| W-3 | a close taken for a pong | P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, C-CROSS, C-ANSWER, C-BADCLOSE, C-ENDED1, C-STOP, C-API2, C-STALL, C-ENDED3, C-FINISH, K-ENDS, P-SENDAPI, P-QEND, P-TAKEN, C-ENDKEEP2 |
+| W-4 | read-stop told again while reading is stopped | C-STOP, C-STALL, C-END, C-FINISH, K-STOP, P-QWAIT |
+| W-5 | a last frame's buffer never takes its whole end | P-GROW |
+| W-6 | what waits ends a byte short | C-STOP, C-STALL, C-END, C-FINISH, K-STOP, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-PURE |
+| W-7 | a control frame acted on at every piece | P-B2B, C-CROSS, P-TWO |
+| W-8 | a data frame ended at every piece | P-B2B, P-UTF8END, C-END, K-REARM, P-QREAD, P-GROW |
+| W-9 | a read's shape not checked | P-API |
+| W-10 | a send's shape not checked | P-SENDAPI |
+| W-11 | a take's shape not checked | P-API |
+| W-12 | a read's bytevector not checked | P-API |
+| W-13 | a read's start past its end not refused | P-API |
+| W-14 | a read past its bytevector not refused | P-API |
+| W-15 | any string sent as text, whatever the kind | P-SENDAPI |
+| W-16 | a binary's payload not checked for a bytevector | P-SENDAPI |
+| W-17 | a take never reads what waits | C-STOP, K-STOP, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-PURE, P-KEEP |
+| W-18 | reading started again not recorded | K-STOP, K-AGREE, P-QCOUNT, P-QREAD |
+| W-19 | a take leaves its bytes queued | P-QBYTES, P-QSTAY |
+| W-20 | a take leaves its message counted | C-STOP, K-STOP, K-CLOSE, K-OFF, K-AGREE, P-QCOUNT, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-PURE, P-KEEP |
+| W-21 | a close's reason measured past its end | C-SEND, C-123, C-REF, C-REASONLEN, C-CLOSEALLOC, C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-AFTER, C-ENDED1, C-API1, C-STOP, C-TIMEOUT, C-API2, C-STALL, C-ENDCLOSING, C-ENDED3, C-FINISH, K-CLOSE, K-AGREE, C-ENDKEEP2, C-KEEPWAIT2 |
+| W-22 | the end never reads what waits | C-STALL, C-END, C-FINISH, C-KEEPWAIT2, C-KEEPWAIT3 |
+| W-23 | an end with no close received never ends the connection | C-TIMEOUT, C-STALL, C-END, C-ENDCLOSING, C-ENDED3, C-FINISH, K-CLOSE, K-ENDS, K-OFF, C-ENDKEEP2 |
+| W-24 | the water marks found as the first field | L-WATER, L-MAKE-REF |
+| W-25 | an absent variable read as a value | L-EMPTY, L-EACH, L-EDGE, L-BELOW, L-WATER, L-MAL, L-FIX, L-ZERO |
+| W-26 | a value's digits read in hexadecimal | L-EACH, L-ALL, L-WATER, L-FIX |
+
+### M3's exit
+
+The protocol is done: `(websocket protocol)` and `(websocket limits)`, 84 checks and
+15, held to RFC 6455's §5 and §7 and to decision 0001. ws 7.5.10 was fed every
+connection the final suite made, 731:
+- 623 answered the same, and 47 stepped nothing; the new row's state is one of them;
+- 13 are the clock's, not replayed;
+- the rest are M3.1's and M3.2's categories.
+
+No answer disagreed. Every guard and branch of both libraries is flipped by a
+mutant of M3's, or recorded with why none was run. M3's mutation log holds 251
+rows on the final tree. The codec the protocol reads through is held by M2's 98
+frame mutants, last run in M3.1's review on `frame.sls` 1f004d2, unchanged since.
+README.org's status says so.
