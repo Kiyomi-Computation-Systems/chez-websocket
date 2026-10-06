@@ -152,11 +152,16 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
     nothing, and 1006 is told: websockets' `close_timeout`.
   - The stream's end with no close received closes the stream, writes nothing, and
     tells 1006 (§7.1.5), as websockets and ws do.
+  - At the close timeout and at the stream's end, no more bytes will come, so what
+    waits for the queue is read first, whatever the queue holds: at most the rest
+    of one read. A client's close among it is told with its code, cleanly
+    (M3.2's review).
   - Codes 1005, 1006 and 1015 are never sent (§7.4.1). They are what the handler is
     told when a close carried no code (1005), or when the stream ended without one
     (1006).
 - **Failing** (§7.1.7) sends a close with its code, unless the server's close was
-  sent, then closes the stream, and logs why. Nothing the client sends after it is
+  sent, then closes the stream, and logs why, with the code of the close it wrote,
+  if it wrote one. Nothing the client sends after it is
   read. The handler is told 1006 and an empty reason, since no close came (§7.1.5,
   §7.1.6).
 - **A delivered text is its UTF-8 bytes**, checked, and a close's reason too; the

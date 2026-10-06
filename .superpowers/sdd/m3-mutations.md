@@ -1065,3 +1065,177 @@ On this step's tree, 185 rows, 0 mismatches: step 2's 179 and this step's 6.
 C-31 writes a close of 1006 at the stream's end: the plan's "1005 and 1006 never
 sent", held by C-END, C-ENDCLOSING and C-ENDED3. Every check, 15 in the limits suite
 and 68 in the protocol suite, has a killer that reddens it by value.
+
+## M3.2's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05. The owner's `/code-review high` of the M3.2 stack, #19 to #21, found
+seven things, and all seven are fixed, on the owner's "fix all". The blobs:
+`protocol.sls` 5466f0f, and `test-protocol.sps` 5bde1ef, 72 checks; the rest as M3.2
+step 1's. The runner is step 3's, three suites a mutant.
+
+### The findings and their fixes
+
+| # | finding | fixed |
+|---|---|---|
+| 1 | the close timeout ended with what waits for the queue unread, a client's close among it told 1006 | `passed!` reads what waits first, whatever the queue holds (`finish!`) |
+| 2 | the stream's end did the same | `stream-end!` too, through the same `lost!` |
+| 3 | a failure after the server's close logged a code it never wrote | the log's code is #f when no close was written |
+| 4 | a close that answers nothing encoded its reason to measure it, and its body was built beside `code-bytes` | `fits-close?` counts by RFC 3629 §3's rows; one `close-frame` builds every close |
+| 5 | `run-from` and `any-pieces-from` copied `run` and `any-pieces` | `run` and `any-pieces` call them with no events |
+| 6 | `let-go-waiting` copied P-KEEP's guardian, which answered #f | one `let-go`, answering `kept`, and one `footprint` |
+| 7 | no check that an end after the server's close lets go of an unfinished message | a footprint check of the four ends, and R-15 |
+
+**Taken out**, as no check could tell them from their absence:
+- `end!`'s release of the read that waits: every end now reads it first;
+- `stream-end!`'s check for an ended connection: `lost!` answers nothing once the
+  connection has ended. R-16 holds that.
+
+### The test-first runs
+
+The review's suite against #21's library (325e797): 66 passes, and six red:
+- the default queue's stall, now telling the client's 1001;
+- the stream's end while reading is stopped, now reading what waits;
+- what waits read at the end (new);
+- a client's bad close after the server's, and failing after it: the log's code;
+- a close once one is sent allocating nothing: `(112 112)` for `(0 0)`, the
+  100-byte reason's bytevector.
+
+Three new checks pass there:
+- the reason measured by RFC 3629 §3's rows, which #21 answered alike by encoding it;
+- the end's release of an unfinished message after the server's close;
+- P-KEEP, whose helper changed.
+
+Their mutants hold them. R-15, cut on #21's library, passes #21's 68 checks, and
+fails the end's release here.
+
+### The oracles
+
+- **RFC 3629 §3's table**: 1 byte to U+007F, 2 to U+07FF, 3 to U+FFFF, 4 to
+  U+10FFFF. Each row's last character fills 123 bytes, accepted, and its first goes
+  one past, refused.
+- **RFC 6455 §7.1.5**: the code told is the first close received's. A close the step
+  holds, waiting for the queue, has been received.
+- **ws 7.5.10**, as in M3.2's steps, fed the review's 698 connections. 607 answered
+  the same and 43 stepped nothing. No answer disagreed. The rest, by category:
+
+  | count | category |
+  |---|---|
+  | 18 | ws judges UTF-8 only at a message's end |
+  | 14 | ws echoes a close's reason too |
+  | 8 | ours logs no code where it wrote no close; ws reports the failure's |
+  | 3 | ws accepts 1012 to 1014 |
+  | 2 | ours waits for a take; ws reads on |
+  | 2 | M2.1's length forms |
+  | 1 | ws answers no ping once its close is sent |
+
+  The default queue's stall, which waited on a take before, is now among the same.
+
+### The mutants
+
+The new checks' keys:
+
+| key | check |
+|---|---|
+| C-REASONLEN | a close's reason is measured in UTF-8 by RFC 3629 §3's rows at their edges… |
+| C-CLOSEALLOC | a close once one is sent, or after the end, allocates nothing: its reason is measured, not encoded |
+| C-FINISH | what waits for the queue is read at the stream's end and at the close timeout, whatever the queue holds… |
+| C-ENDKEEP2 | once the connection has ended after the server's close, it keeps no unfinished message… |
+
+C-STALL and C-END kept their keys under their changed names.
+
+**199 rows.** They are step 3's 185, re-cut where the review rewrote their lines, less
+four withdrawn, and the review's 18.
+
+Withdrawn:
+- **C-4 and C-29**: their lines are taken out. R-4 and R-16 hold what replaced them.
+- **C-19**: now cuts the same line as M-4, since one `close-frame` builds every close.
+- **C-35**: now cuts the same line as C-32, since `lost!` ends the connection for
+  the timeout and the stream's end.
+
+Re-cut onto the review's lines, each breaking the same property:
+- M-4, M-7, M-8, M-22, M-58 and E-1;
+- C-6, C-7, C-14 to C-18, C-20 to C-27, C-30 to C-32, and C-34.
+
+**The first run had four mismatches:**
+- **M-22, a harness error.** Its replacement, from step 3's specs, named
+  `code-bytes`, which the review took out. It was re-cut onto `close-frame`.
+- **M-2, S-3 and C-23, prediction errors.** Each was named to redden the allocation
+  check, and none did. `allocated` takes the least of three calls. These mutants
+  write a close only at the first call, which moves the state to closing, so the
+  least is 0. Each is killed by its other checks.
+
+The final run had 0 mismatches.
+
+**Rows whose red sets changed.** No red set lost a check. The other 139 are red as in
+step 3:
+
+| # | mutation | red besides | no longer red |
+|---|---|---|---|
+| L-34 | websocket-limits-with ignores its overrides | C-FINISH | — |
+| M-2 | the end does not end the connection | C-STALL, C-FINISH | — |
+| M-3 | the end's actions in the reverse order | C-FINISH | — |
+| M-4 | the server's close's code little-endian, a failure's among them | C-SEND, C-123, C-CROSS, C-ANSWER, C-AFTER, C-STOP, C-TIMEOUT, C-STALL, C-ENDCLOSING, C-FINISH | — |
+| M-5 | 1000 told where no close came: a failure, the stream's end, the close timeout | C-FINISH | — |
+| M-6 | told clean where no close came: a failure, the stream's end, the close timeout | C-FINISH | — |
+| M-9 | 1000 not sendable | C-REASONLEN, C-CLOSEALLOC, C-FINISH, C-ENDKEEP2 | — |
+| M-29 | a client's close told unclean, an empty one among them | C-STALL, C-FINISH | — |
+| M-34 | max-queue messages queued do not stop reading | C-FINISH | — |
+| M-36 | no count bound on the queue | C-FINISH | — |
+| M-41 | a message not counted | C-FINISH | — |
+| M-42 | read-stop not answered | C-FINISH | — |
+| M-43 | reading not marked stopped | C-STALL, C-END, C-FINISH | — |
+| M-58 | reading goes on past a full queue | C-FINISH | — |
+| M-59 | what waits is kept from the read's start | C-STALL, C-END, C-FINISH | — |
+| M-63 | binary checked as UTF-8 | C-ENDKEEP2 | — |
+| E-1 | the end keeps an unfinished message | C-ENDKEEP2 | — |
+| S-1 | a delivery does not end the message | C-END, C-FINISH | — |
+| S-2 | a delivery keeps its count of bytes held | C-END, C-FINISH, C-KEEPWAIT2, C-KEEPWAIT3 | — |
+| F-1 | frame-control? leaves out a close | C-STALL, C-FINISH | — |
+| C-1 | the end disarms nothing | C-FINISH | — |
+| C-2 | the end disarms, armed or not | C-FINISH | — |
+| C-5 | a new connection's deadline armed | C-FINISH | — |
+| C-8 | the client's close after the server's answered with a close | C-STALL, C-FINISH | — |
+| C-9 | a client's close never answered | C-FINISH | — |
+| C-10 | nothing read once the server's close is sent | C-STALL, C-FINISH | — |
+| C-11 | a read refused once the server's close is sent | C-ENDKEEP2 | — |
+| C-17 | a close's reason of 124 bytes let through | C-REASONLEN | — |
+| C-18 | a close's reason of 123 bytes refused | C-REASONLEN | — |
+| C-21 | the server's close's reason in Latin-1 | C-REASONLEN | — |
+| C-22 | a close once one is sent written again | C-CLOSEALLOC | — |
+| C-24 | the server's close leaves the connection open | C-CLOSEALLOC, C-STALL, C-FINISH | — |
+| C-25 | the server's close arms no deadline in its state | C-FINISH, C-ENDKEEP2 | — |
+| C-26 | the arm left out of the server's close's actions | C-FINISH | — |
+| C-27 | the deadline armed named ping | C-FINISH | — |
+| C-30 | the stream's end ignored | C-FINISH, C-ENDKEEP2 | — |
+| C-31 | the stream's end writes a close of 1006 | C-FINISH | — |
+| C-32 | an end with no close received leaves the stream open: the timeout's and the stream's end's | C-TIMEOUT, C-STALL, C-FINISH | — |
+| C-34 | the passed deadline disarmed again | C-FINISH | — |
+| C-40 | messages dropped once the server's close is sent (the form's other answer) | C-STALL, C-FINISH | — |
+
+**The review's own:**
+
+| # | mutation | red |
+|---|---|---|
+| R-1 | the close timeout ends without reading what waits (#21's) | C-STALL, C-FINISH, C-KEEPWAIT2 |
+| R-2 | the stream's end ends without reading what waits (#21's) | C-END, C-FINISH, C-KEEPWAIT3 |
+| R-3 | what waits read at the end stops at a full queue | C-STALL, C-END, C-FINISH, C-KEEPWAIT2, C-KEEPWAIT3 |
+| R-4 | what waits read at the end, and kept | C-KEEPWAIT2, C-KEEPWAIT3 |
+| R-16 | an end with no close received ends again a connection what waited ended | C-STALL, C-ENDED3, C-FINISH |
+| R-5 | a failure after the server's close logs the code it did not write (#21's) | C-BADCLOSE, C-FAIL |
+| R-6 | U+007F counted two bytes | C-REASONLEN |
+| R-7 | U+0080 counted one byte | C-REASONLEN |
+| R-8 | U+07FF counted three bytes | C-REASONLEN |
+| R-9 | U+0800 counted two bytes | C-REASONLEN |
+| R-10 | U+FFFF counted four bytes | C-REASONLEN |
+| R-11 | U+10000 counted three bytes | C-REASONLEN |
+| R-12 | four-byte characters counted three | C-REASONLEN |
+| R-18 | a reason counted in characters, not bytes | C-REASONLEN |
+| R-13 | a reason's length checked only while open | C-REASONLEN |
+| R-14 | a reason encoded to be measured, whatever the phase (#21's) | C-CLOSEALLOC |
+| R-17 | the server's close a byte long | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, C-SEND, C-123, C-REF, C-REASONLEN, C-CROSS, C-ANSWER, C-AFTER, C-ENDED1, C-STOP, C-TIMEOUT, C-STALL, C-ENDCLOSING, C-ENDED3, C-FINISH, P-QEND |
+| R-15 | the unfinished message kept when the end finds a deadline armed | C-ENDKEEP2 |
+
+Every check, 15 in the limits suite and 72 in the protocol suite, has a killer that
+reddens it by value. P-KEEP is reddened by value now, by M-39, M-43, M-59, M-77 and
+M-82, since `let-go` answers `kept` where it answered #f.

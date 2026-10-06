@@ -28,7 +28,8 @@
 ;;;   once a close has gone each way, and two closes that cross; §5.5.2, a
 ;;;   ping answered unless a close has been received; §5.5, a control
 ;;;   frame's payload at most 125 bytes, so a close's reason at most 123;
-;;;   §7.1.2, a close sent with its code and reason; §7.1.5 and §7.1.6, the
+;;;   §7.1.2, a close sent with its code and reason, its reason measured by
+;;;   RFC 3629 §3's table of UTF-8 lengths; §7.1.5 and §7.1.6, the
 ;;;   code and reason told are the first close received's, 1005 for one with
 ;;;   no code, 1006 when none came; §7.1.7, failing sends a close, so never
 ;;;   a second; §7.4.1, 1005, 1006 and 1015 never set in a close.  The
@@ -152,32 +153,42 @@
 (define (closed? actions)
   (exists (lambda (a) (eq? (car a) 'closed)) actions))
 
-;; run : Limits (Listof Byte) (Listof Nat) -> (Listof Action)
-;; The bytes fed to a new connection as reads of one bytevector, cut at each
-;; point (ascending; a point given twice makes an empty read): every step's
-;; actions, in order.  A step that ends the connection ends the feeding.
-(define (run limits bytes cuts)
-  (let ((v (bv bytes)))
-    (let loop ((s (make-ws-state limits)) (from 0)
-               (ends (append cuts (list (length bytes)))) (out '()))
+;; run-from : Limits (Listof Event) (Listof Byte) (Listof Nat) -> (Listof Action)
+;; The events stepped on a new connection, then the bytes fed to it as reads
+;; of one bytevector, cut at each point (ascending; a point given twice makes
+;; an empty read): every step's actions, in order.  A read that ends the
+;; connection ends the feeding.
+(define (run-from limits events bytes cuts)
+  (let* ((s (make-ws-state limits)) (first (concat (step* s events))) (v (bv bytes)))
+    (let loop ((from 0) (ends (append cuts (list (length bytes)))) (out (list first)))
       (if (null? ends)
           (concat (reverse out))
           (let-values (((s actions) (ws-step s (list 'bytes v from (car ends)))))
             (if (closed? actions)
                 (concat (reverse (cons actions out)))
-                (loop s (car ends) (cdr ends) (cons actions out))))))))
+                (loop (car ends) (cdr ends) (cons actions out))))))))
+
+;; run : Limits (Listof Byte) (Listof Nat) -> (Listof Action)
+;; The bytes fed to a new connection, as run-from feeds them.
+(define (run limits bytes cuts)
+  (run-from limits '() bytes cuts))
 
 ;; bytewise : (Listof Byte) -> (Listof Nat)
 ;; The cuts that make a read of every byte.
 (define (bytewise bytes)
   (range 1 (length bytes)))
 
-;; any-pieces : Limits (Listof Byte) -> (Listof (Listof Action))
+;; any-pieces-from : Limits (Listof Event) (Listof Byte) -> (Listof (Listof Action))
 ;; The actions for the bytes read whole, a byte at a time, and cut once at
-;; every point, the first and last among them.
+;; every point, the first and last among them, each after the events.
+(define (any-pieces-from limits events bytes)
+  (append (list (run-from limits events bytes '()) (run-from limits events bytes (bytewise bytes)))
+          (map (lambda (k) (run-from limits events bytes (list k))) (range 0 (+ 1 (length bytes))))))
+
+;; any-pieces : Limits (Listof Byte) -> (Listof (Listof Action))
+;; As any-pieces-from, with no events first.
 (define (any-pieces limits bytes)
-  (append (list (run limits bytes '()) (run limits bytes (bytewise bytes)))
-          (map (lambda (k) (run limits bytes (list k))) (range 0 (+ 1 (length bytes))))))
+  (any-pieces-from limits '() bytes))
 
 ;; as-any-pieces : (Listof Action) (Listof Byte) -> (Listof (Listof Action))
 ;; What any-pieces should answer: the same actions, each way.
@@ -241,43 +252,46 @@
 ;; not cleanly (§7.1.5, §7.1.6), and nothing written.
 (define lost (list '(close-stream) (list 'closed 1006 no-bytes #f)))
 
-;; failed-closing : Nat Symbol -> (Listof Action)
+;; failed-closing : Symbol -> (Listof Action)
 ;; Failing once the server's close is sent: no second close (§7.1.7), the
-;; deadline disarmed, the stream closed, the reason logged, and 1006 told.
-(define (failed-closing code why)
-  (list disarmed '(close-stream) (list 'log 'failed code why) (list 'closed 1006 no-bytes #f)))
+;; deadline disarmed, the stream closed, the reason logged with no code,
+;; since no close of the failure's was written, and 1006 told.
+(define (failed-closing why)
+  (list disarmed '(close-stream) (list 'log 'failed #f why) (list 'closed 1006 no-bytes #f)))
 
-;; run-from : Limits (Listof Event) (Listof Byte) (Listof Nat) -> (Listof Action)
-;; As run, once the events are stepped on the new connection: their
-;; actions, then each read's.
-(define (run-from limits events bytes cuts)
-  (let* ((s (make-ws-state limits)) (first (concat (step* s events))) (v (bv bytes)))
-    (let loop ((from 0) (ends (append cuts (list (length bytes)))) (out (list first)))
-      (if (null? ends)
-          (concat (reverse out))
-          (let-values (((s actions) (ws-step s (list 'bytes v from (car ends)))))
-            (if (closed? actions)
-                (concat (reverse (cons actions out)))
-                (loop (car ends) (cdr ends) (cons actions out))))))))
-
-;; any-pieces-from : Limits (Listof Event) (Listof Byte) -> (Listof (Listof Action))
-;; As any-pieces, once the events are stepped.
-(define (any-pieces-from limits events bytes)
-  (append (list (run-from limits events bytes '()) (run-from limits events bytes (bytewise bytes)))
-          (map (lambda (k) (run-from limits events bytes (list k))) (range 0 (+ 1 (length bytes))))))
+;; let-go : Limits (Guardian WsState -> Any) -> (U Any 'kept)
+;; A new connection fed by feed!, which hands the guardian what the
+;; connection should let go of: once every generation is collected, what
+;; the guardian hands back, which nothing else holds, or kept if nothing, a
+;; value no raise prints.
+(define (let-go limits feed!)
+  (let ((g (make-guardian)) (s (make-ws-state limits)))
+    (feed! g s)
+    (collect (collect-maximum-generation))
+    (let ((got (g))) (keep! s) (or got 'kept))))
 
 ;; let-go-waiting : (Listof Event) -> (U Bytevector 'kept)
 ;; A read of two messages to a connection with room for one, so the second
-;; waits, and then the events: the read, if the connection let go of it, as
-;; a guardian hands back what nothing else holds once collected; kept if
-;; not, a value no raise prints.
+;; waits, and then the events: the read, if the connection let go of it.
 (define (let-go-waiting events)
-  (let ((g (make-guardian)) (s (make-ws-state (lim 1048576 1))))
-    (let ((r (bv (append (frame #x82 '(1)) (frame #x82 '(2))))))
-      (g r)
-      (step* s (cons (list 'bytes r 0 (bytevector-length r)) events)))
+  (let-go (lim 1048576 1)
+          (lambda (g s)
+            (let ((r (bv (append (frame #x82 '(1)) (frame #x82 '(2))))))
+              (g r)
+              (step* s (cons (list 'bytes r 0 (bytevector-length r)) events))))))
+
+;; footprint : (-> Any) -> Integer
+;; What the live heap holds for what the thunk makes: the live heap holding
+;; it, every generation collected, less the live heap once it is let go,
+;; two measures back to back.  A run's first footprint also frees what
+;; loading left (about 87 KB here), so a check warms up with one.
+(define (footprint make)
+  (keep! (make))
+  (collect (collect-maximum-generation))
+  (let ((with (bytes-allocated)))
+    (keep! #f)
     (collect (collect-maximum-generation))
-    (let ((got (g))) (keep! s) (or got 'kept))))
+    (- with (bytes-allocated))))
 
 ;; read-event : (Listof Byte) -> Event
 (define (read-event bytes)
@@ -543,6 +557,35 @@
                                 (refusal (lambda () (ws-step closing '(close 1005 ""))))
                                 (refusal (lambda () (ws-step ended '(close 1006 ""))))
                                 (refusal (lambda () (ws-step (make-ws-state open) (list 'close 4000 (make-string 123 #\a)))))))))
+    (test-equal "a close's reason is measured in UTF-8 by RFC 3629 §3's rows at their edges: each row's last character filling 123 bytes is accepted, and its first character past 123 refused; past 123 is refused once a close is sent or the connection has ended, too"
+                '(accepted (refused ws-step) accepted (refused ws-step) accepted (refused ws-step) accepted (refused ws-step)
+                  (refused ws-step) (refused ws-step))
+                (let ((closing (make-ws-state open)) (ended (make-ws-state open))
+                      (chars (lambda (n c) (make-string n (integer->char c))))
+                      (close (lambda (s reason) (refusal (lambda () (ws-step s (list 'close 4000 reason)))))))
+                  (step* closing '((close 1000 "")))
+                  (step* ended (list (read-event (frame #x88 '()))))
+                  (list (close (make-ws-state open) (chars 123 #x7F))
+                        (close (make-ws-state open) (chars 62 #x80))
+                        (close (make-ws-state open) (string-append (chars 61 #x7FF) "a"))
+                        (close (make-ws-state open) (string-append (chars 41 #x800) "a"))
+                        (close (make-ws-state open) (chars 41 #xFFFF))
+                        (close (make-ws-state open) (chars 31 #x10000))
+                        (close (make-ws-state open) (string-append (chars 30 #x10FFFF) "abc"))
+                        (close (make-ws-state open) (chars 31 #x10FFFF))
+                        (close closing (chars 124 #x61))
+                        (close ended (chars 124 #x61)))))
+    (test-equal "a close once one is sent, or after the end, allocates nothing: its reason is measured, not encoded"
+                '(0 0)
+                (let ((closing (make-ws-state open)) (ended (make-ws-state open))
+                      (event (list 'close 1001 (make-string 100 #\a))))
+                  (step* closing '((close 1000 "")))
+                  (step* ended (list (read-event (frame #x88 '()))))
+                  (map (lambda (s)
+                         (allocated (lambda ()
+                                      (let-values (((s actions) (ws-step s event)))
+                                        (keep! actions)))))
+                       (list closing ended))))
     (let ((crossing (frame #x88 (append '(#x03 #xE8) (ascii "A")))))
       (test-equal "closes crossing (§5.5.1, §7.1.5): the server's close sent, the client's own comes: nothing more is written, the deadline is disarmed, the stream closed, and the client's code and reason told, cleanly; read whole, a byte at a time, and cut at every point"
                   (as-any-pieces (list (server-close 1001 '()) armed disarmed '(close-stream)
@@ -559,13 +602,13 @@
                       (step* (make-ws-state open)
                              (list '(close 4000 "x") (read-event (frame #x88 (append (big-endian 4999 2) (ascii "bye"))))))))
     (test-equal "a client's close after the server's that fails its checks fails with no second close (§7.1.7): one byte, a code an endpoint may not send, a reason not UTF-8"
-                (list (failed-closing 1002 'close-body-one-byte) (failed-closing 1002 'close-code-not-sendable)
-                      (failed-closing 1007 'close-reason-not-utf8))
+                (list (failed-closing 'close-body-one-byte) (failed-closing 'close-code-not-sendable)
+                      (failed-closing 'close-reason-not-utf8))
                 (map (lambda (body) (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x88 body))))))
                      (list '(#x03) '(#x03 #xED) '(#x03 #xE8 #xFF))))
     (test-equal "failing after the server's close writes no second close (§7.1.7): a refusal of the decoder, the cap, a byte no character goes on with, a continuation with no message"
-                (list (failed-closing 1002 'unknown-opcode) (failed-closing 1009 'message-too-big)
-                      (failed-closing 1007 'text-not-utf8) (failed-closing 1002 'continuation-without-message))
+                (list (failed-closing 'unknown-opcode) (failed-closing 'message-too-big)
+                      (failed-closing 'text-not-utf8) (failed-closing 'continuation-without-message))
                 (list (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x83 '())))))
                       (cadr (step* (make-ws-state (lim 10 100)) (list '(close 1000 "") (read-event (header #x82 11)))))
                       (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x81 '(#xFF))))))
@@ -624,19 +667,25 @@
                         (refusal (lambda () (ws-step answered '(deadline-passed))))
                         (refusal (lambda () (ws-step passed '(deadline-passed))))
                         (refusal (lambda () (ws-step closing '(deadline-passed now)))))))
-    (test-equal "by default, with 16 messages queued and none taken, the client's close waits behind them until the close timeout, and 1006 is told, not cleanly (by form)"
-                (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
-                      (list (server-close 1000 '()) armed)
-                      lost)
-                (step* (make-ws-state default-websocket-limits)
-                       (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))
-                                                 (frame #x88 '(#x03 #xE8))))
-                             '(close 1000 "") '(deadline-passed))))
+    (test-equal "by default, with 16 messages queued and none taken, the client's close waits behind them until the close timeout (by form), which reads what waits whatever the queue holds: the 17th message is delivered, and the client's close told, cleanly; with no close among it, 1006, not cleanly"
+                (list (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
+                            (list (server-close 1000 '()) armed)
+                            (list (deliver 'binary '(2)) '(close-stream) (list 'closed 1001 no-bytes #t)))
+                      (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
+                            (list (server-close 1000 '()) armed)
+                            (cons (deliver 'binary '(2)) lost)))
+                (list (step* (make-ws-state default-websocket-limits)
+                             (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))
+                                                       (frame #x88 '(#x03 #xE9))))
+                                   '(close 1000 "") '(deadline-passed)))
+                      (step* (make-ws-state default-websocket-limits)
+                             (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))))
+                                   '(close 1000 "") '(deadline-passed)))))
 
     ;; --- the stream's end (§7.1.5; M3.2) ---
-    (test-equal "the stream's end with no close received closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written: at once, in a frame's header, in its payload, between fragments, and while reading is stopped; at the end of file or an error"
+    (test-equal "the stream's end with no close received closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written: at once, in a frame's header, in its payload, between fragments, and while reading is stopped, once what waits is read; at the end of file or an error"
                 (list (list lost) (list '() lost) (list '() lost) (list '() lost)
-                      (list (list (deliver 'binary '(1)) '(read-stop)) lost) (list lost))
+                      (list (list (deliver 'binary '(1)) '(read-stop)) (cons (deliver 'binary '(2)) lost)) (list lost))
                 (list (step* (make-ws-state open) '((end eof)))
                       (step* (make-ws-state open) (list (read-event (take (frame #x82 '(1 2 3)) 3)) '(end eof)))
                       (step* (make-ws-state open) (list (read-event (take (frame #x82 '(1 2 3)) 7)) '(end eof)))
@@ -656,6 +705,27 @@
                       (step* (make-ws-state open) (list (read-event (frame #x83 '())) '(end eof)))
                       (step* (make-ws-state open) '((close 1000 "") (deadline-passed) (end eof)))
                       (step* (make-ws-state open) '((end eof) (close 1000 "") (end eof)))))
+    (test-equal "what waits for the queue is read at the stream's end and at the close timeout, whatever the queue holds, since no more will come: a client's close among it is told, cleanly, and answered unless the server's close was sent; a frame cut off is lost with the rest"
+                (list (list (list (deliver 'binary '(1)) '(read-stop))
+                            (list (deliver 'binary '(2)) (wrote #x88 '(#x03 #xE8)) '(close-stream)
+                                  (list 'closed 1000 no-bytes #t)))
+                      (list (list (deliver 'binary '(1)) '(read-stop))
+                            (list (server-close 1000 '()) armed)
+                            (list (deliver 'binary '(2)) '(close-stream) (list 'closed 1000 no-bytes #t)))
+                      (list (list (deliver 'binary '(1)) '(read-stop))
+                            (list (server-close 1000 '()) armed)
+                            (list disarmed '(close-stream) (list 'closed 1001 no-bytes #t)))
+                      (list (list (deliver 'binary '(1)) '(read-stop)) lost))
+                (let ((three (append (frame #x82 '(1)) (frame #x82 '(2)) (frame #x88 '(#x03 #xE8)))))
+                  (list (step* (make-ws-state (lim 1048576 1)) (list (read-event three) '(end eof)))
+                        (step* (make-ws-state (lim 1048576 1))
+                               (list (read-event three) '(close 1000 "") '(deadline-passed)))
+                        (step* (make-ws-state (lim 1048576 1))
+                               (list (read-event (append (frame #x82 '(1)) (frame #x88 '(#x03 #xE9))))
+                                     '(close 1000 "") '(end eof)))
+                        (step* (make-ws-state (lim 1048576 1))
+                               (list (read-event (append (frame #x82 '(1)) (take (frame #x82 '(2 3)) 5)))
+                                     '(end eof))))))
     (test-equal "an end of the wrong shape, or whose why is not a symbol, is an assertion naming ws-step; an end at the end of file, or an error, is accepted"
                 '((refused ws-step) (refused ws-step) accepted accepted)
                 (list (refusal (lambda () (ws-step (make-ws-state open) '(end))))
@@ -876,11 +946,7 @@
     ;; holds once collected.
     (test-equal "a connection keeps no message once it is delivered, and no read once its bytes are read"
                 (list (bv (pattern 1000)) (bv (append (frame #x82 '(1)) (frame #x82 '(2)))))
-                (let ((let-go (lambda (limits feed!)
-                                (let ((g (make-guardian)) (s (make-ws-state limits)))
-                                  (feed! g s)
-                                  (collect (collect-maximum-generation))
-                                  (let ((got (g))) (keep! s) got)))))
+                (begin
                   (list (let-go open
                           (lambda (g s)
                             (let-values (((s actions) (ws-step s (read-event (frame #x82 (pattern 1000))))))
@@ -893,29 +959,31 @@
                               (ws-step s '(taken 1))))))))
 
     ;; An unfinished message's bytes are the connection's own, out of any
-    ;; guardian's reach, so the live heap tells.  A connection's footprint is
-    ;; the live heap holding it, every generation collected, less the live
-    ;; heap once it is let go: two measures back to back, after one round to
-    ;; warm up, since the first frees what loading left (about 87 KB here).
-    ;; One that ended in the middle of a fragment of 1,000,000 bytes and kept
-    ;; them would show them all; let go, a new one's few hundred bytes.  Half
-    ;; the fragment tells the two apart.
+    ;; guardian's reach, so the live heap tells, by footprint, after one
+    ;; round to warm up.  One that ended in the middle of a fragment of
+    ;; 1,000,000 bytes and kept them would show them all; let go, a new
+    ;; one's few hundred bytes.  Half the fragment tells the two apart.
     (test-equal "once the connection has ended, it keeps no unfinished message"
                 'let-go
-                (let* ((footprint (lambda (make)
-                                    (keep! (make))
-                                    (collect (collect-maximum-generation))
-                                    (let ((with (bytes-allocated)))
-                                      (keep! #f)
-                                      (collect (collect-maximum-generation))
-                                      (- with (bytes-allocated)))))
-                       (warm (footprint (lambda () (make-ws-state open))))
+                (let* ((warm (footprint (lambda () (make-ws-state open))))
                        (ended (footprint (lambda ()
                                            (let ((s (make-ws-state open)))
                                              (step* s (list (read-event (frame #x02 (pattern 1000000)))
                                                             (read-event (frame #x83 '()))))
                                              s)))))
                   (if (< ended 500000) 'let-go (list 'kept ended))))
+    (test-equal "once the connection has ended after the server's close, it keeps no unfinished message: ended by the client's close, a failure, the close timeout, or the stream's end"
+                '(let-go let-go let-go let-go)
+                (let ((warm (footprint (lambda () (make-ws-state open))))
+                      (fragment (read-event (frame #x02 (pattern 1000000)))))
+                  (map (lambda (last)
+                         (let ((ended (footprint (lambda ()
+                                                   (let ((s (make-ws-state open)))
+                                                     (step* s (list '(close 1000 "") fragment last))
+                                                     s)))))
+                           (if (< ended 500000) 'let-go (list 'kept ended))))
+                       (list (read-event (frame #x88 '(#x03 #xE8))) (read-event (frame #x83 '()))
+                             '(deadline-passed) '(end eof)))))
 
     (test-equal "once the close timeout has ended the connection, it keeps no read that waited for the queue"
                 (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
