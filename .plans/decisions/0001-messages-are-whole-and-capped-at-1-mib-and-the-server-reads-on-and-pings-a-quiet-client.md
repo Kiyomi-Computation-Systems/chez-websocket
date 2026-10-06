@@ -4,6 +4,7 @@ Date: 2026-10-04
 Status: accepted (user decision, 2026-10-04, by form: "1 MiB", "Read on, ping",
 "Whole messages", each the recommended). Amended 2026-10-05 by form (M3.1):
 "Also 16 messages", the recommended; and again (M3.2): "Deliver as before", the
+recommended. Amended 2026-10-06 by form (M3.3's review): "Any bytes", the
 recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §5–§7
 
@@ -160,3 +161,39 @@ queue's bound aside: at most the rest of one read. So in the probe above, when t
 timeout passes, the 17th message is delivered and the client's close is told with its
 code, cleanly, where it had been 1006. The decision stands: messages after the
 server's close are delivered as before, and the wait is the close timeout.
+
+## Amendment of 2026-10-06 (M3.3's review): anything received answers the ping
+
+M3.3's review found what item 2 left open. Item 2 fails the connection "if no pong
+comes within 20 s". As M3.3 built it, any bytes received re-arm the ping clock, a
+pong or not, while the pong is awaited too. Probed on the review's core (Darwin
+arm64, Chez 10.4.1): the ping's deadline passing, then one read, then the pong's
+deadline.
+- **Any bytes, as built.** A whole message, the first fragment of one, or the first
+  500 bytes of a 1,000-byte frame: each re-armed ping, and the pong's deadline pinged
+  again. On M3.3's core (dd532f7), the review's probe sent one message an interval,
+  and one byte an interval, for 10,000 intervals each, and neither was failed.
+- **Only a pong**, a prototype of websockets' rule: each of the three was failed with
+  1011, the frame half arrived among them.
+
+websockets 17.2 waits for the pong alone (`asyncio/connection.py:826-843`), but it
+pings every 20 s, busy or not.
+
+Decided by form, the recommended, "Any bytes":
+- **While the pong is awaited, any bytes received re-arm ping**, as before it. The
+  connection fails with 1011 only if nothing comes within 20 s of the ping. A read of
+  no bytes changes nothing.
+- **A live client in the middle of a long frame** is not failed for a pong that waits
+  behind it.
+- **A client that keeps sending but has stopped reading** is never failed with 1011,
+  since it never sees the ping. That is left to M4's send side (the design's §9).
+
+Weighed and not taken: "Only a pong". A client that sends but does not answer would
+be failed at 40 s, but so would a live one whose pong waits behind its own frame. The
+core would have grown by about 11 lines.
+
+**"A dead client is found within 40 s"** holds while the server reads. While the queue
+is full, reading and the ping clock stop and nothing is armed (item 2). A client that
+filled the queue and vanished is found only by a take, the server's close, the
+stream's end or the server's drain, and a handler parked in a send to it takes
+nothing (the design's §9).

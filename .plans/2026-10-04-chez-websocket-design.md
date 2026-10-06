@@ -132,23 +132,25 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   hands a taker each read's bytevector to keep. A take that brings the queue under
   both reads what waits, a message at a time as the queue makes room, then answers
   `read-start`. A read while reading is stopped is the caller's mistake.
-- **The ping clock** (0001 item 2). After 20 s with nothing received, the step sends
-  a ping. If no pong comes within 20 s, it fails 1011. The clock is stopped while
-  reading is, since a pong the server has not read is not the client's fault.
-  As built in M3.3:
+- **The ping clock** (0001 item 2, and its amendment of 2026-10-06). After 20 s with
+  nothing received, the step sends a ping. If nothing comes within 20 s, it fails
+  1011. The clock is stopped while reading is, since a pong the server has not read
+  is not the client's fault.
+  As built in M3.3, and its review:
   - The ping carries no payload: two bytes.
-  - Any bytes received re-arm `ping`, after the read's own actions. That includes a
-    message that comes while the pong is awaited. websockets waits for the pong
-    alone, but it pings every 20 s, busy or not.
+  - Any bytes received re-arm `ping`, after the read's own actions, while the pong is
+    awaited too (by form, "Any bytes"). websockets waits for the pong alone, but it
+    pings every 20 s, busy or not. A read of no bytes re-arms nothing.
   - When `pong` passes, the close written is 1011 with no reason, as every failure's
     is, and `ping-timeout` is logged. websockets writes "keepalive ping timeout".
-  - When reading starts again, the clock starts afresh at `ping`, though a ping was
-    out when it stopped.
+  - The pong's 20 s start when the ping is queued, not when it is written (§9).
+  - When reading stops, nothing is armed, until a take starts reading again and the
+    clock afresh at `ping`, though a ping was out when it stopped.
   - The server's close takes the one deadline for its own, and the clock does not run
     again.
   - An interval of 0 turns it off.
-  - Re-arming costs the step 32 B a read, measured: one action, and its place in the
-    list.
+  - Re-arming allocates nothing: a step's actions are reversed onto a constant tail,
+    so a read costs the same with pinging on as off.
 - **The closing handshake.**
   - A close received is answered with a close echoing its code, unless one was sent
     (§5.5.1).
@@ -186,9 +188,11 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   kind's time, and its passing comes back as `(deadline-passed)`. This is how the
   server's core arms its own (`(arm-deadline kind)`). A connection needs one deadline
   at a time, which is what the transport has. Any bytes received re-arm `ping`.
-  A new connection's deadline is `ping`, unless pinging is off. `ws-deadline` names
-  it, and the binding arms it as it starts, as the server's shell arms a new
-  connection's idle deadline (M3.3).
+  A new connection's deadline is `ping`, unless pinging is off. No step tells it:
+  `ws-deadline` names it, and the binding arms it as it starts (M3.3). The server's
+  shell names its own new connection's deadline, `idle`, and arms it. Here the core
+  names it, so a binding that forgets leaves a silent client unpinged; M4.3's
+  silent-client check holds it (M3.3's review).
 
 ## 6. The binding (the shell)
 
@@ -290,8 +294,10 @@ is refused.
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`
     and `taker-wrote!`). A client that stops reading leaves a write outstanding.
-    So when the close timeout passes and the binding closes the stream, the
-    connection stays open until the server drains.
+    So when the binding closes the stream on such a client, the connection stays
+    open until the server drains. The close timeout is one such close. So is the
+    pong's 1011, and every failure: each writes a close, then `close-stream`
+    (M3.3's review).
   - **The server's advice falls short.** Its docs advise a deadline for such a
     client (`docs/handlers.org`). But a deadline's call can only ask for the same
     close again.
@@ -300,3 +306,25 @@ is refused.
   - **M4 decides, by form**, between:
     - a door change in the server: a close that drops what is unsent;
     - a bound of the binding's own.
+- **A client that sends and does not read** (M4; M3.3's review). Nothing in the core
+  bounds it.
+  - With the queue full, reading and the ping clock stop, and nothing is armed (0001).
+    A handler parked in a send to that client takes nothing, so nothing wakes the
+    connection until the server's close, the stream's end or the drain.
+  - While reading runs, any bytes re-arm `ping` (0001's amendment of 2026-10-06), so a
+    client that keeps sending is never failed with 1011, though it never reads the
+    ping.
+  - **M4 decides, by form**, how the send side bounds it.
+- **When the pong's time starts** (M4.3; M3.3's review). The step arms `pong` as it
+  writes the ping, so its 20 s start when the ping is queued. Behind up to 256 KiB
+  unsent (§6), and the kernel's buffer, a ping reaches a slow reader late, and a live
+  client can be failed with 1011. websockets times the pong from the ping's drain
+  (`asyncio/connection.py:822`, `:828`). Arming `pong` on the ping's `written` instead
+  would leave nothing armed for a ping stuck behind a client that does not read.
+  M4.3's real-socket suite measures it with a throttled reader.
+- **Every read re-arms the transport's deadline** (M4.3; M3.3's review): 55 to 57 ns a
+  read in the review's measure of the transport's `taker-deadline!`, about 0.2% of a
+  loopback read. Re-arming only when the deadline passes, from a flag a read sets,
+  would cost nothing a read, but a quiet client would be pinged up to 40 s after its
+  last byte, and a dead one found within 60 s, against 0001's 20 s and 40 s. M4.3
+  measures it beside a connection's cost.
