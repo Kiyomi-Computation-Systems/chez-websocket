@@ -83,7 +83,13 @@ and the door suite.
     drop it;
   - the server's drain and the stream's close;
   - a real-socket suite on `127.0.0.1:0`;
-  - a connection's cost, measured.
+  - a connection's cost, measured;
+  - a client silent after the 101, pinged at the ping interval and failed with 1011 a
+    timeout later, so a binding that never arms `ws-deadline`'s deadline fails it
+    (M3.3's review);
+  - when the pong's time starts, measured with a throttled reader (design §9);
+  - the send side's bound for a client that sends and does not read, by form
+    (design §9).
 
 ## M5 — the Autobahn lane
 

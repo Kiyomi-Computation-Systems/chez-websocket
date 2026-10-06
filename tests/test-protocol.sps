@@ -41,14 +41,16 @@
 ;;;   sent nothing for the ping's interval pinged, the connection failed
 ;;;   with 1011 if no pong comes in time, and the clock stopped while
 ;;;   reading is, its interval of 0 turning pinging off; the design's §5,
-;;;   any bytes received re-arm ping, and a connection's one deadline named
+;;;   any bytes received re-arm ping, while the pong is awaited too (0001's
+;;;   amendment of 2026-10-06, by form: "Any bytes"), and a connection's one deadline named
 ;;;   by its kind, ping, pong or close; RFC 6455's raw text, §5.5.2, a ping
 ;;;   may carry no payload, so its frame is two bytes; §7.4.1, 1011; and
 ;;;   websockets 17.2's keepalive, which fails with 1011 when its ping's pong
 ;;;   does not come in time.
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
-;;; Node's ws 7.5.10 was fed every case in its pieces (m3-mutations.md).
+;;; Node's ws 7.5.10 was fed every case in its pieces but the ping clock's,
+;;; since ws keeps no clock (m3-mutations.md).
 ;;;
 ;;; A step is fed pieces of one bytevector, cut at points; a step that ends
 ;;; the connection ends the feeding, as the binding closes the stream.
@@ -154,9 +156,6 @@
 (define (lim cap queue)
   (websocket-limits-with default-websocket-limits
     (list (cons 'max-message-bytes cap) (cons 'max-queue queue) (cons 'ping-interval-ms 0))))
-
-;; The default cap, a queue no message check fills by count, and pinging off.
-(define open (lim 1048576 100000))
 
 ;; pinging : Nat -> WebsocketLimits
 ;; The default limits, pinging on as 0001 has it, with this many messages
@@ -282,15 +281,31 @@
 (define awaiting '(arm-deadline pong))
 (define pinged (wrote #x89 '()))
 
-;; deadlines : WsState (Listof Event) -> (Listof (U Symbol #f))
+;; told : (U Symbol #f) Event (Listof Action) -> (U Symbol #f)
+;; The deadline a binding has armed after a step, from the one it had and
+;; the step's actions, as the server's transport keeps it: a passing lets
+;; the armed one go, an arm arms its kind in place of any other, and a
+;; disarm lets it go.
+(define (told armed event actions)
+  (fold-left (lambda (kind a)
+               (case (car a)
+                 ((arm-deadline) (cadr a))
+                 ((disarm-deadline) #f)
+                 (else kind)))
+             (if (eq? (car event) 'deadline-passed) #f armed)
+             actions))
+
+;; deadlines : WsState (Listof Event) -> (List (Listof (U Symbol #f)) (Listof (U Symbol #f)))
 ;; The deadline the connection names as made, then after each event,
-;; stepped in turn.
+;; stepped in turn; and beside it the one its steps told the binding, which
+;; arms a new connection's as ws-deadline names it.
 (define (deadlines s events)
-  (let loop ((events events) (out (list (ws-deadline s))))
+  (let loop ((events events) (named (list (ws-deadline s))) (armed (list (ws-deadline s))))
     (if (null? events)
-        (reverse out)
+        (list (reverse named) (reverse armed))
         (let-values (((s actions) (ws-step s (car events))))
-          (loop (cdr events) (cons (ws-deadline s) out))))))
+          (loop (cdr events) (cons (ws-deadline s) named)
+                (cons (told (car armed) (car events) actions) armed))))))
 
 ;; let-go : Limits (Guardian WsState -> Any) -> (U Any 'kept)
 ;; A new connection fed by feed!, which hands the guardian what the
@@ -359,6 +374,10 @@
 
 (run-suite "protocol"
   (lambda ()
+    ;; The default cap, a queue no message check fills by count, and pinging
+    ;; off.  Made in the suite's body, so limits that refuse it are a harness
+    ;; error, exit 2, not a raise as the program loads.
+    (define open (lim 1048576 100000))
     (unless (and (equal? (frame #x81 hello) rfc-masked-text)
                  (equal? (frame #x8A hello) rfc-masked-pong)
                  (equal? (server-frame #x81 hello) rfc-text)
@@ -608,17 +627,19 @@
                         (close (make-ws-state open) (chars 31 #x10FFFF))
                         (close closing (chars 124 #x61))
                         (close ended (chars 124 #x61)))))
+    ;; Each call measures a connection made afresh, closing or ended, less
+    ;; the making: `allocated` calls its thunk three times, and a close that
+    ;; wrote at the first call would leave the next two nothing to write.
     (test-equal "a close once one is sent, or after the end, allocates nothing: its reason is measured, not encoded"
                 '(0 0)
-                (let ((closing (make-ws-state open)) (ended (make-ws-state open))
-                      (event (list 'close 1001 (make-string 100 #\a))))
-                  (step* closing '((close 1000 "")))
-                  (step* ended (list (read-event (frame #x88 '()))))
-                  (map (lambda (s)
-                         (allocated (lambda ()
-                                      (let-values (((s actions) (ws-step s event)))
-                                        (keep! actions)))))
-                       (list closing ended))))
+                (let ((event (list 'close 1001 (make-string 100 #\a))))
+                  (map (lambda (prepared)
+                         (- (allocated (lambda ()
+                                         (let-values (((s actions) (ws-step (prepared) event)))
+                                           (keep! actions))))
+                            (allocated (lambda () (keep! (prepared))))))
+                       (list (lambda () (let ((s (make-ws-state open))) (step* s '((close 1000 ""))) s))
+                             (lambda () (let ((s (make-ws-state open))) (step* s (list (read-event (frame #x88 '())))) s))))))
     (let ((crossing (frame #x88 (append '(#x03 #xE8) (ascii "A")))))
       (test-equal "closes crossing (§5.5.1, §7.1.5): the server's close sent, the client's own comes: nothing more is written, the deadline is disarmed, the stream closed, and the client's code and reason told, cleanly; read whole, a byte at a time, and cut at every point"
                   (as-any-pieces (list (server-close 1001 '()) armed disarmed '(close-stream)
@@ -787,24 +808,29 @@
                 (list (step* (make-ws-state (pinging 16)) '((deadline-passed) (deadline-passed)))
                       (step* (make-ws-state (pinging 16))
                              (list (read-event (frame #x01 (ascii "Hel"))) '(deadline-passed) '(deadline-passed)))))
-    (test-equal "any bytes received re-arm the ping clock, after the read's own actions (design §5): a message, a fragment, a ping answered, a pong, one byte of a header; and each read of a message cut a byte at a time"
+    (test-equal "any bytes received re-arm the ping clock, after the read's own actions, in their order (design §5): a message, a fragment, a ping answered, a pong, one byte of a header, a ping answered and a message in one read; and each read of a message cut a byte at a time"
                 (list (list (list (deliver 'binary '(1 2 3)) quiet))
                       (list (list quiet))
                       (list (list (pong '(1)) quiet))
                       (list (list quiet))
                       (list (list quiet))
+                      (list (list (pong '(1)) (deliver 'binary '(2)) quiet))
                       (append (repeat 10 quiet) (list (deliver 'text hello) quiet)))
                 (list (step* (make-ws-state (pinging 16)) (list (read-event (frame #x82 '(1 2 3)))))
                       (step* (make-ws-state (pinging 16)) (list (read-event (frame #x01 (ascii "Hel")))))
                       (step* (make-ws-state (pinging 16)) (list (read-event (frame #x89 '(1)))))
                       (step* (make-ws-state (pinging 16)) (list (read-event (frame #x8A '(7)))))
                       (step* (make-ws-state (pinging 16)) (list (read-event (take (frame #x82 '(1)) 1))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (append (frame #x89 '(1)) (frame #x82 '(2))))))
                       (run (pinging 16) (frame #x81 hello) (bytewise (frame #x81 hello)))))
-    (test-equal "while the pong is awaited, any bytes received re-arm ping in its place, a message as well as a pong: the next quiet deadline pings again, and fails nothing"
-                (list (list pinged awaiting) (list (deliver 'binary '(5)) quiet) (list pinged awaiting))
-                (step* (make-ws-state (pinging 16))
-                       (list '(deadline-passed) (read-event (frame #x82 '(5))) '(deadline-passed))))
-    (test-equal "only what is received re-arms the ping clock: a send, and a take while reading runs, answer nothing for it, and the quiet deadline still pings"
+    (test-equal "while the pong is awaited, a message re-arms ping in its place, as any bytes received do (by form, \"Any bytes\"): the next quiet deadline pings again, and fails nothing; an empty read, no bytes received, re-arms nothing, and the pong's deadline then fails 1011"
+                (list (list (list pinged awaiting) (list (deliver 'binary '(5)) quiet) (list pinged awaiting))
+                      (list (list pinged awaiting) '() (failed 1011 'ping-timeout)))
+                (list (step* (make-ws-state (pinging 16))
+                             (list '(deadline-passed) (read-event (frame #x82 '(5))) '(deadline-passed)))
+                      (step* (make-ws-state (pinging 16))
+                             (list '(deadline-passed) (list 'bytes no-bytes 0 0) '(deadline-passed)))))
+    (test-equal "a send, and a take while reading runs, re-arm nothing: only bytes received, and reading started again, re-arm the ping clock; the quiet deadline still pings"
                 (list (list (wrote #x81 (ascii "A"))) (list (deliver 'binary '(1)) quiet) '() (list pinged awaiting))
                 (step* (make-ws-state (pinging 16))
                        (list '(send text "A") (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed))))
@@ -839,13 +865,17 @@
                              (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))
                       (step* (make-ws-state (pinging 1))
                              (list '(close 1000 "") (read-event (frame #x82 '(1))) '(deadline-passed)))))
-    (test-equal "every end of the connection disarms the ping clock first, ping or pong armed: a client's close answered, a failure, the stream's end"
+    (test-equal "every end of the connection disarms the ping clock before its own last actions, ping or pong armed: a client's close answered, a failure, the stream's end; and after the read's own actions, a message before a failure, or a ping answered before a close, in one read"
                 (list (list (cons disarmed (answered 1000 '())))
                       (list (list pinged awaiting) (cons disarmed (failed 1002 'unknown-opcode)))
-                      (list (cons disarmed lost)))
+                      (list (cons disarmed lost))
+                      (list (append (list (deliver 'text hello) disarmed) (failed 1002 'continuation-without-message)))
+                      (list (append (list (pong '(7)) disarmed) (answered 1000 '()))))
                 (list (step* (make-ws-state (pinging 16)) (list (read-event (frame #x88 '(#x03 #xE8)))))
                       (step* (make-ws-state (pinging 16)) (list '(deadline-passed) (read-event (frame #x83 '()))))
-                      (step* (make-ws-state (pinging 16)) '((end eof)))))
+                      (step* (make-ws-state (pinging 16)) '((end eof)))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (append (frame #x81 hello) (frame #x80 '(1))))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (append (frame #x89 '(7)) (frame #x88 '(#x03 #xE8))))))))
     (test-equal "pinging off, an interval of 0, arms nothing: a read re-arms nothing, the queue's stop and start touch no deadline, and an end disarms nothing"
                 (list (list (list (deliver 'text hello)))
                       (list (list (deliver 'binary '(1)) '(read-stop)) '((read-start)))
@@ -853,19 +883,54 @@
                 (list (step* (make-ws-state (lim 1048576 16)) (list (read-event (frame #x81 hello))))
                       (step* (make-ws-state (lim 1048576 1)) (list (read-event (frame #x82 '(1))) '(taken 1)))
                       (step* (make-ws-state (lim 1048576 16)) '((end eof)))))
-    (test-equal "a deadline passing while the ping clock is stopped, or once the pong's has failed the connection, is an assertion naming ws-step; ws-deadline of anything but a connection is an assertion naming ws-deadline"
-                '((refused ws-step) (refused ws-step) (refused ws-deadline))
-                (let ((stopped (make-ws-state (pinging 1))) (timed-out (make-ws-state (pinging 16))))
+    (test-equal "a deadline passing while the ping clock is stopped, or once the pong's has failed the connection, or once the connection has ended with ping or pong armed, is an assertion naming ws-step; ws-deadline of anything but a connection is an assertion naming ws-deadline"
+                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-deadline))
+                (let ((stopped (make-ws-state (pinging 1))) (timed-out (make-ws-state (pinging 16)))
+                      (closed-pinging (make-ws-state (pinging 16))) (failed-ponging (make-ws-state (pinging 16))))
                   (step* stopped (list (read-event (frame #x82 '(1)))))
                   (step* timed-out '((deadline-passed) (deadline-passed)))
+                  (step* closed-pinging (list (read-event (frame #x88 '(#x03 #xE8)))))
+                  (step* failed-ponging (list '(deadline-passed) (read-event (frame #x83 '()))))
                   (list (refusal (lambda () (ws-step stopped '(deadline-passed))))
                         (refusal (lambda () (ws-step timed-out '(deadline-passed))))
+                        (refusal (lambda () (ws-step closed-pinging '(deadline-passed))))
+                        (refusal (lambda () (ws-step failed-ponging '(deadline-passed))))
                         (refusal (lambda () (ws-deadline (pinging 16)))))))
-    (test-equal "the deadline a connection names is the one its steps have told the binding: as made, ping; then after each step, the kind its last arm named, or none once disarmed, or passed with none armed again, or ended"
-                '(ping #f ping pong ping close #f)
-                (deadlines (make-ws-state (pinging 1))
-                           (list (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed)
-                                 (read-event (frame #x8A '())) '(close 1000 "") '(deadline-passed))))
+    (test-equal "the deadline a connection names, as made and after each step, is the one its steps have told the binding: armed by an arm, none once disarmed, none once its passing lets it go with nothing armed again, and none once ended; ended with ping or pong armed, and with pinging off"
+                (map (lambda (kinds) (list kinds kinds))
+                     '((ping #f ping pong ping close #f) (ping #f) (ping pong #f) (ping #f) (#f close #f)))
+                (list (deadlines (make-ws-state (pinging 1))
+                                 (list (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed)
+                                       (read-event (frame #x8A '())) '(close 1000 "") '(deadline-passed)))
+                      (deadlines (make-ws-state (pinging 16)) (list (read-event (frame #x88 '(#x03 #xE8)))))
+                      (deadlines (make-ws-state (pinging 16)) (list '(deadline-passed) (read-event (frame #x83 '()))))
+                      (deadlines (make-ws-state (pinging 16)) '((end eof)))
+                      (deadlines (make-ws-state open) '((close 1000 "") (deadline-passed)))))
+    ;; Re-arming at every read is the clock's hot path, so it allocates
+    ;; nothing: a step allocates the same with pinging on as with it off.
+    ;; Each measure makes its connection afresh in the thunk, which
+    ;; `allocated` calls three times, so no call steps a state another has
+    ;; changed; a take's is the take's alone, the read before it measured
+    ;; apart.
+    (let* ((read-cost (lambda (limits bytes)
+                        (let* ((v (bv bytes)) (event (list 'bytes v 0 (bytevector-length v))))
+                          (allocated (lambda ()
+                                       (let-values (((s actions) (ws-step (make-ws-state limits) event)))
+                                         (keep! actions)))))))
+           (take-cost (lambda (limits)
+                        (let ((prepared (lambda ()
+                                          (let ((s (make-ws-state limits)))
+                                            (step* s (list (read-event (frame #x82 '(1)))))
+                                            s))))
+                          (- (allocated (lambda ()
+                                          (let-values (((s actions) (ws-step (prepared) '(taken 1))))
+                                            (keep! actions))))
+                             (allocated (lambda () (keep! (prepared)))))))))
+      (test-equal "re-arming the ping clock allocates nothing: a step allocates the same with pinging on as off, a read of one byte of a header, of a message, of a ping answered, and a take that starts reading again"
+                  '(0 0 0 0)
+                  (append (map (lambda (bytes) (- (read-cost (pinging 16) bytes) (read-cost (lim 1048576 16) bytes)))
+                               (list (take (frame #x82 '(1)) 1) (frame #x82 '(1 2 3)) (frame #x89 '(1))))
+                          (list (- (take-cost (pinging 1)) (take-cost (lim 1048576 1)))))))
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"
@@ -985,9 +1050,10 @@
                                    (ws-step s (read-event (frame #x82 '(2)))))))))
 
     ;; --- the API ---
-    (test-equal "an event outside the vocabulary or of the wrong shape, or a read outside its bytevector, is an assertion naming ws-step; limits that are not, naming make-ws-state"
+    (test-equal "an event outside the vocabulary or of the wrong shape, an improper list among them, or a read outside its bytevector, is an assertion naming ws-step; limits that are not, naming make-ws-state"
                 '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step)
                   (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step)
+                  (refused ws-step) (refused ws-step) (refused ws-step)
                   (refused make-ws-state))
                 (list (refusal (lambda () (ws-step (make-ws-state open) '(no-such-event))))
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) -1 1))))
@@ -999,6 +1065,9 @@
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) 0 3))))
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes (bv '(1 2)) 2 1))))
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'bytes "ab" 0 1))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(taken . 5))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(close 1000 . ""))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(end . eof))))
                       (refusal (lambda () (make-ws-state 1048576)))))
     (test-equal "the bytes a step reads are left as they were, read at once or after waiting"
                 (let ((stream (append (frame #x82 '(1)) (frame #x89 '(7)) (frame #x81 hello))))
