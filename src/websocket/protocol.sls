@@ -407,7 +407,7 @@
       (assertion-violation 'ws-step "not a message queued" n))
     (ws-state-queued-bytes-set! s (- (ws-state-queued-bytes s) n))
     (ws-state-queued-count-set! s (- (ws-state-queued-count s) 1))
-    (if (and (not (ws-state-reading? s)) (not (full? s)))
+    (if (not (ws-state-reading? s))
         (let* ((bv (ws-state-waiting s))
                (acts (if bv
                          (begin

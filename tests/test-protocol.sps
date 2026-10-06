@@ -887,11 +887,12 @@
                        (list (read-event (frame #x01 (ascii "Hel")))
                              (list 'send 'binary (bv '(9)))
                              (read-event (frame #x80 (ascii "lo"))))))
-    (test-equal "a send of another kind, or a payload not of its kind, or after the connection has ended, is an assertion naming ws-step"
-                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
+    (test-equal "a send of another kind, or a payload not of its kind, or of the wrong shape, or after the connection has ended, is an assertion naming ws-step"
+                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
                 (list (refusal (lambda () (ws-step (make-ws-state open) (list 'send 'ping (bv '(1))))))
                       (refusal (lambda () (ws-step (make-ws-state open) (list 'send 'text (bv '(65))))))
                       (refusal (lambda () (ws-step (make-ws-state open) '(send binary "A"))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(send text "A" "B"))))
                       (refusal (lambda ()
                                  (let ((s (make-ws-state open)))
                                    (step* s (list (read-event (frame #x83 '()))))
