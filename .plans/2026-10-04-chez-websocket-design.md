@@ -135,6 +135,20 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
 - **The ping clock** (0001 item 2). After 20 s with nothing received, the step sends
   a ping. If no pong comes within 20 s, it fails 1011. The clock is stopped while
   reading is, since a pong the server has not read is not the client's fault.
+  As built in M3.3:
+  - The ping carries no payload: two bytes.
+  - Any bytes received re-arm `ping`, after the read's own actions. That includes a
+    message that comes while the pong is awaited. websockets waits for the pong
+    alone, but it pings every 20 s, busy or not.
+  - When `pong` passes, the close written is 1011 with no reason, as every failure's
+    is, and `ping-timeout` is logged. websockets writes "keepalive ping timeout".
+  - When reading starts again, the clock starts afresh at `ping`, though a ping was
+    out when it stopped.
+  - The server's close takes the one deadline for its own, and the clock does not run
+    again.
+  - An interval of 0 turns it off.
+  - Re-arming costs the step 32 B a read, measured: one action, and its place in the
+    list.
 - **The closing handshake.**
   - A close received is answered with a close echoing its code, unless one was sent
     (§5.5.1).
@@ -172,11 +186,15 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   kind's time, and its passing comes back as `(deadline-passed)`. This is how the
   server's core arms its own (`(arm-deadline kind)`). A connection needs one deadline
   at a time, which is what the transport has. Any bytes received re-arm `ping`.
+  A new connection's deadline is `ping`, unless pinging is off. `ws-deadline` names
+  it, and the binding arms it as it starts, as the server's shell arms a new
+  connection's idle deadline (M3.3).
 
 ## 6. The binding (the shell)
 
 The take-over runs in place, inside the server's callbacks, and cannot wait (0016).
-It makes the core's state and starts reading. It feeds the core the bytes the server
+It makes the core's state, arms the deadline the state names (`ws-deadline`), and
+starts reading. It feeds the core the bytes the server
 read past the request (`retained`), and answers `(awaiting thunk)`. Each read's bytes
 are stepped through the core in place, and the actions run at once:
 
@@ -185,7 +203,7 @@ are stepped through the core in place, and the actions run at once:
 | `write` | `transport-write!`; its `written` procedure counts what is unsent |
 | `deliver` | the message queued for `websocket-receive`, which is resumed if it waits |
 | `read-stop`, `read-start` | the transport's verbs |
-| `arm-deadline`, `disarm-deadline` | `transport-deadline!`, the transport's one deadline, armed for the kind's time; when it passes, a `deadline-passed` |
+| `arm-deadline`, `disarm-deadline` | `transport-deadline!`, the transport's one deadline, armed for the kind's time (`ping` the ping interval, `pong` the ping timeout, `close` the close timeout); when it passes, a `deadline-passed` |
 | `close-stream` | `transport-close!` |
 | `closed` | the WebSocket's end: every receive and send after it raises `&websocket-closed` |
 

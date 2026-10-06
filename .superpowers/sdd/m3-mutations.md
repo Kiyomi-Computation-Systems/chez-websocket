@@ -1239,3 +1239,215 @@ step 3:
 Every check, 15 in the limits suite and 72 in the protocol suite, has a killer that
 reddens it by value. P-KEEP is reddened by value now, by M-39, M-43, M-59, M-77 and
 M-82, since `let-go` answers `kept` where it answered #f.
+
+## M3.3, step 1 — the ping clock
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05.
+
+The blobs:
+- `protocol.sls` 45847a6, and `test-protocol.sps` 8429d19, 84 checks;
+- unchanged from M3.2's review: `limits.sls` cdf3ec3, `frame.sls` 1f004d2,
+  `test-limits.sps` 16c37e2 and `test-frame.sps` b6c0444.
+
+The runner is M3.2's review's, run on this branch's tree, three suites a mutant. It
+gained one kind of row: a mutant that stops the protocol suite at load, with an
+exception and no check run, the other suites' reds as named.
+
+The PR shape was decided by form: "Two stacked PRs", the recommended. Measured for
+it, this step was +511/-37 against main, and step 2, the sweep, +163/-5 against it.
+
+### What changed in the suite
+
+- **`lim` and `open` turn pinging off**, an interval of 0, so a check of messages
+  or closes sees no ping clock. The checks that run at the default limits, pinging
+  on, hold the clock's actions now too: P-CAPDEF, P-QCOUNT and C-STALL.
+- **`pinging`** makes the default limits with a queue of its own, pinging on.
+- **12 new checks** (K-START to K-AGREE).
+- C-API2's open connection has pinging off, and its name says so.
+
+### The oracles
+
+- **Decision 0001, item 2**:
+  - a client that has sent nothing for the ping interval is pinged;
+  - if no pong comes within the ping timeout, the connection fails with 1011;
+  - the clock stops while reading has;
+  - an interval of 0 turns pinging off.
+- **The design's §5**: any bytes received re-arm `ping`, and a connection's one
+  deadline is named by its kind, `ping`, `pong` or `close`.
+- **RFC 6455's raw text**:
+  - §5.5.2: a ping may carry application data, so it may carry none, and its
+    frame is then two bytes;
+  - §5.5.3: a pong may be sent unsolicited;
+  - §7.4.1: 1011, an endpoint terminating on an unexpected condition.
+- **websockets 17.2**, read through `gh api` at the tag (`asyncio/connection.py`):
+  - its defaults are 20 s each (lines 49-50);
+  - `keepalive` (803-848) sleeps the interval and pings, whether or not the client
+    is quiet;
+  - its ping carries four random bytes (`ping`, 659-690);
+  - when no pong comes within the timeout, it fails with 1011, "keepalive ping
+    timeout".
+- **ws 7.5.10** keeps no ping clock. The shim and replay of M3.2's review were run
+  again, the shim logging each deadline's kind as it passed. The suite made 730
+  connections:
+  - 623 answered the same, and 46 stepped nothing;
+  - 13 are the clock's, a ping or pong deadline passing, and were not replayed;
+  - the rest are M3.1's and M3.2's categories, as there.
+
+  No answer disagreed.
+
+### The test-first runs
+
+Named before the runs, and hashed (`e3df1a5`):
+- **Against main's library** (e2eadb5): the suite stops at once, `attempt to
+  reference unbound identifier ws-deadline`, exit 255.
+- **Against main's library, with a stub `ws-deadline` answering #f**: 70 passes, and
+  14 red, exactly as named:
+  - the clock's eleven checks, all but K-OFF, which holds what pinging off keeps;
+  - the three default-limit checks, P-CAPDEF, P-QCOUNT and C-STALL.
+
+### Gap found by writing the mutants
+
+**Reading stopped after the server's close leaves the close's deadline armed.** A
+`stop-clock!` that disarmed whatever was armed, K-15, passed every check of the
+suite as first written: 84 passes. K-CLOSE gained a row for it, the server's close,
+then a read that fills the queue, then the close timeout. K-15 now fails it.
+
+### The mutants
+
+The new checks' keys:
+
+| key | check |
+|---|---|
+| K-START | a new connection's deadline is ping, which the binding arms as it starts… none when pinging is off |
+| K-PING | a quiet client is pinged when the ping deadline passes: a ping with no payload written, two bytes… |
+| K-PONG | no pong by the pong's deadline fails the connection with 1011… |
+| K-REARM | any bytes received re-arm the ping clock, after the read's own actions… |
+| K-PONGWAIT | while the pong is awaited, any bytes received re-arm ping in its place… |
+| K-QUIET | only what is received re-arms the ping clock: a send, and a take while reading runs… |
+| K-STOP | the ping clock stops while reading is (0001)… |
+| K-CLOSE | the server's close takes the connection's one deadline from the ping clock… |
+| K-ENDS | every end of the connection disarms the ping clock first, ping or pong armed… |
+| K-OFF | pinging off, an interval of 0, arms nothing… |
+| K-API | a deadline passing while the ping clock is stopped… ws-deadline of anything but a connection… |
+| K-AGREE | the deadline a connection names is the one its steps have told the binding… |
+
+**The runs.** 225 rows and a baseline, each red set named before the run and hashed:
+- M3.2's review's 199;
+- this step's 26, K-1 to K-26.
+
+The first run had three mismatches:
+- **C-5 and K-2 were harness errors.** Each replaced `(and ping? 'ping))))` with a
+  paren too many, which closed the library early, so it did not load.
+- **M-40 was a prediction error.** With a message's bytes not queued, a take of any
+  count but 0 is refused, so the five clock checks that take a message reddened
+  through that raise.
+
+The second run, with those two cuts mended and M-40's red set grown, had 0
+mismatches.
+
+**M3.2's review's rows.**
+- **Re-cut where this step rewrote their lines:** M-42, M-43, M-85, C-5, C-33, C-34
+  and R-1. Each breaks the same property as before.
+  - C-5 now arms close's deadline in place of ping's.
+  - C-34 now leaves the passed deadline uncleared before its kind's actions.
+- **Two now stop the protocol suite at load.** `open` is made at the top of the
+  suite with an interval of 0:
+  - L-12 refuses an interval of 0;
+  - L-32 swaps the interval and the timeout, and a timeout of 0 is refused.
+
+  Their limits checks are red as before.
+- **Red sets that changed**, by this step's checks:
+
+| # | mutation | red besides | no longer red |
+|---|---|---|---|
+| L-34 | websocket-limits-with ignores its overrides | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-CONT, P-UNFIN, P-PING, P-PONG, P-PINGMID, P-CAPMAX, P-UTF8OK, P-UTF8AT, P-UTF8SPLIT, P-UTF8END, P-BIN, P-REFUSE, P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, C-AFTER, C-ENDED1, C-TIMEOUT, C-API2, C-ENDED3, K-START, K-STOP, K-CLOSE, K-OFF, K-API, K-AGREE, P-SENDMID, P-TWO | — |
+| M-2 | the end does not end the connection | P-CAPDEF, K-ENDS | — |
+| M-3 | the end's actions in the reverse order | K-PONG, K-CLOSE, K-ENDS, K-OFF | — |
+| M-4 | the server's close's code little-endian, a failure's among them | K-PONG, K-CLOSE, K-ENDS | — |
+| M-5 | 1000 told where no close came: a failure, the stream's end, the close timeout | K-PONG, K-CLOSE, K-ENDS, K-OFF | — |
+| M-6 | told clean where no close came: a failure, the stream's end, the close timeout | K-PONG, K-CLOSE, K-ENDS, K-OFF | — |
+| M-7 | a failure logged without why | K-PONG, K-ENDS | — |
+| M-8 | a failure leaves the stream open | K-PONG, K-ENDS | — |
+| M-9 | 1000 not sendable | K-CLOSE, K-ENDS, K-AGREE | — |
+| M-29 | a client's close told unclean, an empty one among them | K-ENDS | — |
+| M-30 | a ping not answered | K-REARM | — |
+| M-31 | a pong answered with a pong | K-PING, K-REARM | — |
+| M-32 | a pong without its ping's payload | K-REARM | — |
+| M-34 | max-queue messages queued do not stop reading | K-STOP, K-CLOSE, K-OFF, K-API, K-AGREE | — |
+| M-36 | no count bound on the queue | K-STOP, K-CLOSE, K-OFF, K-API, K-AGREE | — |
+| M-40 | a message's bytes not queued | K-QUIET, K-STOP, K-CLOSE, K-OFF, K-AGREE | — |
+| M-41 | a message not counted | K-QUIET, K-STOP, K-CLOSE, K-OFF, K-API, K-AGREE | — |
+| M-42 | read-stop not answered | K-STOP, K-CLOSE, K-OFF | — |
+| M-43 | reading not marked stopped | P-CAPDEF, K-STOP, K-CLOSE, K-OFF, K-API, K-AGREE | — |
+| M-44 | every data frame ends its message | K-PONG, K-REARM | — |
+| M-48 | the buffer forgets what it held as it grows (filled) | K-REARM | — |
+| M-58 | reading goes on past a full queue | K-STOP | — |
+| M-59 | what waits is kept from the read's start | K-STOP | — |
+| M-60 | a refusal's reason not logged | K-ENDS | — |
+| M-68 | text sent as binary | K-QUIET | — |
+| M-74 | a take while reading answers read-start | K-QUIET | — |
+| M-75 | read-start though what waits fills the queue again | K-STOP | — |
+| M-77 | what waits not let go before it is read | K-STOP | — |
+| M-84 | every message delivered as binary | K-PING, K-REARM, K-CLOSE, K-OFF | — |
+| S-1 | a delivery does not end the message | K-STOP | — |
+| S-2 | a delivery keeps its count of bytes held | K-STOP | — |
+| S-6 | every message begun as binary | K-PING, K-REARM, K-CLOSE, K-OFF | — |
+| F-1 | frame-control? leaves out a close | K-ENDS | — |
+| C-1 | the end disarms nothing | P-CAPDEF, K-ENDS | — |
+| C-2 | the end disarms, armed or not | K-PONG, K-CLOSE, K-OFF | P-CAPDEF |
+| C-5 | a new connection's deadline armed as close's | C-STALL, K-START, K-PING, K-PONG, K-PONGWAIT, K-STOP, K-CLOSE, K-ENDS, K-OFF, K-API, K-AGREE, P-QCOUNT | — |
+| C-7 | failing never writes a close | K-PONG, K-ENDS | — |
+| C-9 | a client's close never answered | K-ENDS | — |
+| C-10 | nothing read once the server's close is sent | K-CLOSE | — |
+| C-11 | a read refused once the server's close is sent | K-CLOSE | — |
+| C-13 | reading not started again once the server's close is sent | K-CLOSE | — |
+| C-24 | the server's close leaves the connection open | K-CLOSE | — |
+| C-25 | the server's close arms no deadline in its state | K-CLOSE, K-AGREE | — |
+| C-26 | the arm left out of the server's close's actions | K-CLOSE | — |
+| C-27 | the deadline armed named ping | K-CLOSE | — |
+| C-30 | the stream's end ignored | K-ENDS, K-OFF | — |
+| C-31 | the stream's end writes a close of 1006 | K-ENDS, K-OFF | — |
+| C-32 | an end with no close received leaves the stream open: the timeout's and the stream's end's | K-CLOSE, K-ENDS, K-OFF | — |
+| C-33 | a deadline passing with none armed ends the connection | K-API | — |
+| C-34 | the passed deadline not cleared before its kind's actions, so an end disarms it again | K-PONG, K-CLOSE | — |
+| C-40 | messages dropped once the server's close is sent (the form's other answer) | K-CLOSE | — |
+| R-17 | the server's close a byte long | K-PONG, K-CLOSE, K-ENDS | — |
+
+C-2 no longer reddens P-CAPDEF: its failure now expects the clock disarmed first, and
+C-2 disarms always. The other rows are red as before.
+
+**This step's own:**
+
+| # | mutation | red |
+|---|---|---|
+| K-1 | pinging on only for an interval past 1 ms | K-START |
+| K-2 | a new connection arms no deadline | P-CAPDEF, C-STALL, K-START, K-PING, K-PONG, K-PONGWAIT, K-STOP, K-CLOSE, K-ENDS, K-API, K-AGREE, P-QCOUNT |
+| K-3 | ws-deadline does not check for a connection | K-API |
+| K-4 | ws-deadline names ping whenever pinging is on | K-AGREE |
+| K-5 | nothing re-arms ping | K-PING, K-PONG, K-REARM, K-PONGWAIT, K-QUIET, K-STOP, K-AGREE, P-QCOUNT |
+| K-6 | ping re-armed once the server's close is sent | K-CLOSE |
+| K-7 | ping re-armed though reading has stopped | P-CAPDEF, C-STALL, K-STOP, K-CLOSE, K-API, K-AGREE, P-QCOUNT |
+| K-8 | the re-arm's action names pong | K-PING, K-PONG, K-REARM, K-PONGWAIT, K-QUIET, K-STOP, P-QCOUNT |
+| K-9 | the re-arm recorded as pong | K-PING, K-PONG, K-PONGWAIT, K-QUIET, K-STOP, K-AGREE |
+| K-10 | the re-arm not recorded | K-PING, K-PONGWAIT, K-STOP, K-AGREE |
+| K-11 | a read re-arms ping before its own actions | P-CAPDEF, C-STALL, K-PING, K-REARM, K-PONGWAIT, K-QUIET, K-STOP, K-CLOSE, K-ENDS, P-QCOUNT |
+| K-12 | reading started again re-arms nothing | K-STOP, K-AGREE, P-QCOUNT |
+| K-13 | a read re-arms ping though pinging is off | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-PING, P-PONG, P-PINGMID, P-UTF8OK, P-UTF8SPLIT, P-BIN, C-AFTER, C-TIMEOUT, C-END, K-OFF, P-SENDMID, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD, P-GROW, P-TWO |
+| K-14 | reading stopped leaves the clock running | P-CAPDEF, C-STALL, K-STOP, K-CLOSE, K-API, K-AGREE, P-QCOUNT |
+| K-15 | reading stopped disarms the close's deadline too | K-CLOSE |
+| K-16 | the clock stopped with no disarm told | P-CAPDEF, C-STALL, K-STOP, K-CLOSE, P-QCOUNT |
+| K-17 | the clock's disarm told, and still recorded armed | K-API, K-AGREE |
+| K-18 | the clock disarmed before read-stop | P-CAPDEF, C-STALL, K-STOP, K-CLOSE, P-QCOUNT |
+| K-19 | reading stopped tells a disarm though nothing is armed | P-CAP, P-CAPFRAG, C-STOP, C-END, C-FINISH, K-OFF, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD, P-QEND, P-TAKEN |
+| K-20 | the ping carries four bytes | K-PING, K-PONG, K-PONGWAIT, K-QUIET, K-STOP, K-CLOSE, K-ENDS |
+| K-21 | the ping's action arms ping | K-PING, K-PONG, K-PONGWAIT, K-QUIET, K-STOP, K-CLOSE, K-ENDS |
+| K-22 | the ping recorded as ping, so no pong is awaited | K-PONG, K-API, K-AGREE |
+| K-23 | no pong fails with 1001 | K-PONG |
+| K-24 | no pong logged as the pong's timeout | K-PONG |
+| K-25 | no pong taken for the close timeout | K-PONG |
+| K-26 | the close's passing taken for the ping's | C-TIMEOUT, C-API2, C-STALL, C-ENDED3, C-FINISH, K-CLOSE, K-AGREE, C-ENDKEEP2, C-KEEPWAIT2 |
+
+Every check, 15 in the limits suite and 84 in the protocol suite, has a killer that
+reddens it by value. Each of the 12 new checks has 4 or more, and so do the three
+default-limit checks.

@@ -1,7 +1,7 @@
 #!r6rs
-;;; (websocket protocol)'s step against its oracles (M3.1, M3.2): messages,
+;;; (websocket protocol)'s step against its oracles (M3.1 to M3.3): messages,
 ;;; control frames, the cap, UTF-8, failing, a client's close, sending,
-;;; reading on, and the closing handshake.
+;;; reading on, the closing handshake, and the ping clock.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.4's fragments, §5.5's control
@@ -37,6 +37,15 @@
 ;;;   answered in time closing the stream anyway (websockets' close_timeout).
 ;;;   The form of 2026-10-05, "Deliver as before": messages that come after
 ;;;   the server's close are delivered as before.
+;;; - For the ping clock (M3.3): decision 0001 item 2, a client that has
+;;;   sent nothing for the ping's interval pinged, the connection failed
+;;;   with 1011 if no pong comes in time, and the clock stopped while
+;;;   reading is, its interval of 0 turning pinging off; the design's §5,
+;;;   any bytes received re-arm ping, and a connection's one deadline named
+;;;   by its kind, ping, pong or close; RFC 6455's raw text, §5.5.2, a ping
+;;;   may carry no payload, so its frame is two bytes; §7.4.1, 1011; and
+;;;   websockets 17.2's keepalive, which fails with 1011 when its ping's pong
+;;;   does not come in time.
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
 ;;; Node's ws 7.5.10 was fed every case in its pieces (m3-mutations.md).
@@ -140,13 +149,20 @@
 ;; --- what a connection answers ----------------------------------------------
 
 ;; lim : Nat Nat -> WebsocketLimits
-;; The default limits with this cap and this many messages queued.
+;; The default limits with this cap and this many messages queued, and
+;; pinging off, so a check of messages or closes sees no ping clock.
 (define (lim cap queue)
   (websocket-limits-with default-websocket-limits
-    (list (cons 'max-message-bytes cap) (cons 'max-queue queue))))
+    (list (cons 'max-message-bytes cap) (cons 'max-queue queue) (cons 'ping-interval-ms 0))))
 
-;; The default cap, and a queue no message check fills by count.
+;; The default cap, a queue no message check fills by count, and pinging off.
 (define open (lim 1048576 100000))
+
+;; pinging : Nat -> WebsocketLimits
+;; The default limits, pinging on as 0001 has it, with this many messages
+;; queued.
+(define (pinging queue)
+  (websocket-limits-with default-websocket-limits (list (cons 'max-queue queue))))
 
 ;; closed? : (Listof Action) -> Boolean
 ;; Whether the actions end the connection.
@@ -258,6 +274,23 @@
 ;; since no close of the failure's was written, and 1006 told.
 (define (failed-closing why)
   (list disarmed '(close-stream) (list 'log 'failed #f why) (list 'closed 1006 no-bytes #f)))
+
+;; The ping clock's actions (design §5): the quiet deadline armed afresh,
+;; the pong's deadline armed, and the ping written, §5.5.2's with no
+;; payload, two bytes.
+(define quiet '(arm-deadline ping))
+(define awaiting '(arm-deadline pong))
+(define pinged (wrote #x89 '()))
+
+;; deadlines : WsState (Listof Event) -> (Listof (U Symbol #f))
+;; The deadline the connection names as made, then after each event,
+;; stepped in turn.
+(define (deadlines s events)
+  (let loop ((events events) (out (list (ws-deadline s))))
+    (if (null? events)
+        (reverse out)
+        (let-values (((s actions) (ws-step s (car events))))
+          (loop (cdr events) (cons (ws-deadline s) out))))))
 
 ;; let-go : Limits (Guardian WsState -> Any) -> (U Any 'kept)
 ;; A new connection fed by feed!, which hands the guardian what the
@@ -437,9 +470,9 @@
                         (run L (append (frame #x01 (take (text-pattern 1000) 600)) (frame #x89 (pattern 125))
                                        (frame #x80 (list-tail (text-pattern 1000) 600)))
                              '()))))
-    (test-equal "the default cap, 1 MiB: 1,048,576 bytes are delivered, and reading stops with a cap's worth queued; a frame announcing 1,048,577 fails 1009 at its header"
-                (list (list (deliver 'binary (pattern 1048576)) '(read-stop))
-                      (failed 1009 'message-too-big))
+    (test-equal "the default cap, 1 MiB: 1,048,576 bytes are delivered, and reading stops with a cap's worth queued, the ping clock with it; a frame announcing 1,048,577 fails 1009 at its header, the clock disarmed first"
+                (list (list (deliver 'binary (pattern 1048576)) '(read-stop) disarmed)
+                      (cons disarmed (failed 1009 'message-too-big)))
                 (list (run default-websocket-limits (frame #x82 (pattern 1048576)) '())
                       (run default-websocket-limits (header #x82 1048577) '())))
     (test-equal "a frame announcing 2^63 - 1 bytes fails 1009 at its header"
@@ -657,7 +690,7 @@
                       (step* (make-ws-state open)
                              (list (read-event (frame #x01 (ascii "Hel"))) '(close 1000 "") '(deadline-passed)))
                       (step* (make-ws-state open) '((close 1000 "") (deadline-passed) (close 1000 "")))))
-    (test-equal "a deadline passing with none armed is an assertion naming ws-step: while open, once the client's close has disarmed it, once it has passed; so is one of the wrong shape while one is armed"
+    (test-equal "a deadline passing with none armed is an assertion naming ws-step: while open with pinging off, once the client's close has disarmed it, once it has passed; so is one of the wrong shape while one is armed"
                 '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step))
                 (let ((closing (make-ws-state open)) (answered (make-ws-state open)) (passed (make-ws-state open)))
                   (step* closing '((close 1000 "")))
@@ -667,11 +700,11 @@
                         (refusal (lambda () (ws-step answered '(deadline-passed))))
                         (refusal (lambda () (ws-step passed '(deadline-passed))))
                         (refusal (lambda () (ws-step closing '(deadline-passed now)))))))
-    (test-equal "by default, with 16 messages queued and none taken, the client's close waits behind them until the close timeout (by form), which reads what waits whatever the queue holds: the 17th message is delivered, and the client's close told, cleanly; with no close among it, 1006, not cleanly"
-                (list (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
+    (test-equal "by default, with 16 messages queued and none taken, reading and the ping clock stopped, the client's close waits behind them until the close timeout (by form), which reads what waits whatever the queue holds: the 17th message is delivered, and the client's close told, cleanly; with no close among it, 1006, not cleanly"
+                (list (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
                             (list (server-close 1000 '()) armed)
                             (list (deliver 'binary '(2)) '(close-stream) (list 'closed 1001 no-bytes #t)))
-                      (list (append (repeat 16 (deliver 'binary '(1))) '((read-stop)))
+                      (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
                             (list (server-close 1000 '()) armed)
                             (cons (deliver 'binary '(2)) lost)))
                 (list (step* (make-ws-state default-websocket-limits)
@@ -732,6 +765,107 @@
                       (refusal (lambda () (ws-step (make-ws-state open) '(end "eof"))))
                       (refusal (lambda () (ws-step (make-ws-state open) '(end eof))))
                       (refusal (lambda () (ws-step (make-ws-state open) '(end ECONNRESET))))))
+
+    ;; --- the ping clock (0001 item 2, design §5; M3.3) ---
+    (test-equal "a new connection's deadline is ping, which the binding arms as it starts: at the default interval, 20 s, and at 1 ms; none when pinging is off, an interval of 0"
+                '(ping ping #f)
+                (map (lambda (limits) (ws-deadline (make-ws-state limits)))
+                     (list default-websocket-limits
+                           (websocket-limits-with default-websocket-limits '((ping-interval-ms . 1)))
+                           (lim 1048576 16))))
+    (test-equal "a quiet client is pinged when the ping deadline passes: a ping with no payload written, two bytes (§5.5.2), and the pong's deadline armed; at once, after a message, and again after its pong"
+                (list (list (list pinged awaiting))
+                      (list (list (deliver 'text hello) quiet) (list pinged awaiting))
+                      (list (list pinged awaiting) (list quiet) (list pinged awaiting)))
+                (list (step* (make-ws-state (pinging 16)) '((deadline-passed)))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (frame #x81 hello)) '(deadline-passed)))
+                      (step* (make-ws-state (pinging 16))
+                             (list '(deadline-passed) (read-event (frame #x8A '())) '(deadline-passed)))))
+    (test-equal "no pong by the pong's deadline fails the connection with 1011 (§7.4.1; websockets' keepalive): a close of 1011 written, the stream closed, the ping's timeout logged, and 1006 told, not cleanly; nothing disarmed, since the deadline has passed; a message unfinished or not"
+                (list (list (list pinged awaiting) (failed 1011 'ping-timeout))
+                      (list (list quiet) (list pinged awaiting) (failed 1011 'ping-timeout)))
+                (list (step* (make-ws-state (pinging 16)) '((deadline-passed) (deadline-passed)))
+                      (step* (make-ws-state (pinging 16))
+                             (list (read-event (frame #x01 (ascii "Hel"))) '(deadline-passed) '(deadline-passed)))))
+    (test-equal "any bytes received re-arm the ping clock, after the read's own actions (design §5): a message, a fragment, a ping answered, a pong, one byte of a header; and each read of a message cut a byte at a time"
+                (list (list (list (deliver 'binary '(1 2 3)) quiet))
+                      (list (list quiet))
+                      (list (list (pong '(1)) quiet))
+                      (list (list quiet))
+                      (list (list quiet))
+                      (append (repeat 10 quiet) (list (deliver 'text hello) quiet)))
+                (list (step* (make-ws-state (pinging 16)) (list (read-event (frame #x82 '(1 2 3)))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (frame #x01 (ascii "Hel")))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (frame #x89 '(1)))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (frame #x8A '(7)))))
+                      (step* (make-ws-state (pinging 16)) (list (read-event (take (frame #x82 '(1)) 1))))
+                      (run (pinging 16) (frame #x81 hello) (bytewise (frame #x81 hello)))))
+    (test-equal "while the pong is awaited, any bytes received re-arm ping in its place, a message as well as a pong: the next quiet deadline pings again, and fails nothing"
+                (list (list pinged awaiting) (list (deliver 'binary '(5)) quiet) (list pinged awaiting))
+                (step* (make-ws-state (pinging 16))
+                       (list '(deadline-passed) (read-event (frame #x82 '(5))) '(deadline-passed))))
+    (test-equal "only what is received re-arms the ping clock: a send, and a take while reading runs, answer nothing for it, and the quiet deadline still pings"
+                (list (list (wrote #x81 (ascii "A"))) (list (deliver 'binary '(1)) quiet) '() (list pinged awaiting))
+                (step* (make-ws-state (pinging 16))
+                       (list '(send text "A") (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed))))
+    (test-equal "the ping clock stops while reading is (0001): the read that fills the queue disarms it after read-stop, ping or pong armed, and re-arms nothing; a take that starts reading again arms ping afresh, and one that leaves reading stopped arms nothing"
+                (list (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
+                            (list '(read-start) quiet)
+                            (list pinged awaiting))
+                      (list (list pinged awaiting)
+                            (list (deliver 'binary '(1)) '(read-stop) disarmed)
+                            (list '(read-start) quiet)
+                            (list pinged awaiting))
+                      (list (list (deliver 'binary '(1)) '(read-stop) disarmed)
+                            (list (deliver 'binary '(2)))
+                            (list '(read-start) quiet)))
+                (list (step* (make-ws-state (pinging 16))
+                             (list (read-event (concat (repeat 16 (frame #x82 '(1))))) '(taken 1) '(deadline-passed)))
+                      (step* (make-ws-state (pinging 1))
+                             (list '(deadline-passed) (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed)))
+                      (step* (make-ws-state (pinging 1))
+                             (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2)))) '(taken 1) '(taken 1)))))
+    (test-equal "the server's close takes the connection's one deadline from the ping clock, over ping, over pong, or while the clock is stopped: then bytes re-arm nothing, a take that starts reading arms nothing more, reading stopped leaves the close's deadline armed, and its passing is the close timeout's, not 1011"
+                (list (list (list (server-close 1000 '()) armed) (list (deliver 'text hello)) lost)
+                      (list (list pinged awaiting) (list (server-close 1000 '()) armed) lost)
+                      (list (list (deliver 'binary '(1)) '(read-stop) disarmed)
+                            (list (server-close 1000 '()) armed)
+                            '((read-start)))
+                      (list (list (server-close 1000 '()) armed) (list (deliver 'binary '(1)) '(read-stop)) lost))
+                (list (step* (make-ws-state (pinging 16))
+                             (list '(close 1000 "") (read-event (frame #x81 hello)) '(deadline-passed)))
+                      (step* (make-ws-state (pinging 16)) '((deadline-passed) (close 1000 "") (deadline-passed)))
+                      (step* (make-ws-state (pinging 1))
+                             (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))
+                      (step* (make-ws-state (pinging 1))
+                             (list '(close 1000 "") (read-event (frame #x82 '(1))) '(deadline-passed)))))
+    (test-equal "every end of the connection disarms the ping clock first, ping or pong armed: a client's close answered, a failure, the stream's end"
+                (list (list (cons disarmed (answered 1000 '())))
+                      (list (list pinged awaiting) (cons disarmed (failed 1002 'unknown-opcode)))
+                      (list (cons disarmed lost)))
+                (list (step* (make-ws-state (pinging 16)) (list (read-event (frame #x88 '(#x03 #xE8)))))
+                      (step* (make-ws-state (pinging 16)) (list '(deadline-passed) (read-event (frame #x83 '()))))
+                      (step* (make-ws-state (pinging 16)) '((end eof)))))
+    (test-equal "pinging off, an interval of 0, arms nothing: a read re-arms nothing, the queue's stop and start touch no deadline, and an end disarms nothing"
+                (list (list (list (deliver 'text hello)))
+                      (list (list (deliver 'binary '(1)) '(read-stop)) '((read-start)))
+                      (list lost))
+                (list (step* (make-ws-state (lim 1048576 16)) (list (read-event (frame #x81 hello))))
+                      (step* (make-ws-state (lim 1048576 1)) (list (read-event (frame #x82 '(1))) '(taken 1)))
+                      (step* (make-ws-state (lim 1048576 16)) '((end eof)))))
+    (test-equal "a deadline passing while the ping clock is stopped, or once the pong's has failed the connection, is an assertion naming ws-step; ws-deadline of anything but a connection is an assertion naming ws-deadline"
+                '((refused ws-step) (refused ws-step) (refused ws-deadline))
+                (let ((stopped (make-ws-state (pinging 1))) (timed-out (make-ws-state (pinging 16))))
+                  (step* stopped (list (read-event (frame #x82 '(1)))))
+                  (step* timed-out '((deadline-passed) (deadline-passed)))
+                  (list (refusal (lambda () (ws-step stopped '(deadline-passed))))
+                        (refusal (lambda () (ws-step timed-out '(deadline-passed))))
+                        (refusal (lambda () (ws-deadline (pinging 16)))))))
+    (test-equal "the deadline a connection names is the one its steps have told the binding: as made, ping; then after each step, the kind its last arm named, or none once disarmed, or passed with none armed again, or ended"
+                '(ping #f ping pong ping close #f)
+                (deadlines (make-ws-state (pinging 1))
+                           (list (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed)
+                                 (read-event (frame #x8A '())) '(close 1000 "") '(deadline-passed))))
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"
@@ -788,9 +922,9 @@
                          (list (read-event (append (frame #x82 (pattern 100)) (frame #x82 (pattern 500))
                                                    (frame #x82 (pattern 600))))
                                '(taken 100) '(taken 500)))))
-    (test-equal "by default, reading stops at 16 queued messages, and starts again once one is taken; at 15 it goes on"
-                (list (list (append (repeat 16 (deliver 'text '())) '((read-stop))) '((read-start)))
-                      (list (repeat 15 (deliver 'text '()))))
+    (test-equal "by default, reading stops at 16 queued messages, the ping clock with it, and both start again once one is taken; at 15 reading goes on, and the read re-arms the clock"
+                (list (list (append (repeat 16 (deliver 'text '())) (list '(read-stop) disarmed)) (list '(read-start) quiet))
+                      (list (append (repeat 15 (deliver 'text '())) (list quiet))))
                 (list (step* (make-ws-state default-websocket-limits)
                              (list (read-event (concat (repeat 16 (frame #x81 '())))) '(taken 0)))
                       (step* (make-ws-state default-websocket-limits)

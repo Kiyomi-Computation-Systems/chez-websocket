@@ -910,3 +910,60 @@ MERGED to main on 2026-10-05: **M3.2, the closing handshake, and M3.2's review**
 `make test` green on main: eight suites, 210 expected passes, every pin ok.
 
 NEXT: M3.3, the ping clock (a quiet client pinged, and failed 1011 when the pong is late; any bytes re-arm it; stopped while reading is), when the owner asks.
+
+---
+
+M3.3, STEP 1 — THE PING CLOCK. Branch `feat/m3.3-1-ping-clock`, cut from main at e2eadb5. 2026-10-05.
+
+On the owner's "Start M3.3, the ping clock". The plan's M3.3 is the clock, then the protocol's mutation sweep. This step is the clock, and step 2 the sweep. They were built as two commits, each green on its own.
+
+**DECIDED by form (2026-10-06), the recommended: "Two stacked PRs"**, on the sizes measured for it: this step +511/-37 (library +78/-20, tests +149/-15, design +20/-2, records +264), and step 2, stacked on it, +163/-5. "One PR" would have been 716 lines.
+
+**`(websocket protocol)`**:
+- **A new connection's deadline is `ping`**, unless the ping interval is 0, which turns pinging off. `ws-deadline : WsState -> (U 'ping 'pong 'close #f)` names the deadline armed, as the steps have told the binding. The binding arms a new connection's as it starts, as the server's shell arms a new connection's idle deadline.
+- **Any bytes received re-arm `ping`**, after the read's own actions (design §5). That includes a message that comes while the pong is awaited.
+- **When `ping` passes**, the client has sent nothing for the interval. A ping with no payload is written, two bytes, and `pong` is armed.
+- **When `pong` passes**, nothing has come since. The connection fails with 1011, websockets' keepalive's code, logged as `ping-timeout`. Nothing is disarmed, since the deadline has passed.
+- **The clock stops while reading has** (0001). The read that fills the queue answers `(read-stop)` and then `(disarm-deadline)`, ping or pong armed. A take that starts reading again arms `ping` afresh.
+- **The server's close takes the one deadline** for its own. The clock does not run again; reading stopped after it leaves the close's deadline armed.
+
+Each read re-arms the clock, which costs the step 32 B a read, measured three times: one action, and its place in the list.
+
+**`tests/test-protocol.sps`, 84 checks**, 12 of them new:
+- a new connection's deadline;
+- the ping, and the pong's timeout;
+- what re-arms the clock, and what does not;
+- the clock stopped with reading, the server's close, and every end;
+- pinging off;
+- the API;
+- the deadline named after each step, against the actions.
+
+The suite's `lim` and `open` now turn pinging off, so a check of messages or closes sees no clock. The three checks that run at the default limits hold the clock's actions too: the cap, the 16-message queue, and the stall behind it.
+
+**The oracles.** Decision 0001's item 2 and the design's §5. RFC 6455's raw text: §5.5.2, a ping may carry no payload; §5.5.3, an unsolicited pong; §7.4.1, 1011. websockets 17.2 at the tag: its keepalive pings every 20 s, busy or not, with four random bytes, and fails with 1011 when no pong comes in 20 s. ws 7.5.10 keeps no clock. Fed the suite's 730 connections, no answer disagreed; the 13 whose ping or pong deadline passed are the clock's, not replayed.
+
+**Taken without a form:**
+- **How the clock starts:** `ws-deadline`, a new export, which the binding reads as it starts. This follows the server, whose core exports `conn-deadline` and whose shell arms a new connection's first deadline.
+- **When reading starts again, the clock starts afresh at `ping`**, though a ping was out when it stopped. 0001 says the clock "runs again once reading does".
+- **The ping carries no payload.** 0001's consequences count it at 2 bytes. websockets' carries four random bytes, to match its pong.
+- **The failure's close is 1011 with no reason**, as every failure's is, and `ping-timeout` is logged. websockets writes "keepalive ping timeout".
+
+**Found while writing the mutants:** reading stopped after the server's close left the close's deadline armed, and no check held it. A `stop-clock!` that disarmed it, K-15, passed all 84 checks. The close check gained a row, and K-15 fails it.
+
+**Tests first.** Named and hashed before the runs:
+- against main's library, the suite stopped at once: `ws-deadline` unbound, exit 255;
+- against main's library with a stub `ws-deadline` answering #f: 70 passes, and 14 red, exactly as named. They were the clock's eleven checks, all but the one for pinging off, and the three at the default limits.
+
+**225 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed:
+- M3.2's review's 199, seven re-cut where this step rewrote their lines, red sets changed by this step's checks;
+- this step's 26.
+
+Two limits mutants, L-12 and L-32, now stop the protocol suite at load: `open`'s interval of 0 is refused. The first run had three mismatches:
+- two harness errors, a paren too many in C-5's and K-2's cuts;
+- one prediction error: M-40 makes every take but of 0 refused, so five clock checks reddened through that raise.
+
+The second run had 0 mismatches. Every check has a killer that reddens it by value.
+
+`make test` green before the commit (Darwin arm64): eight suites, 222 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: step 2, the protocol's mutation sweep, stacked on this.
