@@ -633,6 +633,35 @@
                                                  (frame #x88 '(#x03 #xE8))))
                              '(close 1000 "") '(deadline-passed))))
 
+    ;; --- the stream's end (§7.1.5; M3.2) ---
+    (test-equal "the stream's end with no close received closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written: at once, in a frame's header, in its payload, between fragments, and while reading is stopped; at the end of file or an error"
+                (list (list lost) (list '() lost) (list '() lost) (list '() lost)
+                      (list (list (deliver 'binary '(1)) '(read-stop)) lost) (list lost))
+                (list (step* (make-ws-state open) '((end eof)))
+                      (step* (make-ws-state open) (list (read-event (take (frame #x82 '(1 2 3)) 3)) '(end eof)))
+                      (step* (make-ws-state open) (list (read-event (take (frame #x82 '(1 2 3)) 7)) '(end eof)))
+                      (step* (make-ws-state open) (list (read-event (frame #x02 '(1))) '(end eof)))
+                      (step* (make-ws-state (lim 1048576 1))
+                             (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2)))) '(end eof)))
+                      (step* (make-ws-state open) '((end ECONNRESET)))))
+    (test-equal "the stream's end after the server's close, before the client's: the deadline disarmed, the stream closed, and 1006 told, not cleanly"
+                (list (list (server-close 1000 '()) armed) (cons disarmed lost))
+                (step* (make-ws-state open) '((close 1000 "") (end eof))))
+    (test-equal "once the connection has ended, the stream's end answers nothing: after a client's close, a failure, the close timeout, or the stream's end; and after the stream's end, a close answers nothing"
+                (list (list (answered 1000 '()) '())
+                      (list (failed 1002 'unknown-opcode) '())
+                      (list (list (server-close 1000 '()) armed) lost '())
+                      (list lost '() '()))
+                (list (step* (make-ws-state open) (list (read-event (frame #x88 '(#x03 #xE8))) '(end eof)))
+                      (step* (make-ws-state open) (list (read-event (frame #x83 '())) '(end eof)))
+                      (step* (make-ws-state open) '((close 1000 "") (deadline-passed) (end eof)))
+                      (step* (make-ws-state open) '((end eof) (close 1000 "") (end eof)))))
+    (test-equal "an end of the wrong shape, or whose why is not a symbol, is an assertion naming ws-step; an end at the end of file, or an error, is accepted"
+                '((refused ws-step) (refused ws-step) accepted accepted)
+                (list (refusal (lambda () (ws-step (make-ws-state open) '(end))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(end "eof"))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(end eof))))
+                      (refusal (lambda () (ws-step (make-ws-state open) '(end ECONNRESET))))))
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"
@@ -891,6 +920,10 @@
     (test-equal "once the close timeout has ended the connection, it keeps no read that waited for the queue"
                 (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
                 (let-go-waiting '((close 1000 "") (deadline-passed))))
+    (test-equal "once the stream's end has ended the connection, it keeps no read that waited for the queue"
+                (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
+                (let-go-waiting '((end eof))))
+
     (test-equal "two connections at once are each their own: their messages and their control frames read in turns"
                 (list '() '() (list (deliver 'text hello)) (list (deliver 'binary '(1 2 3)))
                       '() '() (list (pong '(1 2 3))) (list (pong '(9 8 7))))
