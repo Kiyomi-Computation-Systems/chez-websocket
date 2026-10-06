@@ -781,3 +781,37 @@ No answer disagreed.
 `make test` green before the commit (Darwin arm64): eight suites, 197 expected passes, every pin ok. `make prod` green.
 
 NEXT: step 2, the close timeout, stacked on this.
+
+---
+
+M3.2, STEP 2 — THE CLOSE TIMEOUT. Branch `feat/m3.2-2-close-timeout`, stacked on `feat/m3.2-1-server-close`. 2026-10-05.
+
+**`(websocket protocol)`**:
+- **`(deadline-passed)`**: the close sent was not answered in time. The stream is closed anyway, nothing is written, and 1006 is told, not cleanly (§7.1.5). This is websockets' `close_timeout`, by its deadline's kind. A deadline passing with none armed is the caller's mistake, an assertion naming ws-step.
+- **An ended connection lets go of a read that waited for the queue**, since the timeout can end a connection whose reading had stopped.
+
+**`tests/test-protocol.sps`, 63 checks**, 4 of them new:
+- the close timeout, a message unfinished or not, and a close after it;
+- a deadline passing with none armed, and one of the wrong shape;
+- the default queue holding the client's close back until the timeout (by form);
+- what an ended connection keeps.
+
+**Found while writing the mutants:**
+- **The wrong-shape row was refused for another reason.** It stepped a deadline of the wrong shape on an open connection, where none is armed, so the mutant that drops the shape's check would have survived it. Before the first run, the row was moved to step it while the close's deadline is armed.
+- **The retention check answers `kept` when the read is kept**, not #f. A kept read and a raise printed alike, and now print apart.
+
+**The oracles.** The design's §5, and websockets' `close_timeout` (the peer survey).
+
+ws 7.5.10 was fed every connection, 660. 584 answered the same and 36 stepped nothing. 2 are "ours waits for a take; ws reads on", the default queue's and the retention check's. The rest are ws's own, as in step 1. No answer disagreed.
+
+**Tests first.** The step's suite against step 1's library (00559db) gave 59 passes, and the 4 new checks red.
+
+**179 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- step 1's 174, each red set grown by this step's checks it also reddens;
+- this step's 5.
+
+0 mismatches. C-3, equivalent in step 1, is killed here. Every check has a killer that reddens it by value.
+
+`make test` green before the commit (Darwin arm64): eight suites, 201 expected passes, every pin ok. `make prod` green.
+
+NEXT: step 3, the stream's end, stacked on this.

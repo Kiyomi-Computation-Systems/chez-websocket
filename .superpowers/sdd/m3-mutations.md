@@ -881,3 +881,94 @@ the review's table are red as there.
 C-3 is equivalent on this tree: nothing reads the deadline after the end until step
 2's passing, which kills it. Every check, 15 in the limits suite and 59 in the
 protocol suite, has a killer that reddens it by value.
+
+## M3.2, step 2 — the close timeout
+
+The blobs: `protocol.sls` 4f944ea, and `test-protocol.sps` d98df8d, 63 checks; the
+rest as step 1's.
+
+### The oracles
+
+- **The design's §5**: a close not answered in time closes the stream anyway, by its
+  deadline's kind. websockets' `close_timeout`, 10 s (the peer survey).
+- **RFC 6455 §7.1.5**: with no close received, the code is 1006.
+- **ws 7.5.10**, as in step 1, its close timer fired as ws's own does
+  (`socket.destroy`): 660 connections. 584 answered the same and 36 stepped
+  nothing. 2 are "ours waits for a take; ws reads on", since ws has no queue. The
+  rest are the categories of step 1. No answer disagreed.
+
+### The test-first runs
+
+The step's suite against step 1's library (00559db): 59 passes, and the 4 new
+checks red.
+
+### Found while writing the mutants
+
+- **C-38**, the deadline's shape unchecked, would have survived the first form of
+  the check, its red set named while writing it. The row stepped `(deadline-passed
+  now)` on an open connection, which no deadline had armed, so it was refused for
+  that reason too. Before the first run, the row was moved to step it while the
+  close's deadline is armed, and C-38 reddens it.
+- **C-4**, the end keeping the read that waits, reddened the retention check
+  through its #f, which prints as a raise does. The check now answers `kept`, so C-4
+  reddens it by value.
+
+### The mutants
+
+The new checks' keys:
+
+| key | check |
+|---|---|
+| C-TIMEOUT | the close timeout (design §5)… a close after it answers nothing |
+| C-API2 | a deadline passing with none armed is an assertion naming ws-step… one of the wrong shape while one is armed |
+| C-STALL | by default, with 16 messages queued and none taken, the client's close waits behind them until the close timeout… |
+| C-KEEPWAIT2 | once the close timeout has ended the connection, it keeps no read that waited for the queue |
+
+On this step's tree, 179 rows, 0 mismatches. They are step 1's 174, E-1 re-cut back
+to M3.1's two lines with the read that waits, and this step's 5, whose lines step 1
+did not have.
+
+**Rows whose red sets grew** by this step's checks. The other 148 are red as in step
+1:
+
+| # | mutation | red besides |
+|---|---|---|
+| L-2 | the default queue 17 messages | C-STALL |
+| M-3 | the end's actions in the reverse order | C-TIMEOUT, C-STALL |
+| M-5 | 1000 told where no close came | C-TIMEOUT, C-STALL |
+| M-6 | told clean where no close came | C-TIMEOUT, C-STALL |
+| M-9 | 1000 not sendable | C-TIMEOUT, C-API2, C-STALL, C-KEEPWAIT2 |
+| M-34 | max-queue messages queued do not stop reading | C-STALL |
+| M-36 | no count bound on the queue | C-STALL |
+| M-41 | a message not counted | C-STALL |
+| M-42 | read-stop not answered | C-STALL |
+| M-44 | every data frame ends its message | C-TIMEOUT |
+| M-58 | reading goes on past a full queue | C-STALL |
+| M-79 | an event's shape not checked | C-API2 |
+| M-82 | the read's payload unmasked in place | C-KEEPWAIT2 |
+| S-1 | a delivery does not end the message | C-STALL |
+| S-2 | a delivery keeps its count of bytes held | C-STALL |
+| S-3 | a control frame of no payload not answered | C-API2 |
+| C-2 | the end disarms, armed or not | C-TIMEOUT, C-STALL |
+| C-3 | the deadline kept armed past the end | C-API2 |
+| C-5 | a new connection's deadline armed | C-API2 |
+| C-10 | nothing read once the server's close is sent | C-API2 |
+| C-11 | a read refused once the server's close is sent | C-API2 |
+| C-19 | the server's close's code little-endian | C-TIMEOUT, C-STALL |
+| C-23 | a close after the end written | C-TIMEOUT |
+| C-25 | the server's close arms no deadline in its state | C-TIMEOUT, C-API2, C-STALL, C-KEEPWAIT2 |
+| C-26 | the arm left out of the server's close's actions | C-TIMEOUT, C-STALL |
+| C-27 | the deadline armed named ping | C-TIMEOUT, C-STALL |
+
+**This step's own:**
+
+| # | mutation | red |
+|---|---|---|
+| C-4 | the end keeps a read that waits | C-KEEPWAIT2 |
+| C-33 | a deadline passing with none armed ends the connection | C-API2 |
+| C-34 | the passed deadline disarmed again | C-TIMEOUT, C-STALL |
+| C-35 | the close timeout leaves the stream open | C-TIMEOUT, C-STALL |
+| C-38 | a deadline of the wrong shape | C-API2 |
+
+Every check, 15 in the limits suite and 63 in the protocol suite, has a killer that
+reddens it by value.

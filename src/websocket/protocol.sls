@@ -19,6 +19,7 @@
 ;;;                                   endpoint may send, a reason a string
 ;;;            (taken nbytes)         the handler took a delivered message
 ;;;                                   of nbytes
+;;;            (deadline-passed)      the deadline armed has passed
 ;;;   actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
 ;;;            (arm-deadline kind)  (disarm-deadline)  (close-stream)
 ;;;            (closed code reason clean?)  (log what . details)
@@ -58,11 +59,12 @@
 ;;;   arms the close deadline.  Reading goes on as before: a message that
 ;;;   comes after it is delivered (decided by form, 2026-10-05), and a ping
 ;;;   answered, since no close has been received (§5.5.2).  The client's
-;;;   close ends the handshake.  Once a close is sent, a send is the caller's
-;;;   mistake (§5.5.1), and another close answers nothing.
+;;;   close ends the handshake.  If the deadline passes first, the stream is
+;;;   closed anyway, and 1006 told.  Once a close is sent, a send is the
+;;;   caller's mistake (§5.5.1), and another close answers nothing.
 ;;; - Time is a deadline's kind: the step reads no clock, names the deadline
-;;;   it needs, close, and disarms it if the connection ends while it is
-;;;   armed.
+;;;   it needs, close, and disarms it if the connection ends before it
+;;;   passes.  A deadline passing with none armed is the caller's mistake.
 ;;; - Once the connection has ended, failed or closed, nothing more is read,
 ;;;   the rest of a read among it, and a ping is not answered (§5.5.2).  A
 ;;;   close then answers nothing.
@@ -111,13 +113,14 @@
   ;; end! : WsState (Listof Action) (Listof Action) -> (Listof Action)
   ;; Ends the connection with `last`, its last actions, in order, after
   ;; disarming the deadline armed, and lets go of an unfinished message's
-  ;; bytes: a connection lives as long as its WebSocket, and nothing reads
-  ;; it after its end.
+  ;; bytes and of a read that waits: a connection lives as long as its
+  ;; WebSocket, and nothing reads it after its end.
   (define (end! s last acts)
     (let ((armed (ws-state-deadline s)))
       (ws-state-phase-set! s 'ended)
       (ws-state-deadline-set! s #f)
       (ws-state-buffer-set! s #f)
+      (ws-state-waiting-set! s #f)
       (append (reverse last) (if armed (cons '(disarm-deadline) acts) acts))))
 
   ;; unclean : -> Action
@@ -378,6 +381,15 @@
             (list (list 'write (frame-encode 'close body)) '(arm-deadline close)))
           '())))
 
+  ;; passed! : WsState -> (Listof Action)
+  ;; The deadline armed has passed: the close sent was not answered in
+  ;; time, so the stream is closed anyway, and 1006 told.
+  (define (passed! s)
+    (unless (ws-state-deadline s)
+      (assertion-violation 'ws-step "a deadline passed with none armed"))
+    (ws-state-deadline-set! s #f)
+    (reverse (end! s (list '(close-stream) (unclean)) '())))
+
   ;; ws-step : WsState Event -> (values WsState (Listof Action))
   ;; The connection after the event, and what the binding is to do, in
   ;; order.
@@ -397,4 +409,7 @@
       ((close)
        (event-of! event 3)
        (values s (close! s (cadr event) (caddr event))))
+      ((deadline-passed)
+       (event-of! event 1)
+       (values s (passed! s)))
       (else (assertion-violation 'ws-step "not an event" event)))))
