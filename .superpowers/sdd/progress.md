@@ -887,3 +887,26 @@ The final run had 0 mismatches, and every check has a killer that reddens it by 
 `make test` green before the commit (Darwin arm64): eight suites, 210 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: the closing ritual for #19, #20, #21 and this, on the owner's word; then M3.3, the ping clock, when the owner asks.
+
+---
+
+MERGED to main on 2026-10-05: **M3.2, the closing handshake, and M3.2's review** (the four entries above, and the design's open item recorded in step 3's), from the stacked #19, #20, #21 and #22, as a28c33f, 4b2c621, bdd2c0b and b682d58, on the owner's "do closing ritual".
+- **The squashes.** Each has the tree of the head CI tested:
+  - a28c33f has 60b6117's, on d643ec9;
+  - 4b2c621 has 38cc6de's, on a28c33f;
+  - bdd2c0b has d15246f's, on 4b2c621;
+  - b682d58 has d2e58f7's, on bdd2c0b.
+
+  #20 was rebased onto a28c33f from 89b77cb, #21 onto 4b2c621 from 4c07600, and #22 onto bdd2c0b from 20d59db. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #19 at 60b6117 (run 37386690010): eight suites, 197 expected passes;
+  - #20, rebased onto #19's squash, at 38cc6de (run 37394347726): eight suites, 201;
+  - #21, rebased onto #20's squash, at d15246f (run 37395095947): eight suites, 206;
+  - #22, rebased onto #21's squash, at d2e58f7 (run 37395581625): eight suites, 210.
+
+  Main's runs on a28c33f (37394298480), 4b2c621 (37395077735) and bdd2c0b (37395562361) each finished before the next merge. Main's run on b682d58, 37396047678, was green too, and this reflect was pushed after it.
+- **Branches.** `feat/m3.2-1-server-close`, `feat/m3.2-2-close-timeout`, `feat/m3.2-3-stream-end` and `fix/m3.2-review` were deleted, local and remote. No PR is open.
+
+`make test` green on main: eight suites, 210 expected passes, every pin ok.
+
+NEXT: M3.3, the ping clock (a quiet client pinged, and failed 1011 when the pong is late; any bytes re-arm it; stopped while reading is), when the owner asks.
