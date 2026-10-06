@@ -63,31 +63,34 @@
 ;;;   encoded, until the close is written.  Reading goes on as before: a
 ;;;   message that comes after it is delivered (decided by form,
 ;;;   2026-10-05), and a ping answered, since no close has been received
-;;;   (§5.5.2).  The client's close ends the handshake.  If the deadline
+;;;   (§5.5.2).  The client's close ends the handshake.  If its deadline
 ;;;   passes first, the stream is closed anyway, and 1006 told.  Once a close
 ;;;   is sent, a send is the caller's mistake (§5.5.1), and another close
 ;;;   answers nothing.
 ;;; - The stream's end with no close received closes the stream and tells
 ;;;   1006 (§7.1.5).  Nothing is written, since nothing reads it.
-;;; - At the stream's end, or when the deadline passes, no more bytes will
-;;;   come, so what waits for the queue is read first, whatever the queue
-;;;   holds: at most the rest of one read.  A client's close among it ends
+;;; - At the stream's end, or when the close's deadline passes, no more
+;;;   bytes will come, so what waits for the queue is read first, whatever
+;;;   the queue holds: at most the rest of one read.  A client's close among it ends
 ;;;   the connection as any close does, cleanly, with its code.
 ;;; - Time is a deadline's kind: the step reads no clock, names the deadline
 ;;;   it needs, ping, pong or close, one at a time, as the transport has
 ;;;   one, and disarms it if the connection ends before it passes.  A new
-;;;   connection's is ping, unless pinging is off, and ws-deadline names it
-;;;   for the binding to arm as it starts.  A deadline passing with none
-;;;   armed is the caller's mistake.
-;;; - The ping clock (0001 item 2).  Any bytes received re-arm ping, after
-;;;   the read's own actions.  When ping passes, the client has sent nothing
-;;;   for its interval: a ping with no payload is written, and pong armed.
-;;;   When pong passes, nothing has come since, and the connection fails
-;;;   with 1011, websockets' keepalive's code.  The clock stops while
-;;;   reading is, since a pong the server does not read is not the client's
-;;;   fault, and starts afresh, at ping, when reading starts again.  The
-;;;   server's close takes the one deadline for its own, and the clock does
-;;;   not run again.  A ping interval of 0 turns it off.
+;;;   connection's is ping, unless pinging is off: no step tells it, and
+;;;   ws-deadline names it for the binding to arm as it starts.  A deadline
+;;;   passing with none armed is the caller's mistake.
+;;; - The ping clock (0001 item 2, and its amendment of 2026-10-06).  Any
+;;;   bytes received re-arm ping, after the read's own actions, whether a
+;;;   pong is awaited or not; a read of no bytes changes nothing.  When ping
+;;;   passes, the client has sent nothing for its interval: a ping with no
+;;;   payload is written, and pong armed.  When pong passes, nothing has
+;;;   come since, and the connection fails with 1011, websockets'
+;;;   keepalive's code.  The clock stops while reading is, since a pong the
+;;;   server does not read is not the client's fault, and starts afresh, at
+;;;   ping, when reading starts again.  The server's close takes the one
+;;;   deadline for its own, and the clock does not run again.  A ping
+;;;   interval of 0 turns it off.  Re-arming allocates nothing: a step ends
+;;;   with a constant tail of actions.
 ;;; - Once the connection has ended, failed or closed, nothing more is read,
 ;;;   the rest of a read among it, and a ping is not answered (§5.5.2).  A
 ;;;   close or the stream's end then answers nothing.
@@ -112,7 +115,8 @@
   ;; whether the transport reads, as the step last told it; `waiting` is a
   ;; read's bytevector whose bytes from `waiting-start` to `waiting-end`
   ;; wait for the queue to make room, or #f.  `deadline` is the kind of the
-  ;; deadline armed, as the step last told the binding, or #f.  `ping?` is
+  ;; deadline armed, as the steps have told the binding, or #f; a new
+  ;; connection's, which no step tells, ws-deadline names.  `ping?` is
   ;; whether the ping clock runs at all.
   (define-record-type (ws-state new-state ws-state?)
     (fields (immutable decoder) (immutable cap) (immutable max-queue)
@@ -139,33 +143,44 @@
 
   ;; ws-deadline : WsState -> (U 'ping 'pong 'close #f)
   ;; The kind of the deadline armed, as the steps have told the binding.  A
-  ;; new connection's is ping, unless pinging is off, and the binding arms
-  ;; it as it starts, as the server's shell arms a new connection's idle
-  ;; deadline.
+  ;; new connection's is ping, unless pinging is off: no step tells it, and
+  ;; the binding arms it as it starts.
   (define (ws-deadline s)
     (unless (ws-state? s)
       (assertion-violation 'ws-deadline "not a connection" s))
     (ws-state-deadline s))
 
-  ;; The ping clock (0001 item 2).
+  ;; The deadline, one at a time, as the transport has one.  The record and
+  ;; what the binding is told change together, here.
 
-  ;; rearm! : WsState (Listof Action) -> (Listof Action)
-  ;; Arms ping afresh, if the clock runs: pinging on, the connection open,
-  ;; and reading.  Bytes received re-arm it, and so does reading started
-  ;; again.
-  (define (rearm! s acts)
-    (if (and (ws-state-ping? s) (ws-state-reading? s) (eq? (ws-state-phase s) 'open))
-        (begin (ws-state-deadline-set! s 'ping) (cons '(arm-deadline ping) acts))
-        acts))
+  ;; arm! : WsState Action -> Action
+  ;; `(arm-deadline kind)`, its kind recorded as armed.
+  (define (arm! s action)
+    (ws-state-deadline-set! s (cadr action))
+    action)
 
-  ;; stop-clock! : WsState (Listof Action) -> (Listof Action)
-  ;; Reading has stopped: so does the clock, if armed, since a pong the
-  ;; server does not read is not the client's fault.  The close's deadline
-  ;; runs on.
-  (define (stop-clock! s acts)
-    (if (memq (ws-state-deadline s) '(ping pong))
-        (begin (ws-state-deadline-set! s #f) (cons '(disarm-deadline) acts))
-        acts))
+  ;; disarm! : WsState (Listof Action) -> (Listof Action)
+  ;; The deadline armed let go: recorded so, and `(disarm-deadline)` told.
+  (define (disarm! s acts)
+    (ws-state-deadline-set! s #f)
+    (cons '(disarm-deadline) acts))
+
+  ;; The ping clock (0001 item 2).  A step's last actions, as constants, so
+  ;; that re-arming at every read allocates nothing.
+  (define ping-armed '((arm-deadline ping)))
+  (define reading-started '((read-start)))
+  (define reading-started-ping-armed '((read-start) (arm-deadline ping)))
+
+  ;; clock? : WsState -> Boolean
+  ;; Whether the ping clock may run: pinging on, and the connection open,
+  ;; since the server's close takes the one deadline for its own.
+  (define (clock? s)
+    (and (ws-state-ping? s) (eq? (ws-state-phase s) 'open)))
+
+  ;; reverse-onto : (Listof Action) (Listof Action) -> (Listof Action)
+  ;; Actions accumulated newest first, in order, before `tail`.
+  (define (reverse-onto acts tail)
+    (if (null? acts) tail (reverse-onto (cdr acts) (cons (car acts) tail))))
 
   ;; A connection's end, as actions are accumulated: newest first.
 
@@ -173,14 +188,16 @@
   ;; Ends the connection with `last`, its last actions, in order, after
   ;; disarming the deadline armed, and lets go of an unfinished message's
   ;; bytes: a connection lives as long as its WebSocket, and nothing reads
-  ;; it after its end.  Nothing waits for the queue by then: an end comes
-  ;; in a read, which takes what waits first, or in finish!.
+  ;; it after its end.  Nothing waits for the queue by then: a read comes
+  ;; only while reading, so with nothing waiting; a take, the close timeout
+  ;; and the stream's end let go of what waits as they read it
+  ;; (read-waiting!); and the pong's deadline cannot pass while anything
+  ;; waits, since the clock stops whenever reading does.
   (define (end! s last acts)
-    (let ((armed (ws-state-deadline s)))
+    (let ((acts (if (ws-state-deadline s) (disarm! s acts) acts)))
       (ws-state-phase-set! s 'ended)
-      (ws-state-deadline-set! s #f)
       (ws-state-buffer-set! s #f)
-      (append (reverse last) (if armed (cons '(disarm-deadline) acts) acts))))
+      (append (reverse last) acts)))
 
   ;; unclean : -> Action
   ;; The connection closed with no close received (§7.1.5, §7.1.6): 1006,
@@ -254,8 +271,8 @@
         (>= (ws-state-queued-count s) (ws-state-max-queue s))))
 
   ;; deliver! : WsState (Listof Action) -> (Listof Action)
-  ;; The message begun, whole: delivered and queued, and reading stopped,
-  ;; the ping clock with it, if that fills the queue.
+  ;; The message begun, whole: delivered and queued, and reading stopped if
+  ;; that fills the queue.
   (define (deliver! s acts)
     (let* ((n (ws-state-held s))
            (buffer (ws-state-buffer s))
@@ -271,7 +288,7 @@
       (ws-state-queued-bytes-set! s (+ (ws-state-queued-bytes s) n))
       (ws-state-queued-count-set! s (+ (ws-state-queued-count s) 1))
       (if (and (ws-state-reading? s) (full? s))
-          (begin (ws-state-reading?-set! s #f) (stop-clock! s (cons '(read-stop) acts)))
+          (begin (ws-state-reading?-set! s #f) (cons '(read-stop) acts))
           acts)))
 
   ;; data-end! : WsState (Listof Action) -> (Listof Action)
@@ -379,6 +396,10 @@
       (assertion-violation 'ws-step "not an event" event)))
 
   ;; bytes! : WsState Any Any Any -> (Listof Action)
+  ;; A read's bytes read, then the ping clock told, if it may run: stopped,
+  ;; if the read filled the queue, after its read-stop, the last action a
+  ;; read that stops reading tells (ping or pong is armed whenever the
+  ;; clock may run and reading does); else re-armed, if bytes came.
   (define (bytes! s bv start end)
     (unless (and (bytevector? bv) (fixnum? start) (fixnum? end)
                  (fx<=? 0 start) (fx<=? start end) (fx<=? end (bytevector-length bv)))
@@ -387,7 +408,11 @@
       (assertion-violation 'ws-step "a read after the connection has ended"))
     (unless (ws-state-reading? s)
       (assertion-violation 'ws-step "a read while reading is stopped"))
-    (reverse (rearm! s (read! s bv start end #t '()))))
+    (let ((acts (read! s bv start end #t '())))
+      (cond ((not (clock? s)) (reverse acts))
+            ((not (ws-state-reading? s)) (reverse (disarm! s acts)))
+            ((fx<? start end) (arm! s (car ping-armed)) (reverse-onto acts ping-armed))
+            (else (reverse acts)))))
 
   ;; send! : WsState Any Any -> (Listof Action)
   (define (send! s kind payload)
@@ -408,16 +433,14 @@
     (ws-state-queued-bytes-set! s (- (ws-state-queued-bytes s) n))
     (ws-state-queued-count-set! s (- (ws-state-queued-count s) 1))
     (if (not (ws-state-reading? s))
-        (let* ((bv (ws-state-waiting s))
-               (acts (if bv
-                         (begin
-                           (ws-state-waiting-set! s #f)
-                           (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) #t '()))
-                         '())))
+        (let ((acts (read-waiting! s #t '())))
           (if (and (not (eq? (ws-state-phase s) 'ended)) (not (full? s)))
               (begin
                 (ws-state-reading?-set! s #t)
-                (reverse (rearm! s (cons '(read-start) acts))))
+                (if (clock? s)
+                    (begin (arm! s (cadr reading-started-ping-armed))
+                           (reverse-onto acts reading-started-ping-armed))
+                    (reverse-onto acts reading-started)))
               (reverse acts)))
         '()))
 
@@ -446,20 +469,21 @@
     (if (eq? (ws-state-phase s) 'open)
         (begin
           (ws-state-phase-set! s 'closing)
-          (ws-state-deadline-set! s 'close)
-          (list (list 'write (close-frame code (string->utf8 reason))) '(arm-deadline close)))
+          (list (list 'write (close-frame code (string->utf8 reason))) (arm! s '(arm-deadline close))))
         '()))
 
-  ;; finish! : WsState (Listof Action) -> (Listof Action)
-  ;; Reads what waits for the queue, if anything does, whatever the queue
-  ;; holds: no more bytes will come, so a close the client sent is read, not
-  ;; lost.  It is the rest of one read at most.
-  (define (finish! s acts)
+  ;; read-waiting! : WsState Boolean (Listof Action) -> (Listof Action)
+  ;; Reads what waits for the queue, if anything does, letting go of it
+  ;; first: at a take, bounded, as the queue makes room; at the stream's end
+  ;; or the close timeout, whatever the queue holds, since no more bytes
+  ;; will come, so a close the client sent is read, not lost.  It is the
+  ;; rest of one read at most.
+  (define (read-waiting! s bounded? acts)
     (let ((bv (ws-state-waiting s)))
       (if bv
           (begin
             (ws-state-waiting-set! s #f)
-            (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) #f acts))
+            (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) bounded? acts))
           acts)))
 
   ;; lost! : WsState (Listof Action) -> (Listof Action)
@@ -467,7 +491,7 @@
   ;; unless it has ended, by what waited or before: the stream closed, and
   ;; 1006 told.
   (define (lost! s acts)
-    (let ((acts (finish! s acts)))
+    (let ((acts (read-waiting! s #f acts)))
       (if (eq? (ws-state-phase s) 'ended)
           acts
           (end! s (list '(close-stream) (unclean)) acts))))
@@ -493,11 +517,11 @@
     (let ((kind (ws-state-deadline s)))
       (unless kind
         (assertion-violation 'ws-step "a deadline passed with none armed"))
+      ;; The transport has let it go: recorded so, with nothing told.
       (ws-state-deadline-set! s #f)
       (case kind
         ((ping)
-         (ws-state-deadline-set! s 'pong)
-         (list (list 'write (frame-encode 'ping (make-bytevector 0))) '(arm-deadline pong)))
+         (list (list 'write (frame-encode 'ping (make-bytevector 0))) (arm! s '(arm-deadline pong))))
         ((pong) (reverse (fail! s 1011 'ping-timeout '())))
         (else (reverse (lost! s '()))))))
 
