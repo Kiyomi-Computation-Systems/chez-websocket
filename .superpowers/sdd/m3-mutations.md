@@ -1332,8 +1332,9 @@ The new checks' keys:
 | K-API | a deadline passing while the ping clock is stopped… ws-deadline of anything but a connection… |
 | K-AGREE | the deadline a connection names is the one its steps have told the binding… |
 
-**The runs.** 225 rows and a baseline, each red set named before the run and hashed:
-- M3.2's review's 199;
+**The runs.** 225 rows, the baseline among them, each red set named before the run and
+hashed:
+- M3.2's review's 199 rows;
 - this step's 26, K-1 to K-26.
 
 The first run had three mismatches:
@@ -1466,7 +1467,8 @@ The blobs:
 
 The plan's M3.3 ends with the protocol's mutation sweep. Every guard and branch of
 `(websocket protocol)` and `(websocket limits)` was listed, as M3.1's review swept
-them, each with the mutants that flip it. There are 110: 99 in the protocol and 11 in
+them, each with the mutants that flip it. There are 110 (M3.3's review found three
+more: see its section): 99 in the protocol and 11 in
 the limits.
 - **84 were flipped by an earlier mutant** of M3's.
 - **18 were flipped by none**, and now one of the sweep's flips each:
@@ -1509,8 +1511,8 @@ every refusal of the decoder is 1002, so 1002 in its place answers the same.
 
 ### The runs
 
-251 rows and a baseline, each red set named before the run and hashed:
-- step 1's 225, M-74 re-cut, and M-79's red set grown by P-SENDAPI's new row;
+251 rows, the baseline among them, each red set named before the run and hashed:
+- step 1's 225 rows, M-74 re-cut, and M-79's red set grown by P-SENDAPI's new row;
 - the sweep's 26, W-1 to W-26.
 
 The first run stopped short. `README.org` was edited while it ran, so the runner
@@ -1519,7 +1521,9 @@ and had six mismatches, all prediction errors:
 - **M-75 also reddens P-QSTAY.** With the outer test gone, its read-start reaches a
   take that leaves the queue full.
 - **W-3 left C-CLOSEALLOC green.** `allocated` keeps the least of three calls, and a
-  close the mutant leaves open writes only at the first.
+  close the mutant leaves open writes only at the first. (M3.3's review: this was
+  the check's gap, not a prediction error. C-CLOSEALLOC now makes its connection
+  afresh in the thunk, and W-3 fails it.)
 - **W-6, W-17 and W-20 also redden P-PURE**, through a raise: its second take is
   refused once its hello was not delivered.
 - **W-8 also reddens P-UTF8END**: its `ended-at` row feeds a byte at a time, which
@@ -1569,7 +1573,404 @@ connection the final suite made, 731:
 - the rest are M3.1's and M3.2's categories.
 
 No answer disagreed. Every guard and branch of both libraries is flipped by a
-mutant of M3's, or recorded with why none was run. M3's mutation log holds 251
-rows on the final tree. The codec the protocol reads through is held by M2's 98
+mutant of M3's, or recorded with why none was run. (M3.3's review found three this
+missed, and its section lists them, flipped.) M3's mutation log holds 251 rows on the
+final tree. The codec the protocol reads through is held by M2's 98
 frame mutants, last run in M3.1's review on `frame.sls` 1f004d2, unchanged since.
 README.org's status says so.
+
+## M3.3's review — the fixes
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-06.
+
+The blobs:
+- `protocol.sls` 0324812, and `test-protocol.sps` 922769e, 85 checks;
+- unchanged: `limits.sls` cdf3ec3, `frame.sls` 1f004d2, `test-limits.sps` 16c37e2
+  and `test-frame.sps` b6c0444.
+
+The review, `/code-review` at max effort over #23 and #24, reported 15 findings, and
+the owner said "fix all". One choice was the owner's, by form: "Any bytes", the
+recommended (0001's amendment of 2026-10-06).
+
+The runner is step 2's, with one option: it runs #24's protocol suite in place of
+this one, for the gap run. A limits mutant that refuses `open` now stops the protocol
+suite with a harness error, exit 2, since `open` is made in the suite's body.
+
+### What changed in the library
+
+- **`arm!` and `disarm!`** change the record and the action together, and every arm
+  and disarm goes through them. The one-site slips the mutants below make (an arm
+  told and not recorded, a disarm recorded and not told) must now bypass them.
+- **The clock's stop is `bytes!`'s**, after the read's own actions. It disarms what
+  is armed whenever the clock may run and the read stopped reading, since ping or
+  pong is armed then. `deliver!` is the queue's again.
+- **Re-arming allocates nothing.** A re-armed step's actions are reversed onto a
+  constant tail, `((arm-deadline ping))` or `((read-start) (arm-deadline ping))`.
+- **An empty read re-arms nothing.**
+- **`read-waiting!`** reads what waits: at a take, bounded; at the close timeout and
+  the stream's end, whatever the queue holds. It replaces `finish!` and `taken!`'s
+  own copy.
+
+### What changed in the suite
+
+| key | change | finding |
+|---|---|---|
+| K-ALLOC | new: re-arming allocates nothing, pinging on against off: one byte of a header, a message, a ping answered, a take that starts reading | 9 |
+| K-REARM | a ping answered and a message in one read, so a re-armed read's own actions are held in order | 9 |
+| K-ENDS | a message before a failure, and a ping answered before a close, in one read | 4 |
+| K-API | a passing refused after a client's close with ping armed, and after a failure with pong armed | 3 |
+| K-AGREE | each step's named deadline beside what its actions told; four more sequences: a client's close, a failure with pong armed, the stream's end, and pinging off | 7, 13 |
+| K-PONGWAIT | renamed; an empty read while the pong is awaited, then 1011 | 13, 14 |
+| K-QUIET | renamed: a take that starts reading re-arms too | 13 |
+| P-API | three improper lists: a take, a close, an end | 5 |
+| C-CLOSEALLOC | each close measured on a connection made afresh | 8 |
+
+`open` is made in the suite's body. The header no longer says ws was fed every case:
+the clock's are not replayed.
+
+### The oracles
+
+0001's amendment of 2026-10-06, and the design's §5 as amended. ws 7.5.10 was fed the
+suite's 784 connections through the shim and replay of step 1:
+- 670 answered the same, and 50 stepped nothing, the three improper lists' among them;
+- 16 are the clock's, a ping or pong deadline passing: step 2's 13, and the new rows
+  of K-PONGWAIT, K-API and K-AGREE that pass one;
+- the rest are M3.1's and M3.2's categories, as there.
+
+No answer disagreed. The suite through the shim fails its four allocation checks, as
+before, since the shim's logging allocates.
+
+### The test-first run
+
+Named before the run and hashed (`eb0e8dd`). Against #24's library (dd532f7), 83
+passes, and 2 red, exactly as named:
+- K-ALLOC, `(32 32 32 32)`: each re-armed read, and the take, cost 32 B more pinging;
+- K-PONGWAIT: the empty read re-armed ping, so the pong's deadline pinged again.
+
+### The gap run
+
+On the review's library, #24's suite in place of this one: 19 rows, each red set named
+before the run and hashed, 0 mismatches.
+- **The baseline** gave 141 passes, #24's 84 among them.
+- **The review's gaps each pass #24's suite whole**: X-1 to X-5, and X-8 to X-11.
+- **The mutants the new checks newly redden** keep #24's sets there: M-2, S-3, C-23
+  and W-3 (C-CLOSEALLOC), and K-8, K-16, K-21, C-26 and C-27 (K-AGREE).
+
+### The runs
+
+**The first run**, 269 rows, the baseline among them, each red set named before the
+run and hashed (`3002ea8`): the sweep's 250 mutants and the baseline, re-cut where the
+fixes rewrote their lines, red sets changed by the review's suite, and X-1 to X-18. It
+had three mismatches:
+- **C-25 was a harness error.** Its re-cut left a paren too many, so the library did
+  not load.
+- **C-5 and K-2 were prediction errors, with one cause.** `stop-clock!` disarmed only
+  ping or pong. The stop in `bytes!` disarms whatever is armed, by the invariant that
+  ping or pong is armed whenever the clock may run. C-5 arms close's deadline at the
+  start, and K-2 arms none. Each breaks the invariant, so the stop now tells the
+  disarm that P-CAPDEF, C-STALL and P-QCOUNT expect. C-5 no longer reddens those
+  three, nor K-2 C-STALL and P-QCOUNT. Each check keeps other killers.
+
+**A second batch**, named before any of its runs and hashed (`5cbb48d`): X-19 and
+X-20, the fixes' new guards the other way, found listing them for the inventory below.
+
+**The final run**, 271 rows: the first run's, C-25's cut mended, C-5's and K-2's red
+sets as found, and X-19 and X-20. It had 0 mismatches: 270 mutants and the baseline.
+The runner's last line now counts a run's mutants and its baseline apart.
+
+**Re-cut**, 34: the 31 whose lines the fixes rewrote, and three whose lines still
+matched but changed in meaning. R-4 and W-22 now cut `read-waiting!`, which a take
+shares, so each is cut to the end alone. R-15's replacement named `armed`, a variable
+the fixes took out, so it binds its own. Each breaks the same property as before,
+with two exceptions:
+- **K-11** tells a re-armed read's arm before its own actions. Before, the arm came
+  before the read, so reads that stop reading or end were reordered too.
+- **K-13** runs the whole clock though pinging is off: a read re-arms it, a full
+  queue's stop disarms it, a take arms it. Before, only the re-arm ran.
+
+**Red sets that changed**, by the review's checks and the fixes:
+
+| # | mutation | re-cut | red besides | no longer red |
+|---|---|---|---|---|
+| M-2 | the end does not end the connection |  | C-CLOSEALLOC, K-API, K-AGREE | — |
+| M-3 | the end's actions in the reverse order | yes | K-PONGWAIT | — |
+| M-4 | the server's close's code little-endian, a failure's among them |  | K-PONGWAIT | — |
+| M-5 | 1000 told where no close came: a failure, the stream's end, the close timeout |  | K-PONGWAIT | — |
+| M-6 | told clean where no close came: a failure, the stream's end, the close timeout |  | K-PONGWAIT | — |
+| M-7 | a failure logged without why |  | K-PONGWAIT | — |
+| M-8 | a failure leaves the stream open |  | K-PONGWAIT | — |
+| M-30 | a ping not answered |  | K-ENDS | — |
+| M-32 | a pong without its ping's payload |  | K-ENDS | — |
+| M-40 | a message's bytes not queued |  | K-ALLOC | — |
+| M-41 | a message not counted |  | K-ALLOC | — |
+| M-42 | read-stop not answered | yes | — | — |
+| M-43 | reading not marked stopped | yes | — | — |
+| M-49 | a control frame's count not begun again |  | K-ENDS | — |
+| M-50 | a continuation needs no message |  | K-ENDS | — |
+| M-77 | what waits not let go before a take reads it | yes | — | — |
+| M-84 | every message delivered as binary |  | K-ENDS | — |
+| S-1 | a delivery does not end the message |  | K-ENDS | — |
+| S-3 | a control frame of no payload not answered |  | C-CLOSEALLOC | — |
+| S-6 | every message begun as binary |  | K-ENDS | — |
+| S-7 | the reading goes on past the end |  | K-ENDS | — |
+| F-1 | frame-control? leaves out a close |  | K-API, K-AGREE | — |
+| C-1 | the end disarms nothing, told or recorded | yes | C-API2, K-API, K-AGREE | — |
+| C-2 | the end disarms, armed or not | yes | K-PONGWAIT | — |
+| C-3 | the end tells its disarm and records none: the deadline kept armed past the end | yes | K-API, K-AGREE | — |
+| C-5 | a new connection's deadline armed as close's |  | — | P-CAPDEF, C-STALL, P-QCOUNT |
+| C-7 | failing never writes a close |  | K-PONGWAIT | — |
+| C-23 | a close after the end written |  | C-CLOSEALLOC | — |
+| C-25 | the server's close arms no deadline in its state | yes | — | — |
+| C-26 | the arm left out of the server's close's actions | yes | K-AGREE | — |
+| C-27 | the deadline armed named ping | yes | K-AGREE | — |
+| C-30 | the stream's end ignored |  | K-AGREE | — |
+| C-34 | the passed deadline not cleared before its kind's actions, so an end disarms it again |  | K-PONGWAIT | — |
+| C-36 | a close of the wrong shape |  | P-API | — |
+| C-37 | an end of the wrong shape |  | P-API | — |
+| R-3 | what waits read at the end stops at a full queue | yes | — | — |
+| R-4 | what waits read at the end, and kept | yes | — | — |
+| R-17 | the server's close a byte long |  | K-PONGWAIT | — |
+| R-15 | the unfinished message kept when the end finds a deadline armed | yes | — | — |
+| K-2 | a new connection arms no deadline |  | — | C-STALL, P-QCOUNT |
+| K-4 | ws-deadline names ping whenever pinging is on | yes | — | — |
+| K-5 | nothing re-arms ping | yes | — | — |
+| K-6 | ping re-armed once the server's close is sent | yes | — | — |
+| K-7 | ping re-armed though reading has stopped | yes | — | — |
+| K-8 | the re-arm's action names pong | yes | K-AGREE | — |
+| K-9 | the re-arm recorded as pong | yes | — | — |
+| K-10 | the re-arm not recorded | yes | — | — |
+| K-11 | a re-armed read tells its arm before its own actions | yes | K-ALLOC | P-CAPDEF, C-STALL, K-STOP, K-CLOSE, K-ENDS |
+| K-12 | reading started again re-arms nothing | yes | — | — |
+| K-13 | the ping clock runs though pinging is off: a read re-arms it, a full queue's stop disarms it, a take arms it | yes | P-CAP, P-CAPFRAG, C-STOP, C-FINISH, P-QEND, P-TAKEN | P-GROW |
+| K-14 | reading stopped leaves the clock running | yes | — | — |
+| K-15 | reading stopped disarms whatever is armed, the close's deadline too | yes | — | — |
+| K-16 | the clock stopped with no disarm told | yes | K-AGREE | — |
+| K-17 | the clock's disarm told, and still recorded armed | yes | — | — |
+| K-18 | the clock disarmed before read-stop | yes | — | — |
+| K-19 | reading stopped tells a disarm though nothing is armed | yes | — | — |
+| K-21 | the ping's action arms ping | yes | K-AGREE | — |
+| K-22 | the ping recorded as ping, so no pong is awaited | yes | K-PONGWAIT | — |
+| K-23 | no pong fails with 1001 |  | K-PONGWAIT | — |
+| K-24 | no pong logged as the pong's timeout |  | K-PONGWAIT | — |
+| K-25 | no pong taken for the close timeout |  | K-PONGWAIT | — |
+| K-26 | the close's passing taken for the ping's | yes | — | — |
+| W-1 | an interval of 0 pings too |  | K-AGREE | P-GROW |
+| W-3 | a close taken for a pong |  | C-CLOSEALLOC, K-API, K-AGREE | — |
+| W-17 | a take never reads what waits | yes | — | — |
+| W-18 | reading started again not recorded |  | — | K-STOP, P-QCOUNT |
+| W-22 | the end never reads what waits | yes | — | — |
+| W-23 | an end with no close received never ends the connection |  | K-AGREE | — |
+
+- **K-11 no longer reddens P-CAPDEF, C-STALL, K-STOP, K-CLOSE and K-ENDS**, as its
+  re-cut reaches only re-armed reads.
+- **K-13 and W-1 no longer redden P-GROW**: the re-arm they turn on allocates nothing
+  now, and P-GROW holds allocation alone.
+- **W-18 no longer reddens K-STOP and P-QCOUNT.** `taken!` arms ping whenever the
+  clock may run, no longer asking whether reading is on. So with reading's start not
+  recorded, the take still tells and arms as before, and only a read after it fails.
+
+**The review's own:**
+
+| # | mutation | red |
+|---|---|---|
+| X-1 | the end clears the deadline only when the close's was armed (the review's kend) | K-API, K-AGREE |
+| X-2 | the end drops its step's earlier actions when a deadline is armed (the review's A) | K-ENDS |
+| X-3 | the end tells its disarm before its step's earlier actions (the review's B) | K-ENDS |
+| X-4 | ws-deadline names nothing while pinging is off (the review's kdl) | K-AGREE |
+| X-5 | an event not checked for a list: an improper one refused by length | P-API |
+| X-6 | the buffer grows by doubling alone, whatever has arrived (room!'s max, the other way) | P-HELLO, P-ONE, P-FRAG57, P-FRAGS, P-B2B, P-PAIRS, P-CONT, P-UNFIN, P-PONG, P-PINGMID, P-CAP, P-CAPFRAG, P-CAPDEF, P-UTF8OK, P-UTF8AT, P-UTF8SPLIT, P-UTF8END, P-BIN, P-AFTER, P-CLOSEMID, C-FAIL, C-AFTER, C-STOP, C-TIMEOUT, C-STALL, C-END, C-FINISH, K-PING, K-PONG, K-REARM, K-PONGWAIT, K-QUIET, K-STOP, K-CLOSE, K-ENDS, K-OFF, K-API, K-AGREE, K-ALLOC, P-SENDMID, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD, P-QEND, P-TAKEN, P-QAPI, P-PURE, P-ALLOC, P-GROW, P-KEEP, P-ENDKEEP, C-ENDKEEP2, C-KEEPWAIT2, C-KEEPWAIT3, P-TWO |
+| X-7 | room for the rest of the frame, not of the read (read!'s min, the other way) | P-GROW |
+| X-8 | an empty read re-arms ping (#24's) | K-PONGWAIT |
+| X-9 | a re-armed read allocates its arm and a copy (#24's) | K-ALLOC |
+| X-10 | a take that starts reading allocates its actions (#24's) | K-ALLOC |
+| X-11 | a re-armed read's own actions told newest first | K-REARM |
+| X-12 | websockets' rule: while the pong is awaited, only a read holding a pong re-arms | K-PONGWAIT |
+| X-13 | a take reads all of what waits, past a full queue (read-waiting!'s bounded?, the other way) | C-STOP, P-QWAIT |
+| X-14 | a re-armed step, or a take that starts reading, drops its own actions (reverse-onto's end) | K-PING, K-REARM, K-PONGWAIT, K-QUIET, K-ALLOC, P-QCOUNT, P-QREAD |
+| X-15 | a take that starts reading arms ping, pinging off or the close sent | C-STOP, K-CLOSE, K-OFF, P-QBYTES, P-QSTAY, P-QWAIT, P-QREAD |
+| X-16 | arm! records nothing | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-STOP, C-TIMEOUT, C-API2, C-STALL, C-ENDCLOSING, C-ENDED3, C-FINISH, K-PING, K-PONG, K-PONGWAIT, K-STOP, K-CLOSE, K-ENDS, K-API, K-AGREE, C-ENDKEEP2, C-KEEPWAIT2 |
+| X-17 | disarm! clears nothing | C-API2, K-API, K-AGREE |
+| X-18 | disarm! tells nothing | P-CAPDEF, C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-STOP, C-STALL, C-ENDCLOSING, C-FINISH, K-STOP, K-CLOSE, K-ENDS, K-AGREE, P-QCOUNT |
+| X-19 | the ping clock never runs at a read or a take (clock? answers #f) | P-CAPDEF, C-STALL, K-PING, K-PONG, K-REARM, K-PONGWAIT, K-QUIET, K-STOP, K-CLOSE, K-API, K-AGREE, P-QCOUNT |
+| X-20 | every read the clock may see disarms it, reading stopped or not | K-PING, K-PONG, K-REARM, K-PONGWAIT, K-QUIET, K-AGREE, K-ALLOC, P-QCOUNT |
+
+Every check, 15 in the limits suite and 85 in the protocol suite, has a killer that
+reddens it by value. Each new row has one through that row:
+
+| check | row | red through it, among them |
+|---|---|---|
+| K-ALLOC | a header byte, a message, a ping | X-9, K-11 |
+| K-ALLOC | a take that starts reading | X-10 |
+| K-REARM | a ping answered and a message | X-11 |
+| K-ENDS | a message before a failure | X-2, X-3, M-84, S-6 |
+| K-ENDS | a ping answered before a close | X-2, X-3, M-30, M-32, M-49 |
+| K-API | after a client's close, ping armed | X-1, C-3, M-2, W-3 |
+| K-API | after a failure, pong armed | X-1, C-3, M-2 |
+| K-AGREE | told, the first sequence | K-8, K-16, K-21, C-26, C-27 |
+| K-AGREE | a client's close | X-1, C-3, M-2, W-3 |
+| K-AGREE | a failure with pong armed | X-1, C-3, M-2, K-21 |
+| K-AGREE | the stream's end | X-1, C-3, C-30, W-23 |
+| K-AGREE | pinging off | X-4, W-1, C-26, C-27 |
+| K-PONGWAIT | an empty read | X-8, K-23, K-24, K-25 |
+| P-API | the improper take, close and end | X-5; C-36 the close, C-37 the end |
+| C-CLOSEALLOC | after the end, made afresh | W-3, C-23, M-2, S-3 |
+
+X-12, websockets' rule, reddens K-PONGWAIT's first row alone: it is the one check that
+a message, not a pong, re-arms ping while the pong is awaited.
+
+### The sweep, redone
+
+Step 2's inventory missed three: `event-of!`'s test for a list, folded into M-79's
+with the length; and the other way of `room!`'s `max` and of `read!`'s `min`. Each now
+has its mutant, X-5, X-6 and X-7. The inventory was listed again for the fixed
+library: 114 guards and branches, 103 in the protocol and 11 in the limits, and 16
+effects. Each is flipped by a mutant of M3's, or recorded with why none was run: the
+same four as step 2. The fixes' own guards are flipped both ways, but two whose other
+way raises at once: `reverse-onto`'s end (X-14 one way; the other takes the empty
+list's car or cdr), and `read-waiting!`'s test for something waiting (W-17 and W-22
+one way; the other reads #f).
+
+| library | procedure | guard, branch or (effect) | the mutants that flip it, or why none |
+|---|---|---|---|
+| protocol | `make-ws-state` | limits checked | M-1 |
+| protocol | `make-ws-state` | pinging on: interval past 0 | K-1, W-1 |
+| protocol | `make-ws-state` | first deadline ping only when pinging | K-2, C-5 |
+| protocol | `ws-deadline` | a connection checked | K-3 |
+| protocol | `ws-deadline` | (effect) the kind recorded, named | K-4, X-4 |
+| protocol | `arm!` | (effect) the kind recorded | X-16; C-25, K-9, K-10, K-22 bypass it |
+| protocol | `disarm!` | (effect) none recorded | X-17; C-3, K-17, X-1 bypass it |
+| protocol | `disarm!` | (effect) the disarm told | X-18; C-1, K-16 bypass it |
+| protocol | `clock?` | pinging on | K-13 (true when off), X-19 (false when on) |
+| protocol | `clock?` | open | K-6 (true while closing), X-19 (false while open) |
+| protocol | `reverse-onto` | the actions' end | X-14; none run the other way: past the actions' end, taking the empty list's car or cdr raises at every re-arm |
+| protocol | `end!` | a deadline armed | C-1, C-2 |
+| protocol | `end!` | (effect) the disarm recorded | C-3, X-1 |
+| protocol | `end!` | (effect) the disarm after the step's own actions, before the end's | X-2, X-3 |
+| protocol | `fail!` | open: write a close | C-6, C-7 |
+| protocol | `fail!` | open: log the code | R-5 |
+| protocol | `sendable?` | 1000 to 1003, lower bound | M-9, M-10 |
+| protocol | `sendable?` | 1000 to 1003, upper bound | M-11, M-12 |
+| protocol | `sendable?` | 1007 to 1011, lower bound | M-13, M-14 |
+| protocol | `sendable?` | 1007 to 1011, upper bound | M-15, M-16 |
+| protocol | `sendable?` | 3000 to 4999, lower bound | M-17, M-18 |
+| protocol | `sendable?` | 3000 to 4999, upper bound | M-19, M-20 |
+| protocol | `closing!` | open: answer the close | C-8, C-9 |
+| protocol | `closing!` | an empty close | W-2 |
+| protocol | `closing!` | a close of one byte | M-23 |
+| protocol | `closing!` | a code no endpoint may send | M-24 |
+| protocol | `closing!` | a reason not UTF-8 | M-25, M-26 |
+| protocol | `control!` | a ping | M-30 |
+| protocol | `control!` | a pong | M-31 |
+| protocol | `control!` | a close | W-3 |
+| protocol | `full?` | a cap's worth of bytes | M-33, M-35 |
+| protocol | `full?` | max-queue messages | M-34, M-36 |
+| protocol | `deliver!` | a buffer of the message's length | M-37, M-38 |
+| protocol | `deliver!` | reading, and the queue full | W-4 (reading), M-42 and M-43 (the stop) |
+| protocol | `data-end!` | a frame not final | M-44 |
+| protocol | `data-end!` | a text not whole | M-45; S-8 equivalent |
+| protocol | `room!` | room needed | S-9 |
+| protocol | `room!` | the more of what is needed and a doubling | M-46 (what is needed), X-6 (a doubling) |
+| protocol | `room!` | a message's last frame | W-5 |
+| protocol | `room!` | a doubling past half the end | G-1, G-3 |
+| protocol | `room!` | the cap before the last frame | M-47 |
+| protocol | `header!` | a control frame of no payload | S-3 |
+| protocol | `header!` | a continuation with no message | M-50 |
+| protocol | `header!` | a continuation past the cap | M-51, M-52, M-53 |
+| protocol | `header!` | a continuation of no payload | S-4 |
+| protocol | `header!` | a message unfinished | M-54 |
+| protocol | `header!` | a first frame past the cap | M-55, M-56 |
+| protocol | `header!` | a first frame of no payload | S-5 |
+| protocol | `header!` | the dispatch by kind | none run: every kind the suite reads takes its clause; F-1 moves a close out of the control kinds, W-3 in control! |
+| protocol | `read!` | the connection ended | S-7, C-10 |
+| protocol | `read!` | the read's end | none run: taken out, a read that ends mid-payload loops forever; (fx>=? i end) is equivalent, since i never passes end |
+| protocol | `read!` | bounded, and the queue full | M-58, R-3 |
+| protocol | `read!` | a header or a payload | none run: every frame with a payload takes both ways; flipped, none can be read |
+| protocol | `read!` | a header not yet whole | none run: the other way loops forever |
+| protocol | `read!` | a refusal | M-60 (its reason); its code: 1002 in its place is equivalent, every refusal of the decoder being 1002 |
+| protocol | `read!` | a control frame | F-1 |
+| protocol | `read!` | a control frame's payload whole | W-7 |
+| protocol | `read!` | room for the less of the read's rest and the frame's | G-7 (the read's), X-7 (the frame's) |
+| protocol | `read!` | a text | M-63 |
+| protocol | `read!` | a byte no character goes on with | M-88 |
+| protocol | `read!` | a data frame's payload whole | W-8 |
+| protocol | `event-of!` | a list | X-5; M-79 with the length |
+| protocol | `event-of!` | of k elements | M-79 |
+| protocol | `bytes!` | a bytevector | W-12 |
+| protocol | `bytes!` | a fixnum start | Q-3 |
+| protocol | `bytes!` | a fixnum end | Q-4 |
+| protocol | `bytes!` | start at 0 or more | Q-5 |
+| protocol | `bytes!` | start at end or before | W-13 |
+| protocol | `bytes!` | end within the bytevector | W-14 |
+| protocol | `bytes!` | ended | M-65, C-11 |
+| protocol | `bytes!` | reading | M-66 |
+| protocol | `bytes!` | the clock may run | K-6, K-13, X-19 (through clock?); K-15, K-19 |
+| protocol | `bytes!` | reading stopped by the read | K-7 (never), X-20 (always); its disarm K-14, K-16, K-17, K-18 |
+| protocol | `bytes!` | bytes received | X-8 (always), K-5 (never) |
+| protocol | `bytes!` | (effect) the re-arm after the read's own actions, in their order, recorded | K-11, X-11, K-9, K-10; X-9 allocating |
+| protocol | `send!` | open | M-67, C-12 |
+| protocol | `send!` | text: the kind | W-15 |
+| protocol | `send!` | text: a string | M-71 |
+| protocol | `send!` | binary: the kind | M-70 |
+| protocol | `send!` | binary: a bytevector | W-16 |
+| protocol | `taken!` | a fixnum | Q-1 |
+| protocol | `taken!` | 0 or more | Q-2 |
+| protocol | `taken!` | a message queued | M-72 |
+| protocol | `taken!` | no more than is queued | M-73 |
+| protocol | `taken!` | reading stopped | M-74 |
+| protocol | `read-waiting!` | something waits | W-17 (at a take), W-22 (at the end); none run the other way: with nothing waiting, reading #f raises at every take and end |
+| protocol | `read-waiting!` | bounded | X-13 (a take unbounded), R-3 (the end bounded) |
+| protocol | `read-waiting!` | (effect) what waits let go | M-77 (at a take), R-4 (at the end) |
+| protocol | `taken!` | ended, or the queue full again | M-75, M-76, C-13 |
+| protocol | `taken!` | the clock may run | K-12 (never), X-15 (always); X-19 through clock? |
+| protocol | `taken!` | (effect) the arm recorded, the actions allocated | K-9, K-10; X-10 allocating |
+| protocol | `fits-close?` | past 123 bytes | C-17, C-18 |
+| protocol | `fits-close?` | the reason's end | W-21 |
+| protocol | `fits-close?` | a character's row | R-6 to R-12, R-18 |
+| protocol | `close!` | a fixnum code | C-14 |
+| protocol | `close!` | a code an endpoint may send | C-15 |
+| protocol | `close!` | a string reason | C-16 |
+| protocol | `close!` | a reason that fits | R-13, R-14 |
+| protocol | `close!` | open | C-22, C-23 |
+| protocol | `close!` | (effect) the close's deadline armed and recorded | C-25, C-26, C-27 |
+| protocol | `lost!` | ended already | R-16, W-23 |
+| protocol | `stream-end!` | why a symbol | C-28 |
+| protocol | `passed!` | a deadline armed | C-33 |
+| protocol | `passed!` | ping | K-26 |
+| protocol | `passed!` | (effect) the pong armed and recorded | K-21, K-22 |
+| protocol | `passed!` | pong | K-25 |
+| protocol | `ws-step` | a pair | M-78 |
+| protocol | `ws-step` | a read's shape | W-9 |
+| protocol | `ws-step` | a send's shape | W-10 |
+| protocol | `ws-step` | a take's shape | W-11 |
+| protocol | `ws-step` | a close's shape | C-36 |
+| protocol | `ws-step` | an end's shape | C-37 |
+| protocol | `ws-step` | a deadline's shape | C-38 |
+| protocol | `ws-step` | an event outside the vocabulary | M-80 |
+| limits | `checked` | a fixnum | L-29, L-30 |
+| limits | `checked` | at or above its least | L-9 to L-15 |
+| limits | `checked` | the low water at or below the high | L-26, L-27 |
+| limits | `named` | the field named | W-24 |
+| limits | `websocket-limits-with` | a pair | L-35 |
+| limits | `websocket-limits-with` | a field's name | L-33 |
+| limits | `websocket-limits-with` | overridden | L-34 |
+| limits | `digits?` | an ASCII digit | L-20, L-21 |
+| limits | `read-value` | absent | W-25 |
+| limits | `read-value` | empty | L-22 |
+| limits | `read-value` | digits | L-20, L-21 |
+| protocol | `read!` | (effect) what waits ends at the read's end | W-6 |
+| protocol | `taken!` | (effect) the take's bytes off the queue | W-19 |
+| protocol | `taken!` | (effect) the take's message off the queue | W-20 |
+| protocol | `taken!` | (effect) reading recorded as started | W-18 |
+| limits | `read-value` | (effect) digits read in base 10 | W-26 |
+
+### Records corrected
+
+- **Every "N mutants and a baseline"** in progress.md since M3.1's review counted the
+  baseline twice: it is one of the rows. They read 144, 173, 178, 184, 198, 224 and
+  250 now. Step 1's and step 2's "225 rows and a baseline" and "251 rows and a
+  baseline" here now say the baseline is among them.
+- **Step 2's W-3** "left C-CLOSEALLOC green", recorded as a prediction error. It was
+  the check's gap: `allocated` calls its thunk three times, and the close the mutant
+  left open wrote only at the first. C-CLOSEALLOC now makes its connection afresh in
+  the thunk, and W-3 fails it.

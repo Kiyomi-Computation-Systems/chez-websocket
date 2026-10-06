@@ -680,7 +680,7 @@ The owner's `/code-review high` on #16 and #17 found nine things, and all nine a
 
 The rows that held guards #17 already had pass there. Their gap mutants, Q-1 to Q-5 and L-35, pass #17's suites, and each fails its check here.
 
-**145 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree. The first run had four mismatches:
+**144 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree. The first run had four mismatches:
 - **E-1 survived.** The ended connection's check compared two heaps measured apart, and they moved by about 87 KB between measures. It now measures each connection's footprint, back to back, after a warm-up, against half the fragment.
 - **Three were prediction errors.**
 
@@ -772,8 +772,8 @@ No answer disagreed.
 
 **Tests first.** The step's suite against main's library (M3.1's, 132c307) gave 48 passes, and the 11 new checks red.
 
-**174 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
-- M3.1's review's 145, re-cut where this step rewrote their lines, each red set grown by the checks of this step it also reddens;
+**173 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- M3.1's review's 144, re-cut where this step rewrote their lines, each red set grown by the checks of this step it also reddens;
 - this step's 29.
 
 0 mismatches. C-3 is equivalent here: nothing reads the deadline after the end until step 2. Every check has a killer that reddens it by value.
@@ -806,8 +806,8 @@ ws 7.5.10 was fed every connection, 660. 584 answered the same and 36 stepped no
 
 **Tests first.** The step's suite against step 1's library (00559db) gave 59 passes, and the 4 new checks red.
 
-**179 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
-- step 1's 174, each red set grown by this step's checks it also reddens;
+**178 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- step 1's 173, each red set grown by this step's checks it also reddens;
 - this step's 5.
 
 0 mismatches. C-3, equivalent in step 1, is killed here. Every check has a killer that reddens it by value.
@@ -839,8 +839,8 @@ ws 7.5.10 was fed every connection, 676. 596 answered the same and 38 stepped no
 
 **Tests first.** The step's suite against step 2's library (4f944ea) gave 63 passes, and the 5 new checks red.
 
-**185 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
-- step 2's 179, each red set grown by this step's checks it also reddens;
+**184 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this step's tree:
+- step 2's 178, each red set grown by this step's checks it also reddens;
 - this step's 6.
 
 0 mismatches. Every check has a killer that reddens it by value.
@@ -874,8 +874,8 @@ Two lines no check could tell from their absence were taken out:
 
 The other new checks pass there. The reason's measure and the end's release behaved the same in #21; their mutants hold them.
 
-**199 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree:
-- step 3's 185, re-cut where the review rewrote their lines, less four withdrawn;
+**198 mutants and a baseline** (m3-mutations.md), each red set named before the run, on this branch's tree:
+- step 3's 184, re-cut where the review rewrote their lines, less four withdrawn;
 - the review's 18.
 
 The first run had four mismatches:
@@ -943,7 +943,7 @@ The suite's `lim` and `open` now turn pinging off, so a check of messages or clo
 **The oracles.** Decision 0001's item 2 and the design's §5. RFC 6455's raw text: §5.5.2, a ping may carry no payload; §5.5.3, an unsolicited pong; §7.4.1, 1011. websockets 17.2 at the tag: its keepalive pings every 20 s, busy or not, with four random bytes, and fails with 1011 when no pong comes in 20 s. ws 7.5.10 keeps no clock. Fed the suite's 730 connections, no answer disagreed; the 13 whose ping or pong deadline passed are the clock's, not replayed.
 
 **Taken without a form:**
-- **How the clock starts:** `ws-deadline`, a new export, which the binding reads as it starts. This follows the server, whose core exports `conn-deadline` and whose shell arms a new connection's first deadline.
+- **How the clock starts:** `ws-deadline`, a new export, which the binding reads as it starts. (Corrected by M3.3's review: this runs the other way from the server, whose shell names a new connection's first deadline itself, `idle`, and arms it, never reading its core's `conn-deadline`.)
 - **When reading starts again, the clock starts afresh at `ping`**, though a ping was out when it stopped. 0001 says the clock "runs again once reading does".
 - **The ping carries no payload.** 0001's consequences count it at 2 bytes. websockets' carries four random bytes, to match its pong.
 - **The failure's close is 1011 with no reason**, as every failure's is, and `ping-timeout` is logged. websockets writes "keepalive ping timeout".
@@ -954,8 +954,8 @@ The suite's `lim` and `open` now turn pinging off, so a check of messages or clo
 - against main's library, the suite stopped at once: `ws-deadline` unbound, exit 255;
 - against main's library with a stub `ws-deadline` answering #f: 70 passes, and 14 red, exactly as named. They were the clock's eleven checks, all but the one for pinging off, and the three at the default limits.
 
-**225 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed:
-- M3.2's review's 199, seven re-cut where this step rewrote their lines, red sets changed by this step's checks;
+**224 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed:
+- M3.2's review's 198, seven re-cut where this step rewrote their lines, red sets changed by this step's checks;
 - this step's 26.
 
 Two limits mutants, L-12 and L-32, now stop the protocol suite at load: `open`'s interval of 0 is refused. The first run had three mismatches:
@@ -972,21 +972,21 @@ NEXT: step 2, the protocol's mutation sweep, stacked on this.
 
 M3.3, STEP 2 — THE PROTOCOL'S MUTATION SWEEP, AND M3'S EXIT. Branch `test/m3.3-2-sweep`, stacked on `feat/m3.3-1-ping-clock`. 2026-10-05.
 
-**The sweep.** The plan's M3.3 ends with the protocol's mutation sweep. Every guard and branch of `(websocket protocol)` and `(websocket limits)` was listed, as M3.1's review swept them, each with the mutants that flip it. There are 110:
+**The sweep.** The plan's M3.3 ends with the protocol's mutation sweep. Every guard and branch of `(websocket protocol)` and `(websocket limits)` was listed, as M3.1's review swept them, each with the mutants that flip it. There are 110 (M3.3's review found three more, below):
 - 84 an earlier mutant of M3's flipped;
 - 18 none flipped, and 3 one way only. The sweep's own mutants, W-1 to W-26, flip each of the 21. They include a close taken for a pong, an empty close read for a code, a data frame ended at every piece, and the reason of a close measured past its end. The sweep also changes five effects no mutant had changed.
-- 4 have no mutant run, each recorded with why. Taking out `read!`'s test for a read's end loops forever, and the other three are dispatches every frame takes both ways.
+- 4 have no mutant run, each recorded with why. Taking out `read!`'s test for a read's end, or flipping its answer to a header not yet whole, loops forever; its test for a header or a payload, flipped, reads no frame with a payload; and `header!`'s dispatch by kind takes every clause the suite reads.
 - 1 was taken out.
 
 **What it changed:**
 - **`taken!`'s outer test for a full queue is taken out.** No check could tell it from its absence: `read!` stashes what waits again at a full queue, and the inner test asks again. The suite gave 84 passes against step 1's library and against this one.
 - **A send of the wrong shape is checked**, a gap the sweep found. Its mutant, W-10, passed all 84 of step 1's checks. P-SENDAPI gained a row of three arguments, and W-10 now fails it.
 
-**251 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed: step 1's 225, M-74 re-cut and M-79's red set grown, and the sweep's 26.
+**250 mutants and a baseline** (m3-mutations.md), each red set named before the run and hashed: step 1's 224, M-74 re-cut and M-79's red set grown, and the sweep's 26.
 - **The first run stopped short.** I edited README.org while it ran, and the runner refuses to report on a tree that changed under it.
 - **Run again untouched**, it had six mismatches, all prediction errors:
   - M-75 now reaches a take that leaves the queue full;
-  - `allocated` keeps the least of three calls, so W-3's one-shot close measured 0;
+  - `allocated` keeps the least of three calls, so W-3's one-shot close measured 0 (M3.3's review: the check's gap, not a prediction error);
   - three mutants redden P-PURE through its refused second take;
   - W-8 reddens P-UTF8END through `ended-at`'s byte-at-a-time feed.
 - **The final run had 0 mismatches.** Every check, 15 in the limits suite and 84 in the protocol suite, has a killer that reddens it by value.
@@ -998,3 +998,58 @@ ws 7.5.10 was fed the final suite's 731 connections. 623 answered the same, 47 s
 `make test` green before the commit (Darwin arm64): eight suites, 222 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
 
 NEXT: M4.1, the handshake, when the owner asks; first this step and step 1 go through review and the closing ritual.
+
+---
+
+M3.3'S REVIEW — THE FIXES. Branch `fix/m3.3-review`, stacked on `test/m3.3-2-sweep`. 2026-10-06.
+
+On the owner's `/code-review` at max effort, over #23 and #24: 15 findings, then "fix all". One choice was the owner's.
+
+**DECIDED by form (2026-10-06), the recommended: "Any bytes"**, for "While a ping waits for its pong, what should count as the client answering?". Any bytes received re-arm ping while the pong is awaited too, as built. 0001 is amended: the connection fails 1011 if nothing comes within 20 s of the ping. Weighed: "Only a pong", websockets' rule, under which a live client whose pong waits behind its own 1,000-byte frame, half arrived, was failed with 1011.
+
+**`(websocket protocol)`**:
+- **`arm!` and `disarm!`** change the record and the action together. Every arm and disarm goes through them, so the slips the mutants make by hand cannot be written by accident (findings 3, 15).
+- **The clock's stop moved from `deliver!` to `bytes!`**, after the read's own actions: `deliver!` is the queue's again (finding 15).
+- **Re-arming allocates nothing.** A re-armed step's actions are reversed onto a constant tail, the server's `continued` idiom. A read cost 32 B more with pinging on; now it costs the same (finding 9).
+- **An empty read re-arms nothing**, as "any bytes received" says (finding 14).
+- **`read-waiting!`** is the read of what waits, at a take bounded and at the end not. `taken!` and `finish!` each had their own.
+- Comments: the header's close-deadline bullet, `end!`'s invariant, the record's field, `ws-deadline`'s (finding 11).
+
+**`tests/test-protocol.sps`, 85 checks**, one new:
+- **K-ALLOC**: re-arming allocates nothing, pinging on against off, for one byte of a header, a message, a ping answered, and a take that starts reading again (finding 9).
+- **K-REARM**: a ping answered and a message in one read, so the order of a re-armed read's own actions is held (finding 9).
+- **K-ENDS**: a message before a failure, and a ping answered before a close, in one read, so an end keeps its step's earlier actions (finding 4).
+- **K-API**: a passing after a client's close with ping armed, and after a failure with pong armed (finding 3).
+- **K-AGREE** compares each step's named deadline with what its actions told, in five sequences: ended with ping or pong armed, and with pinging off (findings 7, 13).
+- **K-PONGWAIT**: an empty read while the pong is awaited, then 1011 (finding 14). Renamed, with K-QUIET (finding 13).
+- **P-API**: three improper lists (finding 5).
+- **C-CLOSEALLOC** measures each close on a connection made afresh. `allocated` calls its thunk three times, so a close the first call wrote measured 0 (finding 8).
+- `open` is made in the suite's body, so limits that refuse it are a harness error, exit 2, not exit 255.
+
+**Records** (findings 1, 2, 6, 10, 11, 12):
+- **0001's amendment of 2026-10-06**, by form, with the consequence it leaves: "a dead client is found within 40 s" holds while the server reads. A full queue stops the clock and leaves nothing armed (finding 1).
+- **The design's §5**: the ping clock as amended; the pong's 20 s start when the ping is queued; re-arming allocates nothing. **§9**: the unforceable close widened to every close of a client that does not read, the pong's 1011 among them (finding 6); a client that sends and does not read, for M4's send side (findings 1, 2); when the pong's time starts, for M4.3's throttled reader (finding 10); the transport's deadline re-armed every read, about 56 ns.
+- **The plan's M4.3**: a client silent after the 101, pinged and failed 1011, so a binding that never arms `ws-deadline`'s deadline fails it (finding 12).
+- **Corrected**: every "N mutants and a baseline" since M3.1's review counted the baseline twice (144, 173, 178, 184, 198, 224 and 250); step 1's precedent for `ws-deadline` ran the other way, since the server's shell names its first deadline itself; step 2's reasons for the four rows with no mutant; W-3's C-CLOSEALLOC green was the check's gap, not a prediction error; the suite's header now says ws was fed every case but the clock's.
+
+**Kept, with its reason** (finding 12): the first deadline stays out of band. The server arms its own first deadline out of band too: its shell chooses `idle`. M4.3's silent-client check holds a binding that forgets.
+
+**Tests first.** Named and hashed before the run (`eb0e8dd`): against #24's library, 83 passes and 2 red, exactly as named: K-ALLOC, `(32 32 32 32)`, and K-PONGWAIT, whose empty read re-armed ping.
+
+**Mutants** (m3-mutations.md), each red set named before its run and hashed:
+- **The first run**, 269 rows: the sweep's 250 mutants and the baseline, 34 re-cut where the fixes rewrote their lines, red sets changed by the review's suite, and the review's 18, X-1 to X-18. Three mismatches:
+  - C-25's re-cut left a paren too many, a harness error;
+  - C-5 and K-2 were prediction errors, one cause: the stop in `bytes!` disarms whatever is armed, by the invariant that ping or pong is then, where `stop-clock!` asked for ping or pong. Each mutant breaks the invariant, so three default-limit checks no longer see them.
+- **A second batch**, X-19 and X-20: the new guards the other way, named while listing them.
+- **The final run**, 271 rows, 270 mutants and the baseline: 0 mismatches.
+- **The gap run**, the review's library against #24's suite, 19 rows: 0 mismatches. Each review gap passes #24's suite whole.
+
+Every check, 15 in the limits suite and 85 in the protocol suite, has a killer that reddens it by value, and each new row one through that row.
+
+**The sweep, redone.** Step 2's inventory missed `event-of!`'s test for a list, and the other way of `room!`'s `max` and of `read!`'s `min`; X-5, X-6 and X-7 flip them. Listed again for the fixed library: 114 guards and branches, and 16 effects.
+
+**ws 7.5.10** was fed the suite's 784 connections: 670 answered the same, 50 stepped nothing, and 16 are the clock's. No answer disagreed.
+
+`make test` green before the commit (Darwin arm64): eight suites, 223 expected passes, every pin ok. The protocol suite was green over 30 runs. `make prod` green.
+
+NEXT: the closing ritual for #23, #24 and this PR, when the owner asks; then M4.1.
