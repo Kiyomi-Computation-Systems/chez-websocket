@@ -3,7 +3,8 @@
 Date: 2026-10-04
 Status: accepted (user decision, 2026-10-04, by form: "1 MiB", "Read on, ping",
 "Whole messages", each the recommended). Amended 2026-10-05 by form (M3.1):
-"Also 16 messages", the recommended.
+"Also 16 messages", the recommended; and again (M3.2): "Deliver as before", the
+recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §5–§7
 
 ## Context
@@ -116,3 +117,39 @@ and bytes alone, as first decided.
 queue under a cap's worth, and the message that fills it, up to the cap. While
 reading is stopped, the rest of one read waits too, and no message arrives.
 
+## Amendment of 2026-10-05 (M3.2): reading on goes on after the server's close
+
+Building M3.2 found what item 2 left open. Once the server has sent its close, the
+client may not have seen it yet, so messages can still come before its answering
+close. Reading stops while the queue is full, so the client's close can sit unread
+behind it. Measured on two prototypes of the core (Darwin arm64, Chez 10.4.1):
+- **At the default limits**, a read of 16 messages, a 17th and the client's close
+  delivered the 16 and stopped reading, the rest waiting. Then the server's close:
+  - delivered as before, the client's close stayed unread, until the close timeout
+    would tell 1006;
+  - with messages dropped once the close is sent, the step read on, and the
+    connection closed at once, cleanly, with the client's 1000.
+- **Two messages the client sends after the server's close** were delivered, or
+  dropped: 2 of 2, or 0 of 2.
+- **The core's lines**, the prototypes': +82/-22, or +97/-23.
+
+The peers, read from source or run:
+- websockets 17.2 queues them, and pauses reading past 16 frames whether closing or
+  not (`asyncio/connection.py:740-749`, `asyncio/messages.py:266-289`);
+- ws 7.5.10, run on a fake socket, delivers them.
+
+Decided by form, the recommended, "Deliver as before":
+- **A message that comes after the server's close is delivered as before**, and
+  reading on is unchanged: websockets' way.
+- **The close timeout bounds the wait** for a client's close held back by a full
+  queue.
+- **M4's binding can take on behalf of a procedure that has ended**, so that
+  procedure's queue never holds the close back.
+
+Weighed and not taken: "Drop them". Once its close is sent, the server would read on
+whatever the queue holds, dropping data messages and answering pings, and read what
+waits at once. The handshake would end as soon as the client answered, but a
+message the client sent before seeing the close would be lost, unlike both peers.
+
+The form said 16 messages were queued. The probe it rested on had run with a queue
+of 2. It was run again at the default, 16, after the answer, with the same outcome.

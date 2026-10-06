@@ -667,3 +667,217 @@ Notes:
   ends.
 - **Every check has its killers, each at least one by value.** Fifteen mutants
   still redden some check through a raise.
+
+## M3.2, step 1 — the server's close, and closes crossing
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-05.
+
+The blobs:
+- `protocol.sls` 00559db, and `test-protocol.sps` 1fc97be, 59 checks;
+- unchanged from M3.1's review: `limits.sls` cdf3ec3, `frame.sls` 1f004d2,
+  `test-limits.sps` 16c37e2 and `test-frame.sps` b6c0444.
+
+The runner is M3.1's review's, run on a named tree, three suites a mutant.
+
+### The form, and what it was measured on
+
+"Deliver as before", the recommended (0001's second amendment). Two prototypes of
+the core, the step as built, and one that drops data messages once the server's
+close is sent and reads what waits at once:
+
+| probe | delivered as before | dropped |
+|---|---|---|
+| default limits: 16 messages queued, then a 17th and the client's close waiting; the server's close | the client's close unread | the client's 1000 told, cleanly, at once |
+| two messages after the server's close, then the client's close | 2 delivered | 0 delivered |
+| `protocol.sls`, against M3.1's | +82/-22 | +97/-23 |
+
+The form said 16 messages were queued. The first probe had run with a queue of 2.
+It was run again at 16 after the answer, with the same outcome.
+
+The PR shape was decided by form too: "Three stacked PRs", the recommended, one a
+bullet of the plan's. Each step's library and tests against the step below:
+- step 1: +96/-45 and +141/-2;
+- step 2: +21/-6 and +48;
+- step 3: +18/-1 and +33.
+
+### The oracles
+
+- **RFC 6455's raw text**:
+  - §5.5: a control frame's payload is at most 125 bytes, so a close's reason is
+    at most 123.
+  - §5.5.1: a close received is answered unless one was sent. Once a close has gone
+    each way, the stream closes at once. Two closes may cross.
+  - §5.5.2: a ping is answered unless a close has been received.
+  - §7.1.2: a close is sent with its code and reason.
+  - §7.1.5 and §7.1.6: the code and reason told are the first close received's.
+  - §7.1.7: failing sends a close, so a second is never sent.
+  - §7.4.1: 1005, 1006 and 1015 are never set in a close.
+- **The design's §5**: the events, the actions, and the close deadline named by its
+  kind.
+- **The form.**
+- **websockets 17.2** (a1664f4), read through `gh api`. It answers pings while
+  closing (`protocol.py`, `send_pong`, `recv_frame`), and queues data frames in any
+  state (`asyncio/connection.py:740-749`). Its queue pauses reading past its high
+  water whatever the state (`asyncio/messages.py:266-289`).
+- **ws 7.5.10**, from a local checkout. A logging shim of the library recorded every
+  connection the suite made, 651, and a script replayed each one into ws's
+  WebSocket as a server's, on a fake socket:
+  - each read was pushed in the same pieces;
+  - a close went in as `ws.close(code, reason)`;
+  - the fake socket was closed by its client once ws ended it, as a client's TCP
+    close answers a server's.
+
+  Compared: the messages, the pongs and closes written, a failure's code, and the
+  code and reason told. 578 answered the same and 35 stepped nothing. The rest, each
+  in a named category:
+
+  | count | category |
+  |---|---|
+  | 18 | ws judges UTF-8 only at a message's end (M3.1) |
+  | 14 | ws echoes a close's reason too; ours its code alone (M3.1) |
+  | 3 | ws accepts 1012 to 1014 (M3.1) |
+  | 2 | M2.1's length forms |
+  | 1 | ws answers no ping once its close is sent: `pong()` refuses while closing |
+
+  Of the 50 connections that step a close, 49 answered the same, and the other
+  is the ping. No answer disagreed.
+
+### The test-first runs
+
+The step's suite against M3.1's library (132c307): 48 passes, and the 11 new checks
+red, each through an event M3.1 did not have.
+
+### The mutants
+
+The new checks' keys:
+
+| key | check |
+|---|---|
+| C-SEND | the server's close is written with its code and reason, and arms the close deadline… |
+| C-123 | a close's reason of 123 bytes, the most a close holds past its code (§5.5), is sent whole… |
+| C-REF | a close the server may not send is an assertion naming ws-step, open, closing or ended… |
+| C-CROSS | closes crossing (§5.5.1, §7.1.5)… read whole, a byte at a time, and cut at every point |
+| C-ANSWER | the client's close answering the server's is told, its code or 1005 for none… |
+| C-BADCLOSE | a client's close after the server's that fails its checks fails with no second close… |
+| C-FAIL | failing after the server's close writes no second close (§7.1.7)… |
+| C-AFTER | after the server's close, a ping is answered… and messages are delivered as before (by form)… |
+| C-ENDED1 | once the connection has ended, a close answers nothing… |
+| C-API1 | a send once the server's close is sent is an assertion naming ws-step… a close of the wrong shape |
+| C-STOP | the server's close while reading is stopped leaves it stopped (by form)… |
+
+**The runs.** The predictions were first named for the whole slice, on its tree:
+185 rows, 0 mismatches. It ran again, 0 mismatches each time, after three changes:
+- the checks were split one to a bullet;
+- the end's shape check gained the rows an end must pass (step 3);
+- the retention check came to answer `kept` (step 2).
+
+On this step's tree, 174 rows, 0 mismatches. They are:
+- **M3.1's review's 145.**
+  - Re-cut where this step rewrote their lines: M-2, M-3, M-8, M-21, M-22, M-27,
+    M-65, M-67, M-75, M-76, M-85, M-86 and S-7, each breaking the same property as
+    before.
+  - E-1 now cuts `end!`'s release of the message alone.
+  - M-5, M-6 and M-29 are named for what they now break: 1006 is told by one
+    procedure wherever no close came, and an empty close is told by the same
+    `clean` as one with a code.
+- **This step's 29**, C-1 to C-40 less the eleven whose lines are steps 2's and 3's.
+
+**M3.1's rows whose red sets grew**, by this step's checks. M-29 also reddens M3.1's
+P-CLOSE0, since an empty close is told by the same `clean` now. The other 91 rows of
+the review's table are red as there.
+
+| # | mutation | red besides |
+|---|---|---|
+| L-34 | websocket-limits-with ignores its overrides | C-FAIL, C-STOP |
+| M-2 | the end does not end the connection | C-FAIL, C-ENDED1, C-STOP |
+| M-3 | the end's actions in the reverse order | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-ENDED1, C-STOP |
+| M-4 | a failing close's code little-endian | C-ENDED1 |
+| M-5 | 1000 told where no close came | C-BADCLOSE, C-FAIL, C-ENDED1 |
+| M-6 | told clean where no close came | C-BADCLOSE, C-FAIL, C-ENDED1 |
+| M-7 | a failure logged without why | C-BADCLOSE, C-FAIL, C-ENDED1 |
+| M-8 | a failure leaves the stream open | C-BADCLOSE, C-FAIL, C-ENDED1 |
+| M-9 | 1000 not sendable | C-SEND, C-123, C-REF, C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-AFTER, C-ENDED1, C-API1, C-STOP |
+| M-10 | 999 sendable | C-REF |
+| M-11 | 1003 not sendable | C-SEND |
+| M-12 | 1004 sendable | C-REF |
+| M-13 | 1007 not sendable | C-SEND |
+| M-14 | 1006 sendable | C-REF |
+| M-15 | 1011 not sendable | C-SEND |
+| M-16 | 1012 sendable | C-REF |
+| M-17 | 3000 not sendable | C-SEND |
+| M-18 | 2999 sendable | C-REF |
+| M-19 | 4999 not sendable | C-SEND, C-ANSWER |
+| M-20 | 5000 sendable | C-REF |
+| M-21 | an empty close told 1000 | C-ANSWER |
+| M-23 | a close of one byte read as a code | C-BADCLOSE |
+| M-24 | a close's code not checked | C-BADCLOSE |
+| M-25 | a close's reason not checked | C-BADCLOSE |
+| M-28 | a close's reason told from its code on | C-CROSS, C-ANSWER |
+| M-29 | a client's close told unclean, an empty one among them | P-CLOSE0, C-CROSS, C-ANSWER, C-ENDED1, C-STOP |
+| M-30 | a ping not answered | C-AFTER |
+| M-32 | a pong without its ping's payload | C-AFTER |
+| M-34 | max-queue messages queued do not stop reading | C-STOP |
+| M-36 | no count bound on the queue | C-STOP |
+| M-40 | a message's bytes not queued | C-STOP |
+| M-41 | a message not counted | C-STOP |
+| M-42 | read-stop not answered | C-STOP |
+| M-43 | reading not marked stopped | C-STOP |
+| M-44 | every data frame ends its message | C-AFTER |
+| M-48 | the buffer forgets what it held as it grows (filled) | C-AFTER |
+| M-50 | a continuation needs no message | C-FAIL |
+| M-55 | a first frame's cap not checked | C-FAIL |
+| M-58 | reading goes on past a full queue | C-STOP |
+| M-59 | what waits is kept from the read's start | C-STOP |
+| M-60 | a refusal's reason not logged | C-FAIL, C-ENDED1 |
+| M-61 | a control payload always read into its start | C-CROSS |
+| M-67 | a send after the end allowed (now: or once a close is sent) | C-API1 |
+| M-75 | read-start though what waits fills the queue again | C-STOP |
+| M-76 | read-start after the connection ended | C-STOP |
+| M-79 | an event's shape not checked | C-API1 |
+| M-83 | a fragmented message of its last frame's kind | C-AFTER |
+| M-84 | every message delivered as binary | C-AFTER |
+| S-1 | a delivery does not end the message | C-AFTER, C-STOP |
+| S-2 | a delivery keeps its count of bytes held | C-AFTER, C-STOP |
+| S-3 | a control frame of no payload not answered | C-ANSWER |
+| S-6 | every message begun as binary | C-FAIL, C-AFTER |
+| S-7 | the reading goes on past the end | C-FAIL |
+| F-1 | frame-control? leaves out a close | C-CROSS, C-ANSWER, C-BADCLOSE, C-ENDED1, C-STOP |
+
+**This step's own:**
+
+| # | mutation | red |
+|---|---|---|
+| C-1 | the end disarms nothing | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-STOP |
+| C-2 | the end disarms, armed or not | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, P-QEND, P-TAKEN, C-ENDED1 |
+| C-3 | the deadline kept armed past the end | none: equivalent here |
+| C-5 | a new connection's deadline armed | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSE1, P-CODE, P-REASON, P-CLOSEMID, P-QEND, P-TAKEN, C-ENDED1 |
+| C-6 | failing after the server's close writes a second close | C-BADCLOSE, C-FAIL |
+| C-7 | failing never writes a close | P-CONT, P-UNFIN, P-CAP, P-CAPFRAG, P-CAPDEF, P-CAPMAX, P-UTF8AT, P-UTF8END, P-REFUSE, P-AFTER, P-CLOSE1, P-CODE, P-REASON, P-QEND, C-ENDED1 |
+| C-8 | the client's close after the server's answered with a close | C-CROSS, C-ANSWER, C-STOP |
+| C-9 | a client's close never answered | P-CLOSE, P-CLOSE123, P-CLOSE0, P-CLOSEMID, P-QEND, P-TAKEN, C-ENDED1 |
+| C-10 | nothing read once the server's close is sent | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-AFTER, C-STOP |
+| C-11 | a read refused once the server's close is sent | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-AFTER |
+| C-12 | a send allowed once the server's close is sent | C-API1 |
+| C-13 | reading not started again once the server's close is sent | C-STOP |
+| C-14 | a close's code not checked for a fixnum | C-REF |
+| C-15 | a close's code not checked | C-REF |
+| C-16 | a close's reason not checked for a string | C-REF |
+| C-17 | a close's reason of 124 bytes let through | C-REF |
+| C-18 | a close's reason of 123 bytes refused | C-123, C-REF |
+| C-19 | the server's close's code little-endian | C-SEND, C-123, C-CROSS, C-ANSWER, C-AFTER, C-ENDED1, C-STOP |
+| C-20 | the server's close's reason not written | C-SEND, C-123, C-ANSWER |
+| C-21 | the server's close's reason in Latin-1 | C-123 |
+| C-22 | a close once one is sent written again | C-ENDED1 |
+| C-23 | a close after the end written | C-ENDED1 |
+| C-24 | the server's close leaves the connection open | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-ENDED1, C-API1, C-STOP |
+| C-25 | the server's close arms no deadline in its state | C-CROSS, C-ANSWER, C-BADCLOSE, C-FAIL, C-STOP |
+| C-26 | the arm left out of the server's close's actions | C-SEND, C-123, C-CROSS, C-ANSWER, C-AFTER, C-ENDED1, C-STOP |
+| C-27 | the deadline armed named ping | C-SEND, C-123, C-CROSS, C-ANSWER, C-AFTER, C-ENDED1, C-STOP |
+| C-36 | a close of the wrong shape | C-API1 |
+| C-39 | a ping not answered once the server's close is sent (ws 7.5.10's way) | C-AFTER |
+| C-40 | messages dropped once the server's close is sent (the form's other answer) | C-AFTER, C-STOP |
+
+C-3 is equivalent on this tree: nothing reads the deadline after the end until step
+2's passing, which kills it. Every check, 15 in the limits suite and 59 in the
+protocol suite, has a killer that reddens it by value.
