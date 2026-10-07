@@ -1173,3 +1173,30 @@ M4.1'S REVIEW. Branches `fix/m4.1-review` and `docs/m4.1-review-ledger`, stacked
 `make test` green before the commit (Darwin arm64): nine suites, 251 expected passes, every pin ok. `make prod` green.
 
 NEXT: the closing ritual for #27, #28, #29 and this review's PR, when the owner asks; then M4.2, the binding's test driver, by form.
+
+---
+
+MERGED to main on 2026-10-07: **M4.1, the handshake, and its review** (the two entries above), from the stacked #27, #28, #29, #30 and #31, as 2237959, 455e12e, fc1e09d, 2e2503a and ec26833, on the owner's "do closing ritual".
+- **The squashes.** Each has the tree of the head CI tested:
+  - 2237959 has 6150228's, on 6d8e59a;
+  - 455e12e has 283ab80's, on 2237959;
+  - fc1e09d has 8f75855's, on 455e12e;
+  - 2e2503a has 005835e's, on fc1e09d;
+  - ec26833 has 6b97cc9's, on 2e2503a.
+
+  #28 was rebased onto #27's squash from f8936d8, #29 onto #28's from 64d9db1, #30 onto #29's from f6d588e, and #31 onto #30's from 40d55b9. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #27 at 6150228 (run 37546839222): eight suites, 223 expected passes;
+  - #28, rebased onto #27's squash, at 283ab80 (run 37550934556): nine suites, 247;
+  - #29, rebased onto #28's squash, at 8f75855 (run 37551133302): nine suites, 247;
+  - #30, rebased onto #29's squash, at 005835e (run 37551319032): nine suites, 251;
+  - #31, rebased onto #30's squash, at 6b97cc9 (run 37551504053): nine suites, 251.
+
+  Main's runs on 2237959 (37550909005), 455e12e (37551111314), fc1e09d (37551305476) and 2e2503a (37551489373) each finished before the next merge. Main's run on ec26833, 37551682558, was green too, and this reflect was pushed after it.
+- **Branches.** `docs/m4.1-1-decision`, `feat/m4.1-2-handshake`, `docs/m4.1-3-ledger`, `fix/m4.1-review` and `docs/m4.1-review-ledger` were deleted, local and remote. No PR is open.
+
+**M4.1 is complete on main**: `(websocket handshake)`, with decision 0003 and its amendment.
+
+`make test` green on main: nine suites, 251 expected passes, every pin ok.
+
+NEXT: M4.2, the binding's test driver, by form, when the owner asks: the server's fake shell, or a door change in the server (design §8). The door questions in the design's §9 wait with it: a close the transport cannot force, a client that sends and does not read, and a field split over lines.
