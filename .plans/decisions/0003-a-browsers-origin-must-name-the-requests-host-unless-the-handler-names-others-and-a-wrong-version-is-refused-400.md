@@ -2,7 +2,8 @@
 
 Date: 2026-10-06
 Status: accepted (user decision, 2026-10-06, by form, M4.1: "Same host" and "400 with
-13", each the recommended)
+13", each the recommended). Amended 2026-10-06 on the owner's word (M4.1's review):
+"compare with X-Forwarded-Proto", the recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §3
 
 ## Context
@@ -72,3 +73,65 @@ Weighed and not taken:
 - **A browser cannot be made to send another site's `Origin`**, and a client that is not
   a browser can send any, so the check holds browsers alone, as RFC 6455 §10.2 says.
 - **The design's §3** says 400 for the version.
+
+## Amendment of 2026-10-06 (M4.1's review): the scheme, when a proxy names it
+
+M4.1's review found that `same-host` compares only an Origin's host and port. A browser
+leaves a default port out of both `Origin` and `Host`. So a page on
+`http://app.example.com` passes for `wss://app.example.com`, though http on port 80 and
+https on port 443 are different origins. coder and gorilla compare the same way
+(gorilla `server.go:98`, coder `accept.go:239`, at the tags of
+[the research](../research/2026-10-06-peer-handshakes.md)). coder holds the scheme only
+for an origin pattern that holds `://` (`accept.go:244-246`).
+
+**Who can use it, and what they get.** Behind Caddy, no real page lives on the http
+side: Caddy redirects port 80 to https. It sends no HSTS unless told to, though, so a
+network attacker can answer the browser's plain-http request with a page of their
+own. That page's socket comes from the user's browser, and no CORS rule covers a
+WebSocket: the page reads and sends what it likes. It is the user's session only
+where the browser sends the session cookie across schemes:
+- **Chrome** counts http and https of one host as different sites (since 89), and a
+  cookie with no `SameSite` as `Lax` (since 85). So it sends only `SameSite=None`
+  cookies there (Chrome's platform status).
+- **Firefox and Safari:** Chrome's status page records Firefox's position as positive
+  and Safari's as no signal. Not measured here.
+
+**The server can tell.** Caddy writes `X-Forwarded-Proto`, `https` when its client used
+TLS and `http` otherwise. It replaces any value a client sent, unless that client is a
+trusted proxy (`modules/caddyhttp/reverseproxy/reverseproxy.go:997-1009` at v2.11.7;
+its docs' `reverse_proxy.md:505-508`). A browser cannot set the field on a WebSocket
+handshake.
+
+**Decided on the owner's word**, "compare with X-Forwarded-Proto", after these facts and
+a measured prototype:
+- When the request's `X-Forwarded-Proto` is `http` or `https`, without regard to ASCII
+  case, `same-host` also needs the Origin's scheme to be that one.
+- Any other value is not compared, and neither is no value: as before, and as coder and
+  gorilla compare.
+- A listed origin, compared whole, and `any` are not held to it.
+
+**Why no value is not a refusal:**
+- **With no proxy**, the server speaks plain HTTP, and a browser will not let an https
+  page open `ws://`. Measured in Chrome 152: from an https page, `ws://example.com`
+  threw a `SecurityError`, and sockets to `ws://127.0.0.1` and `ws://localhost` never
+  reached the server. So no scheme can mismatch.
+- **Behind a TLS proxy that sends no value**, either guess is worse than none:
+  - taking it for `http` refuses every real https page, while the attacker's http
+    page still passes;
+  - taking it for `https` refuses a server's own pages wherever no proxy stands in
+    front.
+
+Weighed and not taken: **"Keep host-only"**, coder's and gorilla's way, with docs
+advising HSTS and an exact https origin.
+
+**Consequences:**
+- **Behind Caddy**, which always writes the field, a page on the http side of the site's
+  own host is refused 403.
+- **Behind a TLS proxy that sends no `X-Forwarded-Proto`**, the gap stays as it was.
+  There, the proxy can send it (nginx: `proxy_set_header X-Forwarded-Proto $scheme;`),
+  HSTS can keep browsers off plain http, or the handler can list its exact https
+  origin.
+- **If something in front of Caddy ends TLS and talks plain HTTP to Caddy**, Caddy writes
+  `http`, and the site's https pages are refused 403 until Caddy's `trusted_proxies`
+  names that hop.
+- **The check only ever refuses more** than M4.1's: with no value it is the same.

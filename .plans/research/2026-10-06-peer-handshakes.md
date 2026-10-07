@@ -115,6 +115,31 @@ names neither. Only cases 12 and 13 offer `permessage-deflate`.
   - with `Upgrade: websocket` alone, it goes out with `Connection: close` to an upgrade
     request, and with no `Connection` to a plain GET.
 
+## For M4.1's review: the scheme
+
+- **coder and gorilla compare no scheme.** gorilla's `checkSameOrigin` ends
+  `return equalASCIIFold(u.Host, r.Host)` (server.go:98). coder's `authenticateOrigin`
+  accepts `strings.EqualFold(r.Host, u.Host)` (accept.go:239), and holds the scheme only
+  for an `OriginPatterns` entry with `://` in it (accept.go:244-246).
+- **Caddy v2.11.7 and the scheme:**
+  - **It writes `X-Forwarded-Proto` itself**: `https` when its client used TLS, `http`
+    otherwise. A client's value counts only from a trusted proxy, and `Set` replaces
+    it (reverseproxy.go:997-1009; docs `reverse_proxy.md:505-508`).
+  - **It redirects HTTP to HTTPS** by default (the website's `automatic-https.md:46`).
+    Neither that page nor `autohttps.go` mentions HSTS.
+- **Chrome's platform status**, read 2026-10-06:
+  - "Schemeful same-site" (5096179480133632), enabled by default in Chrome 89: http
+    and https of one host are different sites. Firefox's position: positive; Safari:
+    no signal.
+  - "Cookies default to SameSite=Lax" (5088147346030592), enabled by default in Chrome
+    85. Firefox: in development; Safari: no signal.
+- **Chrome 152 from an https page (chromestatus.com), measured:**
+  - `new WebSocket("ws://example.com/")` threw `SecurityError`: "An insecure WebSocket
+    connection may not be initiated from a page loaded over HTTPS."
+  - Sockets to `ws://127.0.0.1:18744` and `ws://localhost:18744` were made, then
+    failed, and the probe there logged no request.
+- **The server reads no `X-Forwarded-` field:** none of its `src/` names one, at v0.3.0.
+
 ## Not found, and caveats
 
 - Go's `Header.Get` (the first line) and Node's joining of lines were read at Go 1.27.1
