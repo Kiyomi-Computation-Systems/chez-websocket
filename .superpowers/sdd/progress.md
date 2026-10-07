@@ -1130,3 +1130,46 @@ Writing the mutants added rows that the draft suite would have let pass, and P-T
 `make test` green before the commit (Darwin arm64): nine suites, 247 expected passes, every pin ok. `make prod` green.
 
 NEXT: review and the closing ritual, when the owner asks; then M4.2, the binding's test driver, by form.
+
+---
+
+M4.1'S REVIEW. Branches `fix/m4.1-review` and `docs/m4.1-review-ledger`, stacked on `docs/m4.1-3-ledger` (by form, "Two stacked PRs": 800 lines). 2026-10-06.
+
+`/code-review` at high effort over #27 to #29 reported six findings. The owner discussed the first, and decided it on their word: "compare with X-Forwarded-Proto". Then: "fix the rest".
+
+**DECIDED on the owner's word (0003's amendment): the scheme, when a proxy names it.**
+- **The gap.** `same-host` compared only host and port, as coder and gorilla do. A browser leaves default ports out of both fields, so a page on `http://app.example.com` passed for `wss://app.example.com`. Behind Caddy, only a network attacker can make such a page.
+- **The discussion's facts:**
+  - Caddy writes `X-Forwarded-Proto` and replaces a client's; a browser cannot set it on a handshake.
+  - Caddy sends no HSTS unless told to.
+  - Chrome sends only `SameSite=None` cookies across schemes (Chrome's platform status).
+  - Chrome 152 would not let an https page open `ws://`. Measured: a `SecurityError` for `ws://example.com`; sockets to `ws://127.0.0.1` and `ws://localhost` never reached the server.
+- **The rule.** When `X-Forwarded-Proto` names `http` or `https`, `same-host` also needs the Origin's scheme to be that one. Any other value, or none, is not compared, so the check only ever refuses more.
+- **Weighed:** "Keep host-only". A prototype, measured before the owner chose, was 20 lines and passed M4.1's 23 checks unchanged.
+
+**The rest, fixed:**
+- **An empty `Origin`** is refused under `same-host`, as M4.1 built it and as gorilla does. It names no host (RFC 6454 §7.1). This is now recorded in the design's §3 and held by rows in O-SAME, O-LIST and O-ANY. Taken without a form.
+- **The design's §9:** a split `Sec-WebSocket-Protocol` is not refused 400. Its later offers are missed, and the 101 goes without them.
+- **Fresh values.** Each answer's fields and its subprotocol's string are made for it (H-FRESH).
+- **The server's rules move to the door suite** (D-SERVER), so the handshake's suite needs no server, as the plan says.
+- **Settings checked once.** `make-handshake-settings` checks a handler's subprotocols and origins where they are made, and keeps copies (P-SETTINGS, P-KEEP). `handshake-answer` takes the settings.
+
+**Tests first**, each named and hashed before its run:
+- the review's suites against #29's library stopped at load, exit 255 (`3a9ccdc`);
+- against stage 1, the settings API alone, exactly O-SCHEME, P-API, H-FRESH and P-KEEP went red, each for its named reason (`678dc43`).
+
+**Mutants** (`m4-mutations.md`), each red set named before the run and hashed (`6684df1`):
+- **All of M4.1's mutants, re-cut and re-predicted** on the review's library, and the review's own: A-29, and X-1 to X-18.
+- **121 rows, 120 mutants and the baseline: 0 mismatches**, on the first run.
+- **The gap run.** X-9, an empty Origin taken as none, passes #29's suite whole (23 passes). The review's suite reddens it.
+- **L-2** is still equivalent.
+- **Every check has a killer by value**: the handshake suite's 26, and D-SERVER.
+
+**Records:**
+- 0003's amendment, with its sources;
+- the design's §3 (settings, fresh values, the scheme, the empty `Origin`), §8 (the door suite holds the server's rules) and §9;
+- the research's section for the review.
+
+`make test` green before the commit (Darwin arm64): nine suites, 251 expected passes, every pin ok. `make prod` green.
+
+NEXT: the closing ritual for #27, #28, #29 and this review's PR, when the owner asks; then M4.2, the binding's test driver, by form.

@@ -270,3 +270,266 @@ Every check has killers, at least one of them by value:
 | P-TOKEN | A-5, A-8, A-15, A-16, A-17, A-18, A-19, A-22, C-2, C-7, D-3, F-1, L-17, O-15 |
 | P-API | A-1, A-2, A-3, A-4, A-5, A-6, A-7, A-8, A-22, A-24, A-25, A-28, C-2, C-3, D-3, R-2 |
 | H-SERVER | C-3, F-7 |
+
+## M4.1's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-06. The library is `src/websocket/handshake.sls` (blob cc49751). The suites:
+- `tests/test-handshake.sps`, 26 checks (blob ffadc1d);
+- `tests/test-door.sps`, 5 checks (blob f7f8666).
+
+The review, `/code-review` at high effort over #27 to #29, reported six findings.
+- **The scheme:** discussed with the owner, and decided on their word: "compare with
+  X-Forwarded-Proto" (0003's amendment).
+- **The other five:** "fix the rest".
+
+The runner is M4.1's, now running the door suite too.
+
+### The findings and their fixes
+
+| # | finding | fix |
+|---|---|---|
+| 1 | `same-host` ignores the Origin's scheme | when the request's `X-Forwarded-Proto` names `http` or `https`, the Origin's scheme must be it (0003's amendment) |
+| 2 | an empty `Origin` is refused, unchecked and undecided | kept as built, gorilla's way, and recorded: it names no host (RFC 6454 §7.1); rows in O-SAME, O-LIST and O-ANY |
+| 3 | the design's §9 said a split `Sec-WebSocket-Protocol` is refused | it is not: its later offers are missed, and the 101 goes without them |
+| 4 | the answers hand out shared mutable bytevectors | each answer's fields, and its subprotocol's string, are made for it (H-FRESH) |
+| 5 | the handshake's suite imports the server's internal serializer | the check moves to the door suite, D-SERVER; the handshake's suite needs no server, as the plan says |
+| 6 | a handler's settings are checked at every handshake | `make-handshake-settings` checks them once, where they are made, and keeps copies (P-SETTINGS, P-KEEP); `handshake-answer` takes the settings |
+
+### The oracles
+
+- **Decision 0003's amendment** and the research's section for the review:
+  - coder's and gorilla's source;
+  - Caddy's `X-Forwarded-Proto` and its HTTPS redirect, from its source and docs at
+    v2.11.7;
+  - Chrome's platform status on schemeful same-site and on `SameSite=Lax` by default.
+- **Chrome 152, measured:** an https page cannot open `ws://`.
+- **The rows of O-SCHEME** follow from 0003's amendment. The prototype the owner saw
+  ran the same table.
+
+### The test-first runs
+
+- **The review's suites against #29's library**, named and hashed before the run
+  (`3a9ccdc`): both stopped at load, exit 255, `make-handshake-settings` unbound.
+- **Against stage 1**, the settings API alone, named and hashed (`678dc43`). Exactly the
+  four named went red, each for the reason named, with the other 22 and the door's 5
+  green:
+  - O-SCHEME accepted every scheme;
+  - P-API's `X-Forwarded-Proto` row raised nothing;
+  - H-FRESH read the spoiled shared bytes back, and lost its subprotocol to the
+    settings' shared string;
+  - P-KEEP chose `superchat` through the handler's list.
+- **The fixes** then passed all 26 and 5.
+
+### The gap run
+
+X-9, "an empty Origin is taken as none", cut on #29's library (34e8f61), against #29's
+suite (8bf2738), named and hashed before the run (`4119acd`): green, 23 passes, beside a
+baseline row that passed too. The review's suite reddens X-9 (O-LIST, O-SAME). The
+review's other gaps are #29's library itself, which #29's suite and CI passed:
+- a scheme never compared;
+- shared bytevectors;
+- no settings to check once.
+
+### The mutants
+
+The new and changed checks:
+
+| key | check |
+|---|---|
+| O-SCHEME | same-host holds the Origin's scheme to X-Forwarded-Proto when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it (0003's amendment) |
+| P-SETTINGS | make-handshake-settings refuses settings outside its contract, naming itself: subprotocols not a list of tokens, and origins neither any nor a list of origins and same-host |
+| P-API | handshake-answer refuses arguments outside its contract, naming itself: a method not a symbol, a reader not a procedure, a host not a string, settings make-handshake-settings did not make, and a field read as neither a string nor #f, X-Forwarded-Proto among them |
+| H-FRESH | each answer's fields are bytevectors of its own, and its subprotocol a string of its own: writing over one answer's leaves the next answer's as they were |
+| P-KEEP | settings keep copies of what they were made with: the handler's lists and strings, changed afterwards, change nothing |
+| D-SERVER | every answer of (websocket handshake) is one the server writes: a 101's fields pass its switch-fault against the request's, and a refusal's its response-fault |
+
+| # | mutation | red |
+|---|----------|-----|
+| B-0 | the library as written | none: the library unmutated, 26 and 5 passes |
+| A-1 | a method that is not a symbol is not refused | P-API |
+| A-2 | a reader that is not a procedure is not refused | P-API |
+| A-3 | a host that is not a string is not refused | P-API |
+| A-4 | subprotocols that are not a list reach for-all | P-SETTINGS |
+| A-5 | subprotocols are not checked as tokens | P-TOKEN, P-SETTINGS |
+| A-6 | token? takes a symbol to string-length | P-SETTINGS |
+| A-7 | an empty subprotocol is a token | P-SETTINGS |
+| A-8 | a token's characters are not checked | P-TOKEN, P-SETTINGS |
+| A-9 | tchar's lower letters start at b | H-RFC, R-METHOD, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, R-ORDER, S-PICK, S-NONE, S-LIST, S-EXACT, P-TOKEN, H-FRESH, P-KEEP, D-SERVER |
+| A-10 | tchar's lower letters end at y | P-TOKEN |
+| A-11 | tchar's capitals start at B | P-TOKEN |
+| A-12 | tchar's capitals end at Y | P-TOKEN |
+| A-13 | tchar's digits start at 1 | P-TOKEN |
+| A-14 | tchar's digits end at 8 | P-TOKEN |
+| A-15 | tchar's lower letters run on to { | P-TOKEN |
+| A-16 | tchar's capitals start at @ | P-TOKEN |
+| A-17 | tchar's capitals run on to [ | P-TOKEN |
+| A-18 | tchar's digits start at / | P-TOKEN |
+| A-19 | tchar's digits run on to : | P-TOKEN |
+| A-20 | tchar lacks ! | P-TOKEN |
+| A-21 | tchar lacks ~ | P-TOKEN |
+| A-22 | tchar takes a comma | P-TOKEN, P-SETTINGS |
+| A-23 | origins any is refused | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, R-METHOD, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, S-PICK, S-NONE, S-LIST, S-EXACT, O-ABSENT, O-ANY, O-SCHEME, P-TOKEN, P-API, H-FRESH, P-KEEP, D-SERVER |
+| A-24 | origins that are not a list reach for-all | P-SETTINGS |
+| A-25 | origins' elements are not checked | P-SETTINGS |
+| A-26 | same-host is not an origin | O-DEFAULT, O-ABSENT, O-SAME, O-SCHEME, O-HOST |
+| A-27 | a listed origin string is refused | R-ORDER, O-ABSENT, O-LIST, O-SCHEME, O-HOST, P-KEEP |
+| A-28 | a field's value is not checked | P-API |
+| A-29 | settings that are not a settings record are not refused | P-API |
+| C-1 | the method is not checked | R-METHOD, R-ORDER |
+| C-2 | the method must be get, in lower case | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, R-ORDER, S-PICK, S-NONE, S-LIST, S-EXACT, O-DEFAULT, O-ABSENT, O-ANY, O-LIST, O-SAME, O-SCHEME, O-HOST, P-TOKEN, P-API, H-FRESH, P-KEEP |
+| C-3 | Upgrade is not checked | R-UPGRADE, R-ORDER, P-API, D-SERVER |
+| C-4 | Upgrade's websocket is compared with case | H-LISTS |
+| C-5 | Upgrade is compared whole, not as a list | H-LISTS |
+| C-6 | Connection is not checked | R-CONNECTION, R-ORDER |
+| C-7 | Connection's upgrade is compared with case | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, R-VERSION, R-KEY, R-ORDER, S-PICK, S-NONE, S-LIST, S-EXACT, O-DEFAULT, O-ABSENT, O-ANY, O-LIST, O-SAME, O-SCHEME, O-HOST, P-TOKEN, P-API, H-FRESH, P-KEEP |
+| C-8 | Connection is compared whole, not as a list | H-LISTS |
+| C-9 | the version is not checked | R-VERSION, R-ORDER, H-FRESH |
+| C-10 | the version may be a list holding 13 | R-VERSION |
+| C-11 | the version is read as a number | R-VERSION |
+| C-12 | a wrong version is refused 426, the design's first answer | R-VERSION, R-ORDER, H-FRESH |
+| C-13 | a wrong version is refused with no field | R-VERSION, H-FRESH |
+| C-14 | the key is not checked | R-KEY, R-ORDER |
+| C-15 | a key is any 24 characters | R-KEY |
+| C-16 | a key is the base64 of sixteen bytes or more | R-KEY |
+| C-17 | a missing key reaches the decoder | R-KEY |
+| C-18 | a key that is not base64 reaches bytevector-length | R-KEY, R-ORDER, D-SERVER |
+| C-19 | the Origin is not checked | R-ORDER, O-DEFAULT, O-LIST, O-SAME, O-SCHEME, O-HOST, P-API |
+| C-20 | an Origin refused is answered 400 | R-ORDER, O-DEFAULT, O-LIST, O-SAME, O-SCHEME, O-HOST |
+| O-1 | a request with no Origin is refused | O-DEFAULT, O-ABSENT |
+| O-2 | any is judged as a list | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, S-PICK, S-NONE, S-LIST, S-EXACT, O-ANY, O-SCHEME, P-TOKEN, H-FRESH, P-KEEP, D-SERVER |
+| O-15 | any accepts only the request's own host | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, S-PICK, S-NONE, S-LIST, S-EXACT, O-ANY, O-SCHEME, P-TOKEN, H-FRESH, P-KEEP |
+| O-3 | a listed origin is compared with case | O-LIST |
+| O-4 | an Origin is accepted when a listed origin begins it | O-LIST |
+| O-5 | same-host accepts nothing | O-DEFAULT, O-SAME, O-SCHEME, O-HOST |
+| O-6 | same-host accepts everything | O-DEFAULT, O-SAME, O-SCHEME, O-HOST |
+| O-7 | same-host is read as a listed origin | O-DEFAULT, O-SAME, O-SCHEME, O-HOST |
+| O-8 | an Origin with no scheme is compared whole with the host | O-SAME |
+| O-9 | the host is compared with case | O-HOST |
+| O-10 | an Origin is accepted when the host begins what follows its scheme | O-SAME |
+| O-11 | past-scheme misses a :// that ends the origin | O-HOST |
+| O-12 | past-scheme finds the last :// | O-SAME |
+| O-13 | past-scheme ends at :/ | O-DEFAULT, O-SAME, O-SCHEME, O-HOST |
+| O-14 | past-scheme ends at //, the colon unasked | O-SAME, O-HOST |
+| L-1 | an absent field reaches has-element? | R-UPGRADE, R-CONNECTION |
+| L-2 | the empty last element is passed over (equivalent: no token is empty) | none (equivalent) |
+| L-3 | after a comma, the next character is skipped | H-LISTS, S-LIST |
+| L-4 | OWS before an element is kept | H-LISTS, S-PICK, S-LIST |
+| L-5 | OWS after an element is kept | H-LISTS, S-LIST |
+| L-6 | elements are separated by semicolons | H-RFC, H-LISTS, S-PICK, S-LIST, H-FRESH, P-KEEP |
+| L-7 | find-comma runs past the end | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, R-ORDER, S-PICK, S-NONE, S-LIST, S-EXACT, O-DEFAULT, O-ABSENT, O-ANY, O-LIST, O-SAME, O-SCHEME, O-HOST, P-TOKEN, P-API, H-FRESH, P-KEEP, D-SERVER |
+| L-8 | skip-ows runs past the end | R-UPGRADE, R-CONNECTION, S-NONE |
+| L-9 | back-ows runs past the start | H-LISTS, R-UPGRADE, R-CONNECTION, S-NONE, S-LIST |
+| L-10 | HTAB is not OWS | H-LISTS, S-LIST |
+| L-11 | SP is not OWS | H-LISTS, S-PICK |
+| L-12 | range=? does not compare lengths | R-UPGRADE, R-CONNECTION, S-NONE, S-EXACT, O-LIST, O-SAME, O-SCHEME, O-HOST |
+| L-13 | range=? does not compare characters | R-UPGRADE, R-CONNECTION, S-EXACT, O-DEFAULT, O-LIST, O-SAME, O-SCHEME, O-HOST |
+| L-14 | range=? leaves the last character unread | R-UPGRADE, O-LIST, O-SAME, O-HOST |
+| L-15 | A is not folded | H-LISTS, O-LIST, O-HOST |
+| L-16 | Z is not folded | O-LIST |
+| L-17 | capitals fold one short | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, R-VERSION, R-KEY, R-ORDER, S-PICK, S-NONE, S-LIST, S-EXACT, O-DEFAULT, O-ABSENT, O-ANY, O-LIST, O-SAME, O-SCHEME, O-HOST, P-TOKEN, P-API, H-FRESH, P-KEEP |
+| S-1 | an absent offer reaches has-element? | S-NONE |
+| S-2 | subprotocols are compared without regard to case | S-EXACT |
+| S-3 | the handler's last preference wins | S-PICK |
+| S-4 | when the offer names none of them, the handler's first is chosen | S-NONE, S-EXACT |
+| F-1 | the 101 never names the subprotocol | H-RFC, S-PICK, S-LIST, P-TOKEN, H-FRESH |
+| F-2 | the 101's Upgrade is WebSocket | H-RFC, H-CHROME, H-FRESH |
+| F-3 | the accept field is named Sec-Websocket-Accept | H-RFC, H-CHROME, H-KEYBITS, H-FRESH |
+| F-4 | the accept value is of the key re-encoded | H-KEYBITS |
+| F-5 | the GUID ends in 2 | H-RFC, H-CHROME, H-KEYBITS, H-FRESH |
+| F-6 | the version's refusal names 8, 13 | R-VERSION, H-FRESH |
+| F-7 | a refusal carries Content-Length: 0 | R-METHOD, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, H-FRESH, D-SERVER |
+| F-8 | a refusal names no check | R-METHOD, R-UPGRADE, R-CONNECTION, R-VERSION, R-KEY, R-ORDER, O-DEFAULT, O-LIST, O-SAME, O-SCHEME, O-HOST, H-FRESH |
+| R-1 | the method is checked after Upgrade | R-ORDER |
+| R-2 | Connection is checked before Upgrade | R-ORDER, P-API |
+| R-3 | the version is checked before Connection | R-ORDER |
+| R-4 | the key is checked after the Origin | R-ORDER |
+| R-5 | the version is checked after the key | R-ORDER |
+| D-1 | a handler that names no origins gets any | O-DEFAULT |
+| D-2 | a handler that names no origins gets none | O-DEFAULT |
+| D-3 | origins given are dropped for the default | H-RFC, H-CHROME, H-KEYBITS, H-LISTS, S-PICK, S-NONE, S-LIST, S-EXACT, O-ANY, O-LIST, O-SCHEME, O-HOST, P-TOKEN, H-FRESH, P-KEEP |
+| X-1 | same-host ignores the scheme, as before the review | O-SCHEME |
+| X-2 | the Origin's scheme is held to X-Forwarded-Proto with case | O-SCHEME |
+| X-3 | only a lower-case X-Forwarded-Proto names a scheme | O-SCHEME |
+| X-4 | any X-Forwarded-Proto names a scheme | O-SCHEME |
+| X-5 | only https names a scheme | O-SCHEME |
+| X-6 | only http names a scheme | O-SCHEME |
+| X-7 | a listed origin is held to X-Forwarded-Proto too | O-SCHEME |
+| X-8 | any is held to X-Forwarded-Proto too | O-SCHEME |
+| X-9 | an empty Origin is taken as none | O-LIST, O-SAME |
+| X-10 | the settings keep the handler's list of subprotocols | P-KEEP |
+| X-11 | the settings keep the handler's subprotocol strings | P-KEEP |
+| X-12 | the settings keep the handler's list of origins | P-KEEP |
+| X-13 | the settings keep the handler's origin strings | P-KEEP |
+| X-14 | the answer's subprotocol is the settings' own string | H-FRESH |
+| X-15 | every 101 shares one Upgrade field | H-FRESH |
+| X-16 | every version refusal shares one field list | H-FRESH |
+| X-17 | X-Forwarded-Proto is not read | O-SCHEME, P-API |
+| X-18 | the scheme compared runs on into its :// | O-SCHEME |
+| AUD-1 | (websocket handshake) imports (chezscheme) | the import audit's check of its library, alone |
+
+**The run**, each red set named before the run and hashed (`6684df1`): 121 rows, 120
+mutants and the baseline, 0 mismatches, on the first run.
+- **Re-cut to the review's library:**
+  - the settings' guards and their indentation (A-4 to A-8, A-22 to A-27);
+  - the version's clause, now on two lines (C-9 to C-13, R-3, R-5);
+  - the Origin's clause, which reads `X-Forwarded-Proto` (C-19, C-20, R-4);
+  - the 101's fields, made by `header` (F-1 to F-3, F-6);
+  - `same-host?` (O-8 to O-10), and the default (D-1 to D-3).
+- **Red sets that changed with the review's suite:**
+  - **P-SETTINGS** takes from P-API the refusals of subprotocols and origins (A-4 to
+    A-8, A-22, A-24, A-25).
+  - **D-SERVER** is H-SERVER, moved.
+  - **H-FRESH and P-KEEP** go red with every mutant that refuses or reshapes a 101 of
+    the RFC's request.
+  - **O-SCHEME** goes red with every mutant of `same-host` or of the Origin's refusal.
+  - **P-API's `X-Forwarded-Proto` row** goes red with every mutant that refuses the
+    RFC's request before its Origin is judged: C-2, C-7, L-7, L-17, C-19 and X-17.
+- **New:**
+  - A-29, a settings record unchecked;
+  - X-1 to X-8, X-17 and X-18, the scheme;
+  - X-9, the empty Origin;
+  - X-10 to X-13, the copies;
+  - X-14 to X-16, the answers' own values.
+
+L-2 is still equivalent. In 24 rows a check went red through a raise:
+- A-9 to A-14, A-20, A-21, A-23, A-26, A-27;
+- C-14, C-17, C-18;
+- F-3;
+- L-1, L-7, L-8, L-9, L-12, L-14;
+- O-2, O-7;
+- S-1.
+
+Every such check has a killer by value too. Every check of the handshake's suite, and
+D-SERVER, has killers by value. The door's other four checks never touch this library;
+their killers are M0's (`m0-mutations.md`).
+
+| check | killers by value |
+|---|---|
+| H-RFC | C-2, C-7, D-3, F-1, F-2, F-3, F-5, L-6, L-17, O-15 |
+| H-CHROME | C-2, C-7, D-3, F-2, F-3, F-5, L-17, O-15 |
+| H-KEYBITS | C-2, C-7, D-3, F-4, F-5, L-17, O-15 |
+| H-LISTS | C-2, C-4, C-5, C-7, C-8, D-3, L-3, L-4, L-5, L-6, L-10, L-11, L-15, L-17, O-15 |
+| R-METHOD | C-1, F-7, F-8 |
+| R-UPGRADE | C-2, C-3, F-7, F-8, L-13, L-14 |
+| R-CONNECTION | C-2, C-6, F-7, F-8, L-13 |
+| R-VERSION | C-2, C-7, C-9, C-10, C-11, C-12, C-13, F-6, F-7, F-8, L-17 |
+| R-KEY | C-2, C-7, C-15, C-16, F-7, F-8, L-17 |
+| R-ORDER | C-1, C-2, C-3, C-6, C-7, C-9, C-12, C-14, C-19, C-20, F-8, L-17, R-1, R-2, R-3, R-4, R-5 |
+| S-PICK | C-2, C-7, D-3, F-1, L-4, L-6, L-11, L-17, O-15, S-3 |
+| S-NONE | C-2, C-7, D-3, L-12, L-17, O-15, S-4 |
+| S-LIST | C-2, C-7, D-3, F-1, L-3, L-4, L-5, L-6, L-10, L-17, O-15 |
+| S-EXACT | C-2, C-7, D-3, L-13, L-17, O-15, S-2, S-4 |
+| O-DEFAULT | C-2, C-7, C-19, C-20, D-1, D-2, F-8, L-13, L-17, O-1, O-5, O-6, O-13 |
+| O-ABSENT | C-2, C-7, L-17, O-1 |
+| O-ANY | C-2, C-7, D-3, L-17, O-15 |
+| O-LIST | C-2, C-7, C-19, C-20, D-3, F-8, L-13, L-14, L-15, L-16, L-17, O-3, O-4, X-9 |
+| O-SAME | C-2, C-7, C-19, C-20, F-8, L-13, L-14, L-17, O-5, O-6, O-8, O-10, O-12, O-13, O-14, X-9 |
+| O-SCHEME | C-2, C-7, C-19, C-20, D-3, F-8, L-13, L-17, O-5, O-6, O-13, O-15, X-1, X-2, X-3, X-4, X-5, X-6, X-7, X-8, X-17, X-18 |
+| O-HOST | C-2, C-7, C-19, C-20, D-3, F-8, L-12, L-13, L-15, L-17, O-5, O-6, O-9, O-11, O-13, O-14 |
+| P-TOKEN | A-5, A-8, A-15, A-16, A-17, A-18, A-19, A-22, C-2, C-7, D-3, F-1, L-17, O-15 |
+| P-SETTINGS | A-4, A-5, A-6, A-7, A-8, A-22, A-24, A-25 |
+| P-API | A-1, A-2, A-3, A-28, A-29, C-2, C-3, C-7, C-19, L-7, L-17, R-2, X-17 |
+| H-FRESH | C-2, C-7, C-9, C-12, C-13, D-3, F-1, F-2, F-3, F-5, F-6, F-7, F-8, L-6, L-17, O-15, X-14, X-15, X-16 |
+| P-KEEP | C-2, C-7, D-3, L-6, L-17, O-15, X-10, X-11, X-12, X-13 |
+| D-SERVER | C-3, F-7 |
