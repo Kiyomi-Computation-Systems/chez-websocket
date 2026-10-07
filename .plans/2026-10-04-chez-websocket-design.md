@@ -68,15 +68,20 @@ in this order, answering the first failure:
 
 - **The checks are a pure library's, `(websocket handshake)` (M4.1).**
   - It is given the method, a reader of the request's fields and the request's host,
-    as the server's `request-method`, `request-header` and `request-host` read them.
+    as the server's `request-method`, `request-header` and `request-host` read them,
+    and the handler's settings.
+  - **A handler's settings**, its subprotocols and its origins, are made once with
+    `make-handshake-settings`, and checked there. So a bad name stops the program
+    where the settings are made, not at the first client. They keep copies of what
+    they were made with (M4.1's review).
   - It answers either the 101's fields and the subprotocol chosen, or a refusal: its
-    status, its fields, and the check that failed.
+    status, its fields, and the check that failed. Each answer's bytevectors and
+    strings are its own (M4.1's review).
   - A refusal has no body, as the server's own refusals have none.
 - **A wrong version is refused 400, not 426** (0003, by form, "400 with 13"). RFC 9110
   has a 426 carry `Upgrade`, and a sender of `Upgrade` put `upgrade` in `Connection`.
   The server lets no response but a 101 say that, and no peer answers a version with
   426.
-
 - **The server has already refused** what is not HTTP/1.1 and what has a body: an
   upgrade is an HTTP/1.1 request with no body (0016).
 - **A key's last digit may set bits past its data**, as RFC 6455 §4.1's own example
@@ -90,17 +95,26 @@ in this order, answering the first failure:
   none matches, none is sent and the handshake still succeeds (§4.2.2 /subprotocol/).
   This is coder's and gorilla's way; `websocket-subprotocol` tells the handler which
   was chosen. As built in M4.1:
-  - each name must be a token (RFC 6455 §4.1), or the handshake refuses it as the
-    caller's mistake;
+  - each name must be a token (RFC 6455 §4.1), or making the settings refuses it as
+    the caller's mistake;
   - an offer is matched exactly, as a whole element of the client's list, as
     websockets and gorilla match it (coder ignores case).
-- **Origin** (0003, by form, "Same host").
+- **Origin** (0003, by form, "Same host"; amended in M4.1's review on the owner's
+  word).
   - A handler names `any`, or a list of origins, compared without regard to ASCII
     case, that may hold `same-host`: an Origin whose host and port, past its
     scheme's `://`, are the request's host.
+  - **The scheme, when a proxy names it.** The request's `X-Forwarded-Proto` may name
+    `http` or `https`: the scheme its client used, as Caddy writes it and no browser
+    can. Then `same-host` also needs the Origin's scheme to be that one. Any other
+    value, or none, is not compared, as coder and gorilla compare no scheme (0003's
+    amendment).
   - A handler that names none gets `same-host`, coder's and gorilla's way.
   - A request with no `Origin` is accepted whatever the handler names. It is not a
     browser's, and a client that is not a browser may send any `Origin` it likes.
+  - **An empty `Origin` is no origin** (RFC 6454 §7.1): it names no host, so
+    `same-host` refuses it, as gorilla does; coder takes it as none. Taken without a
+    form in M4.1's review, keeping what M4.1 built.
 - **`Sec-WebSocket-Extensions` is never answered**, so permessage-deflate is
   declined (RFC 7692 §5; 0022).
 
@@ -294,6 +308,9 @@ is refused.
 
   Autobahn's cases become core tests where they need no socket, read as byte
   scripts. Time is the `deadline-passed` events a test steps, so no test waits.
+- **The handshake's answers meet the server's own rules** for what a handler answers,
+  its `switch-fault` and `response-fault`. The door suite holds that, beside the
+  door's verbs, so the pure suites need no server (M4.1's review).
 - **The binding** runs against a transport made of procedures (`make-transport`, as
   the door suite does). Its waits need a coroutine, which only the server's shell
   runs. M4 chooses between the server's fake shell (its `tests/`, put on the test
@@ -313,7 +330,9 @@ is refused.
     on v0.3.0: the server opens its door to `Connection: keep-alive` and
     `Connection: Upgrade` on two lines, but `request-header` reads `keep-alive`. So the
     handshake would refuse 400 a request the server took as an upgrade. The same holds
-    for `Upgrade` and `Sec-WebSocket-Protocol` over two lines.
+    for `Upgrade` over two lines. Of `Sec-WebSocket-Protocol` over two lines, the
+    offers past the first line are missed: the handshake answers 101 without them
+    (M4.1's review).
   - **Where it reaches.** RFC 9110 lets a list run over lines (§5.2, §5.3). Browsers
     send each field on one line, and Caddy rewrites `Connection` and `Upgrade` to one
     line each.

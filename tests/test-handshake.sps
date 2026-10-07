@@ -14,16 +14,20 @@
 ;;;   fields, a wrong version's 400 by decision 0003; the subprotocol chosen;
 ;;;   Sec-WebSocket-Extensions never answered.
 ;;; - What a handler accepts of Origin, and what it gets when it names none:
-;;;   same-host, by decision 0003, as coder and gorilla do.
-;;; - The server's own rules for what it writes: every answer here is one
-;;;   its switch-fault or response-fault passes.
+;;;   same-host, by decision 0003, as coder and gorilla do; the Origin's
+;;;   scheme, held to X-Forwarded-Proto when that names http or https, by
+;;;   0003's amendment (M4.1's review).
+;;; - A handler's settings, checked once where they are made, keep copies of
+;;;   what they were made with; each answer's bytes and strings are its own.
+;;;
+;;; That every answer is one the server writes is the door suite's to hold:
+;;; this suite needs no server.
 ;;;
 ;;; A request's fields are given as the server's request-header reads them:
 ;;; the value of the first field of a name, without regard to ASCII case,
 ;;; or #f.
-(import (rnrs) (srfi :64) (ws-testing) (websocket handshake)
-        (only (http-server) make-response switch-protocols)
-        (only (http-server serializer) switch-fault response-fault))
+(import (rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (srfi :64) (ws-testing)
+        (websocket handshake))
 
 ;; Fields = (Listof (Pair String String))
 
@@ -55,7 +59,8 @@
 
 ;; answer : Symbol Fields String (Listof String) Origins -> readable's
 (define (answer method fields host subprotocols origins)
-  (readable (handshake-answer method (reader fields) host subprotocols origins)))
+  (readable (handshake-answer method (reader fields) host
+                              (make-handshake-settings subprotocols origins))))
 
 ;; The example of RFC 6455 §1.3 and §4.1: its server spoke chat.
 (define rfc-request
@@ -110,6 +115,18 @@
 ;; origin-answer : (U String #f) String Origins -> (U 'accept (List Nat Symbol) readable's)
 (define (origin-answer origin host origins)
   (let ((a (answer 'GET (with (with chrome-request "Origin" origin) "Host" host) host '() origins)))
+    (case (car a)
+      ((accept) 'accept)
+      ((refuse) (list (cadr a) (cadddr a)))
+      (else a))))
+
+;; scheme-answer : String (U String #f) Origins -> (U 'accept (List Nat Symbol) readable's)
+;; The answer to Chrome's request from `origin`, to the host app.example.com,
+;; with X-Forwarded-Proto `proto`, or none when #f.
+(define (scheme-answer origin proto origins)
+  (let ((a (answer 'GET (with (with (with chrome-request "Origin" origin) "Host" "app.example.com")
+                              "X-Forwarded-Proto" proto)
+                   "app.example.com" '() origins)))
     (case (car a)
       ((accept) 'accept)
       ((refuse) (list (cadr a) (cadddr a)))
@@ -232,7 +249,8 @@
     (test-equal "a handler that names no origins gets same-host (0003): Chrome's page of the same origin is accepted, its page on localhost refused 403, and a request with no Origin accepted"
       '(accept (403 origin) accept)
       (map (lambda (fields)
-             (let ((a (readable (handshake-answer 'GET (reader fields) chrome-host '()))))
+             (let ((a (readable (handshake-answer 'GET (reader fields) chrome-host
+                                                  (make-handshake-settings '())))))
                (case (car a) ((accept) 'accept) ((refuse) (list (cadr a) (cadddr a))) (else a))))
            (list chrome-request chrome-other-request (with chrome-request "Origin" #f))))
 
@@ -241,27 +259,47 @@
       (map (lambda (origins) (origin-answer #f chrome-host origins))
            (list 'any '() '(same-host) '("http://example.com"))))
 
-    (test-equal "any accepts every Origin: another host's, and null"
-      '(accept accept accept)
+    (test-equal "any accepts every Origin: another host's, null, and an empty one"
+      '(accept accept accept accept)
       (map (lambda (origin) (origin-answer origin chrome-host 'any))
-           '("http://localhost:18741" "null" "https://elsewhere.example")))
+           '("http://localhost:18741" "null" "https://elsewhere.example" "")))
 
     (test-equal "a listed origin is accepted without regard to ASCII case; one not listed, or a part or extension of one, is refused 403, for its origin"
-      '(accept accept accept accept (403 origin) (403 origin) (403 origin) (403 origin) (403 origin))
+      '(accept accept accept accept (403 origin) (403 origin) (403 origin) (403 origin) (403 origin)
+        (403 origin))
       (map (lambda (origin)
              (origin-answer origin chrome-host '("http://localhost:18741" "null" "https://zoo.example")))
            '("http://localhost:18741" "HTTP://LOCALHOST:18741" "null" "HTTPS://ZOO.EXAMPLE"
              "http://localhost:18742" "http://localhost" "http://localhost:187410"
-             "https://localhost:18741" "http://localhost:18741/")))
+             "https://localhost:18741" "http://localhost:18741/" "")))
 
-    (test-equal "same-host accepts an Origin whose host and port are the request's, without regard to case or scheme, as Chrome's page of the same origin; another host, another port, a path, null, or no scheme is refused 403"
+    ;; An empty Origin is no origin (RFC 6454 §7.1): it names no host.
+    (test-equal "same-host accepts an Origin whose host and port are the request's, without regard to case, of either scheme when no proxy names one, as Chrome's page of the same origin; another host, another port, a path, null, no scheme, or an empty Origin is refused 403"
       '(accept accept accept (403 origin) (403 origin) (403 origin) (403 origin) (403 origin)
-        (403 origin) (403 origin) (403 origin) (403 origin))
+        (403 origin) (403 origin) (403 origin) (403 origin) (403 origin))
       (map (lambda (origin) (origin-answer origin chrome-host '(same-host)))
            '("http://127.0.0.1:18741" "https://127.0.0.1:18741" "HTTP://127.0.0.1:18741"
              "http://localhost:18741" "http://127.0.0.1:18742" "http://127.0.0.1"
              "http://127.0.0.1:18741/" "null" "127.0.0.1:18741" "http//127.0.0.1:18741"
-             "http://127.0.0.1:187411" "http://elsewhere.example/http://127.0.0.1:18741")))
+             "http://127.0.0.1:187411" "http://elsewhere.example/http://127.0.0.1:18741" "")))
+
+    ;; Caddy writes the scheme its client used in X-Forwarded-Proto, replacing
+    ;; any a client sent, and a browser cannot set it on a handshake.
+    (test-equal "same-host holds the Origin's scheme to X-Forwarded-Proto when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it (0003's amendment)"
+      '(accept (403 origin) (403 origin) accept (403 origin) accept accept accept accept accept accept
+        accept)
+      (list (scheme-answer "https://app.example.com" "https" '(same-host))
+            (scheme-answer "http://app.example.com" "https" '(same-host))
+            (scheme-answer "https://app.example.com" "http" '(same-host))
+            (scheme-answer "http://app.example.com" "http" '(same-host))
+            (scheme-answer "http://app.example.com" "HTTPS" '(same-host))
+            (scheme-answer "HTTPS://app.example.com" "https" '(same-host))
+            (scheme-answer "http://app.example.com" #f '(same-host))
+            (scheme-answer "https://app.example.com" #f '(same-host))
+            (scheme-answer "http://app.example.com" "https, http" '(same-host))
+            (scheme-answer "http://app.example.com" "" '(same-host))
+            (scheme-answer "http://app.example.com" "https" '("http://app.example.com"))
+            (scheme-answer "http://app.example.com" "https" 'any)))
 
     (test-equal "same-host compares the host the request names, letters without regard to case, an empty one too, as coder and gorilla do, and refuses RFC 6455's own example, whose Origin names another host; a list may hold same-host beside origins"
       '(accept accept accept (403 origin) (403 origin) accept accept (403 origin))
@@ -275,54 +313,79 @@
             (origin-answer "http://localhost:18741" chrome-host '("http://localhost:5173" same-host))))
 
     ;; RFC 9110 §5.6.2: tchar is ALPHA, DIGIT, and !#$%&'*+-.^_`|~.
-    (test-equal "a subprotocol the handler speaks is a token: one holding every kind of tchar, and each range's ends, is chosen; one with a character beside a range, a separator, DEL or a character past ASCII is refused, naming handshake-answer"
+    (test-equal "a subprotocol the handler speaks is a token: one holding every kind of tchar, and each range's ends, is chosen; one with a character beside a range, a separator, DEL or a character past ASCII is refused, naming make-handshake-settings"
       (cons '("azAZ09!#$%&'*+-.^_`|~" (("Sec-WebSocket-Protocol" . "azAZ09!#$%&'*+-.^_`|~")))
-            (map (lambda (x) 'handshake-answer) '(1 2 3 4 5 6 7 8 9 10 11 12 13 14)))
+            (map (lambda (x) 'make-handshake-settings) '(1 2 3 4 5 6 7 8 9 10 11 12 13 14)))
       (cons (chosen "azAZ09!#$%&'*+-.^_`|~" '("azAZ09!#$%&'*+-.^_`|~"))
             (map (lambda (c)
                    (who-refused
-                    (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host
-                                                 (list (string #\a c #\b)) 'any))))
+                    (lambda () (make-handshake-settings (list (string #\a c #\b)) 'any))))
                  (list #\/ #\: #\@ #\[ #\{ #\( #\, #\; #\= #\" #\\ #\space
                        (integer->char #x7F) (integer->char #xE9)))))
 
-    (test-equal "handshake-answer refuses arguments outside its contract, naming itself: a method not a symbol, a reader not a procedure, a host not a string, a subprotocol not a token, origins neither any nor a list of origins and same-host, and a field read as neither a string nor #f"
-      (map (lambda (x) 'handshake-answer) '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16))
+    (test-equal "make-handshake-settings refuses settings outside its contract, naming itself: subprotocols not a list of tokens, and origins neither any nor a list of origins and same-host"
+      (map (lambda (x) 'make-handshake-settings) '(1 2 3 4 5 6 7 8 9 10 11 12 13))
       (map who-refused
-           (list (lambda () (handshake-answer "GET" (reader rfc-request) rfc-host '() 'any))
-                 (lambda () (handshake-answer 'GET rfc-request rfc-host '() 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) 'host '() 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host "chat" 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '(chat) 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '("") 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '("chat v2") 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '("chat,v2") 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host
-                                              (list (string #\c (integer->char #xE9))) 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '("chat" . "v2") 'any))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '() 'all))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '() "http://example.com"))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '() '(1)))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '() '(any)))
-                 (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '() '("http://example.com" . same-host)))
-                 (lambda () (handshake-answer 'GET (lambda (name) (if (string-ci=? name "Upgrade") 'websocket "13"))
-                                              rfc-host '() 'any)))))
+           (list (lambda () (make-handshake-settings "chat" 'any))
+                 (lambda () (make-handshake-settings '(chat) 'any))
+                 (lambda () (make-handshake-settings '("") 'any))
+                 (lambda () (make-handshake-settings '("chat v2") 'any))
+                 (lambda () (make-handshake-settings '("chat,v2") 'any))
+                 (lambda () (make-handshake-settings (list (string #\c (integer->char #xE9))) 'any))
+                 (lambda () (make-handshake-settings '("chat" . "v2") 'any))
+                 (lambda () (make-handshake-settings '(chat)))
+                 (lambda () (make-handshake-settings '() 'all))
+                 (lambda () (make-handshake-settings '() "http://example.com"))
+                 (lambda () (make-handshake-settings '() '(1)))
+                 (lambda () (make-handshake-settings '() '(any)))
+                 (lambda () (make-handshake-settings '() '("http://example.com" . same-host))))))
 
-    ;; Every answer the checks above make, written as the server writes them.
-    (test-equal "every answer is one the server writes: a 101's fields pass its switch-fault against the request's, and a refusal's its response-fault"
-      (map (lambda (x) 'ok) '(1 2 3 4 5 6 7 8 9 10))
-      (map (lambda (method fields subprotocols origins)
-             (let ((a (handshake-answer method (reader fields) rfc-host subprotocols origins))
-                   (offered (map (lambda (f) (cons (string->utf8 (car f)) (string->utf8 (cdr f)))) fields)))
-               (or (case (car a)
-                     ((accept) (switch-fault (switch-protocols (cadr a) (lambda (t r) t)) offered))
-                     ((refuse) (response-fault (make-response (cadr a) #f (caddr a) #f)))
-                     (else (car a)))
-                   'ok)))
-           '(GET GET GET POST GET GET GET GET GET GET)
-           (list rfc-request rfc-request (with rfc-request "Upgrade" "WebSocket")
-                 rfc-request (with rfc-request "Upgrade" "h2c") (with rfc-request "Connection" "close")
-                 (with rfc-request "Sec-WebSocket-Version" "8") (with rfc-request "Sec-WebSocket-Key" "x")
-                 rfc-request (with rfc-request "Sec-WebSocket-Protocol" "superchat"))
-           '(("chat") () () () () () () () () ("superchat"))
-           '(any any any any any any any any () any)))))
+    (test-equal "handshake-answer refuses arguments outside its contract, naming itself: a method not a symbol, a reader not a procedure, a host not a string, settings make-handshake-settings did not make, and a field read as neither a string nor #f, X-Forwarded-Proto among them"
+      (map (lambda (x) 'handshake-answer) '(1 2 3 4 5 6))
+      (let ((settings (make-handshake-settings '() 'any)))
+        (map who-refused
+             (list (lambda () (handshake-answer "GET" (reader rfc-request) rfc-host settings))
+                   (lambda () (handshake-answer 'GET rfc-request rfc-host settings))
+                   (lambda () (handshake-answer 'GET (reader rfc-request) 'host settings))
+                   (lambda () (handshake-answer 'GET (reader rfc-request) rfc-host '(() any)))
+                   (lambda () (handshake-answer 'GET (lambda (name) (if (string-ci=? name "Upgrade") 'websocket "13"))
+                                                rfc-host settings))
+                   (lambda () (handshake-answer 'GET (lambda (name)
+                                                       (if (string-ci=? name "X-Forwarded-Proto")
+                                                           'https
+                                                           ((reader rfc-request) name)))
+                                                rfc-host settings))))))
+
+    ;; Each answer is spoiled whole before the next is made.
+    (test-equal "each answer's fields are bytevectors of its own, and its subprotocol a string of its own: writing over one answer's leaves the next answer's as they were"
+      (list (list 'accept
+                  (list (cons "Upgrade" "websocket")
+                        (cons "Sec-WebSocket-Accept" "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+                        (cons "Sec-WebSocket-Protocol" "chat"))
+                  "chat")
+            '(refuse 400 (("Sec-WebSocket-Version" . "13")) version))
+      (let ((settings (make-handshake-settings '("chat") 'any))
+            (version (with rfc-request "Sec-WebSocket-Version" "8")))
+        (define (spoil! a)
+          (for-each (lambda (h) (bytevector-fill! (car h) 0) (bytevector-fill! (cdr h) 0))
+                    (if (eq? (car a) 'accept) (cadr a) (caddr a)))
+          (when (and (eq? (car a) 'accept) (caddr a)) (string-fill! (caddr a) #\x)))
+        (spoil! (handshake-answer 'GET (reader rfc-request) rfc-host settings))
+        (spoil! (handshake-answer 'GET (reader version) rfc-host settings))
+        (list (readable (handshake-answer 'GET (reader rfc-request) rfc-host settings))
+              (readable (handshake-answer 'GET (reader version) rfc-host settings)))))
+
+    ;; The handler's list and strings are changed after the settings are made.
+    (test-equal "settings keep copies of what they were made with: the handler's lists and strings, changed afterwards, change nothing"
+      '("chat" accept)
+      (let* ((names (list (string-copy "chat")))
+             (origin (string-copy "http://example.com"))
+             (origins (list origin))
+             (by-names (make-handshake-settings names 'any))
+             (by-origins (make-handshake-settings '() origins)))
+        (string-fill! (car names) #\x)
+        (set-car! names "superchat")
+        (string-fill! origin #\x)
+        (set-car! origins "http://example.org")
+        (list (caddr (handshake-answer 'GET (reader rfc-request) rfc-host by-names))
+              (car (handshake-answer 'GET (reader rfc-request) rfc-host by-origins)))))))

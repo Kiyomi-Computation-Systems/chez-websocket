@@ -9,6 +9,12 @@
 ;;; ASCII case, or #f.  The host is the request's, as its request-host reads
 ;;; it.  A test gives it a table.
 ;;;
+;;; A handler's settings, its subprotocols and its origins, are made once,
+;;; with make-handshake-settings, and checked there, so a bad name stops the
+;;; program where the settings are made, not at the first client.  They keep
+;;; copies of what they were made with, and each answer's bytevectors and
+;;; strings are its own.
+;;;
 ;;; The checks, in order; the first that fails answers (§4.2.1):
 ;;;   the method is GET                                   400
 ;;;   Upgrade lists websocket, without regard to case     400
@@ -39,61 +45,80 @@
 ;;; and the handshake still succeeds (§4.2.2 /subprotocol/), as coder and
 ;;; gorilla do.
 ;;;
-;;; Origin (decision 0003).  A request with no Origin is not a browser's
-;;; (§4.2.1), and a client that is not a browser may send any Origin it
-;;; likes, so one with none is accepted.  Otherwise the handler's origins
-;;; say, and a handler that names none gets (same-host):
+;;; Origin (decision 0003, and its amendment of 2026-10-06).  A request with
+;;; no Origin is not a browser's (§4.2.1), and a client that is not a
+;;; browser may send any Origin it likes, so one with none is accepted.
+;;; Otherwise the handler's origins say, and a handler that names none gets
+;;; (same-host):
 ;;;   any        every Origin is accepted;
 ;;;   a list     an Origin equal to one listed, without regard to ASCII case,
 ;;;              is accepted; and if the list holds same-host, an Origin of
 ;;;              the request's own host: one whose host and port, past the
 ;;;              first "://", are the request's host, letters without regard
-;;;              to case, as coder and gorilla compare them.
+;;;              to case, as coder and gorilla compare them.  When the
+;;;              request's X-Forwarded-Proto names http or https, the scheme
+;;;              its client used, as Caddy writes it and no browser can, the
+;;;              Origin's scheme must be that one too; otherwise the scheme
+;;;              is not compared.
+;;; An empty Origin is no origin (RFC 6454 §7.1): it names no host, so
+;;; same-host refuses it, as gorilla does.
 (library (websocket handshake)
-  (export handshake-answer)
+  (export make-handshake-settings handshake-settings? handshake-answer)
   (import (rnrs) (websocket sha1) (websocket base64))
 
   ;; RFC 6455 §1.3's GUID.
   (define guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
-  (define upgrade-field (cons (string->utf8 "Upgrade") (string->utf8 "websocket")))
-  (define accept-name (string->utf8 "Sec-WebSocket-Accept"))
-  (define protocol-name (string->utf8 "Sec-WebSocket-Protocol"))
-  (define version-fields
-    (list (cons (string->utf8 "Sec-WebSocket-Version") (string->utf8 "13"))))
+  ;; The record, as made: new-settings checks nothing.
+  (define-record-type (handshake-settings new-settings handshake-settings?)
+    (fields (immutable subprotocols settings-subprotocols)
+            (immutable origins settings-origins)))
+
+  ;; make-handshake-settings : (Listof String) [Origins] -> HandshakeSettings
+  ;;   Origins = (U 'any (Listof (U String 'same-host)))
+  ;; handshake-settings? : Any -> Boolean
+  ;; A handler's subprotocols, in its order of preference, each a token
+  ;; (RFC 6455 §4.1), and its origins, (same-host) when left out (decision
+  ;; 0003), checked once, here.  The settings keep copies, so what the
+  ;; handler changes afterwards changes nothing.  Anything else is an
+  ;; assertion violation naming make-handshake-settings.
+  (define make-handshake-settings
+    (case-lambda
+      ((subprotocols) (make-handshake-settings subprotocols '(same-host)))
+      ((subprotocols origins)
+       (unless (and (list? subprotocols) (for-all token? subprotocols))
+         (refuse-setting "not a list of subprotocols, each a token" subprotocols))
+       (unless (or (eq? origins 'any)
+                   (and (list? origins)
+                        (for-all (lambda (o) (or (string? o) (eq? o 'same-host))) origins)))
+         (refuse-setting "not any, nor a list of origins and same-host" origins))
+       (new-settings (map string-copy subprotocols)
+                     (if (eq? origins 'any)
+                         'any
+                         (map (lambda (o) (if (string? o) (string-copy o) o)) origins))))))
+
+  (define (refuse-setting message irritant)
+    (assertion-violation 'make-handshake-settings message irritant))
 
   ;; handshake-answer :
-  ;;   Symbol (String -> (U String #f)) String (Listof String) [Origins] -> Answer
-  ;;   Origins = (U 'any (Listof (U String 'same-host)))
+  ;;   Symbol (String -> (U String #f)) String HandshakeSettings -> Answer
   ;;   Answer  = (List 'accept Headers (U String #f))
   ;;               the 101's fields, and the subprotocol chosen
   ;;           | (List 'refuse Nat Headers Symbol)
   ;;               the status, its fields, and the check that failed: method,
   ;;               upgrade, connection, version, key or origin
   ;;   Headers = (Listof (Pair Bytevector Bytevector)), as the server's
-  ;;             make-response and switch-protocols take them; their bytes
-  ;;             are shared between answers, to be read and never written
+  ;;             make-response and switch-protocols take them, each made
+  ;;             for its answer
   ;; What the server answers the request: the 101's fields, or a refusal.
-  ;; Origins left out are (same-host) (decision 0003).  Arguments outside
-  ;; the contract are an assertion violation naming handshake-answer, and so
-  ;; is a field the reader answers with anything but a string or #f.
-  (define handshake-answer
-    (case-lambda
-      ((method field host subprotocols)
-       (answer method field host subprotocols '(same-host)))
-      ((method field host subprotocols origins)
-       (answer method field host subprotocols origins))))
-
-  (define (answer method field host subprotocols origins)
+  ;; Arguments outside the contract are an assertion violation naming
+  ;; handshake-answer, and so is a field the reader answers with anything
+  ;; but a string or #f.
+  (define (handshake-answer method field host settings)
     (unless (symbol? method) (refuse-argument "not a method" method))
     (unless (procedure? field) (refuse-argument "not a reader of fields" field))
     (unless (string? host) (refuse-argument "not a host" host))
-    (unless (and (list? subprotocols) (for-all token? subprotocols))
-      (refuse-argument "not a list of subprotocols, each a token" subprotocols))
-    (unless (or (eq? origins 'any)
-                (and (list? origins)
-                     (for-all (lambda (o) (or (string? o) (eq? o 'same-host))) origins)))
-      (refuse-argument "not any, nor a list of origins and same-host" origins))
+    (unless (handshake-settings? settings) (refuse-argument "not handshake settings" settings))
     (let ((value (lambda (name)
                    (let ((v (field name)))
                      (unless (or (not v) (string? v)) (refuse-argument "not a field's value" v))
@@ -101,22 +126,30 @@
       (cond ((not (eq? method 'GET)) (refusal 400 '() 'method))
             ((not (lists? (value "Upgrade") "websocket")) (refusal 400 '() 'upgrade))
             ((not (lists? (value "Connection") "upgrade")) (refusal 400 '() 'connection))
-            ((not (equal? (value "Sec-WebSocket-Version") "13")) (refusal 400 version-fields 'version))
+            ((not (equal? (value "Sec-WebSocket-Version") "13"))
+             (refusal 400 (list (header "Sec-WebSocket-Version" "13")) 'version))
             (else
              (let ((key (value "Sec-WebSocket-Key")))
                (cond ((not (key? key)) (refusal 400 '() 'key))
-                     ((not (origin-accepted? (value "Origin") host origins)) (refusal 403 '() 'origin))
+                     ((not (origin-accepted? (value "Origin") host (settings-origins settings)
+                                             (value "X-Forwarded-Proto")))
+                      (refusal 403 '() 'origin))
                      (else
-                      (let ((protocol (choose subprotocols (value "Sec-WebSocket-Protocol"))))
+                      (let ((protocol (choose (settings-subprotocols settings)
+                                              (value "Sec-WebSocket-Protocol"))))
                         (list 'accept
-                              (cons* upgrade-field
-                                     (cons accept-name (string->utf8 (accept-value key)))
+                              (cons* (header "Upgrade" "websocket")
+                                     (header "Sec-WebSocket-Accept" (accept-value key))
                                      (if protocol
-                                         (list (cons protocol-name (string->utf8 protocol)))
+                                         (list (header "Sec-WebSocket-Protocol" protocol))
                                          '()))
-                              protocol)))))))))
+                              (and protocol (string-copy protocol)))))))))))
 
   (define (refusal status headers why) (list 'refuse status headers why))
+
+  ;; header : String String -> (Pair Bytevector Bytevector) — a field, made
+  ;; for its answer.
+  (define (header name value) (cons (string->utf8 name) (string->utf8 value)))
 
   (define (refuse-argument message irritant)
     (assertion-violation 'handshake-answer message irritant))
@@ -138,23 +171,33 @@
   (define (choose subprotocols offer)
     (and offer (find (lambda (p) (has-element? offer p char=?)) subprotocols)))
 
-  ;; origin-accepted? : (U String #f) String Origins -> Boolean
-  (define (origin-accepted? origin host origins)
+  ;; origin-accepted? : (U String #f) String Origins (U String #f) -> Boolean
+  (define (origin-accepted? origin host origins proto)
     (cond ((not origin) #t)
           ((eq? origins 'any) #t)
           (else
            (exists (lambda (o)
                      (if (eq? o 'same-host)
-                         (same-host? origin host)
+                         (same-host? origin host proto)
                          (range=? origin 0 (string-length origin) o ascii-ci=?)))
                    origins))))
 
-  ;; same-host? : String String -> Boolean
+  ;; same-host? : String String (U String #f) -> Boolean
   ;; Whether what follows the origin's first "://" is `host`, letters
-  ;; without regard to case.
-  (define (same-host? origin host)
+  ;; without regard to case; and, when the request's X-Forwarded-Proto names
+  ;; http or https, whether what precedes it is that scheme.
+  (define (same-host? origin host proto)
     (let ((at (past-scheme origin)))
-      (and at (range=? origin at (string-length origin) host ascii-ci=?))))
+      (and at
+           (or (not (scheme? proto)) (range=? origin 0 (fx- at 3) proto ascii-ci=?))
+           (range=? origin at (string-length origin) host ascii-ci=?))))
+
+  ;; scheme? : (U String #f) -> Boolean — http or https, without regard to
+  ;; case.
+  (define (scheme? proto)
+    (and proto
+         (or (range=? proto 0 (string-length proto) "http" ascii-ci=?)
+             (range=? proto 0 (string-length proto) "https" ascii-ci=?))))
 
   ;; past-scheme : String -> (U Nat #f) — where the origin's first "://" ends.
   (define (past-scheme s)
