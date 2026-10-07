@@ -1079,3 +1079,54 @@ MERGED to main on 2026-10-06: **M3.3, the ping clock, the protocol's mutation sw
 `make test` green on main: eight suites, 223 expected passes, every pin ok.
 
 NEXT: M4.1, the handshake (`(websocket handshake)`: design §3's checks and answers, subprotocols, and `Origin` by form), when the owner asks.
+
+---
+
+M4.1 — THE HANDSHAKE. Branches `docs/m4.1-1-decision`, `feat/m4.1-2-handshake` and `docs/m4.1-3-ledger`, stacked (by form, "Three stacked PRs": about 1,140 lines, over the ~400 mark). 2026-10-06.
+
+**Delivered: `(websocket handshake)`**, pure: it imports `(rnrs)`, `(websocket sha1)` and `(websocket base64)`.
+- **`handshake-answer`** is given the method, a reader of the request's fields and the request's host, as the server's `request-method`, `request-header` and `request-host` read them, and the handler's subprotocols and origins.
+- **It answers** the 101's fields and the subprotocol chosen, or a refusal: its status, its fields, and the check that failed. The 101 carries `Upgrade: websocket`, `Sec-WebSocket-Accept`, and `Sec-WebSocket-Protocol` when a subprotocol is chosen.
+- **The design's §3 checks, in its order**: method, Upgrade, Connection, version, key, Origin.
+  - Upgrade and Connection are read as lists, without regard to case.
+  - A key's last digit may set bits past its data, and the accept value is of the key as sent.
+  - A refusal has no body, as the server's own have none.
+- **Subprotocols**: the handler's first that the client offered, matched exactly as a whole element; none matching is no header and a 101. The handler's names must be tokens.
+- **Origin**: `any`, or a list of origins that may hold `same-host`; no Origin is always accepted.
+- The facade, `websocket-accept`, is M4.3's.
+
+**DECIDED (0003), by form, each the recommended:**
+- **"Same host"**: a handler that names no origins accepts an Origin of the request's own host, or none, and refuses others 403, coder's and gorilla's way.
+- **"400 with 13"**: a wrong version is refused 400 with `Sec-WebSocket-Version: 13`, not the design's 426. RFC 9110 has a 426 carry `Upgrade`, with `upgrade` in `Connection`, and the server lets no response but a 101 say that.
+
+**Measured** (Darwin arm64, server v0.3.0):
+- **Chrome 152, against a probe on the server.** A page of the same origin sent `Origin: http://127.0.0.1:18741` with `Host: 127.0.0.1:18741`. A page on localhost sent `Origin: http://localhost:18741` to the same server.
+- **Fields split over two lines.** The server opens its door to a Connection or an Upgrade list split that way, but `request-header` reads only the first line. That gap is recorded in the design's §9, for M4.3's facade.
+- **A handler's 426.** With `Connection: upgrade`, the server answers 500. With `Upgrade` alone, it goes out with `Connection: close` to an upgrade request.
+- **The research.** A Sonnet agent read the five peers, Autobahn's fuzzing client and Caddy from source at their tags, quotes checked by a script (`.plans/research/2026-10-06-peer-handshakes.md`). No peer answers a version with 426. Autobahn sends no `Origin`. Caddy passes `Host` and `Origin` unchanged to a plaintext upstream.
+
+**Tests first.**
+- **Before the library:** exit 255.
+- **Decision 0003's checks**, named and hashed before the run (`32982d4`). Against the library before 0003, exactly R-VERSION, R-ORDER and O-DEFAULT went red.
+
+**Mutants** (`m4-mutations.md`), each red set named before its run and hashed:
+- **The first run**, 99 rows. Two mismatches, both prediction errors: O-14 and L-14 reach O-HOST too.
+- **The last**, on the final blobs: 102 rows, 101 mutants and the baseline, 0 mismatches.
+- L-2 is equivalent.
+- Every one of the 23 checks has a killer by value.
+
+Writing the mutants added rows that the draft suite would have let pass, and P-TOKEN, a check of its own. Each row has its mutant: an element with OWS after it, a value one character apart, untrimmed lists, a Z, an Origin missing its colon, a `://` that ends the Origin, and the token's character classes. It also made `origin-accepted?` a `cond`, and added S-4, so that every check has a killer by value.
+
+**A real client.** Chrome 152 ran against a scratch probe answering with the library:
+- a page of the same origin opened, with `protocol` superchat, the handler's first preference among the client's two, and no extensions;
+- a page on localhost was refused 403 when it called 127.0.0.1, and opened when it called localhost.
+
+**Records:**
+- decision 0003, and the research;
+- the design's §3, as built, and its §9: Origin decided, and a field split over lines, for M4.3;
+- the plan's M4.1 and M4.3;
+- the README's status.
+
+`make test` green before the commit (Darwin arm64): nine suites, 247 expected passes, every pin ok. `make prod` green.
+
+NEXT: review and the closing ritual, when the owner asks; then M4.2, the binding's test driver, by form.
