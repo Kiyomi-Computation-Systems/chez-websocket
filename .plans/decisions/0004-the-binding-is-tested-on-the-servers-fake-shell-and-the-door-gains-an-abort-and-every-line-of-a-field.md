@@ -58,7 +58,7 @@ line joined with a comma.
 By form, the recommended of each:
 
 1. **The binding is tested on the server's fake shell**, its `tests/` put on this
-   project's library path, last. Weighed:
+   project's test library path, last (amended below). Weighed:
    - our own driver over the server's private scheduler: it copies about 115 lines of
      the fake's door, and skips the parse, the 101 and the hand-off;
    - a runner in the server: a release, and still no 101.
@@ -88,3 +88,19 @@ reading, in the same release (its decision 0024's third item).
 - **The send side's bound for a client that sends and does not read is still M4.3's**,
   to decide by form. It needs no door change, and closes such a client with the abort.
 - **M4.3 tests the binding through the fake shell**, and on a real socket.
+
+## Amendment (2026-10-09): M4.2's review
+
+- **The suites' path, not the one path.** M4.2 first put the server's `tests/` on the
+  one library path, which `make run` and `make dev` use too. It is now on the suites'
+  path alone (`TEST_LIBDIRS`), last. Beside it is chez-httparse's test harness, which
+  the server's `(response-reader)` needs to read the 101 as a client would. `make test`
+  refuses to run if either is on the path that runs programs. The driver suite checks
+  that no library of theirs has the name of one of this project's.
+- **How a test plays the client.** `fake-shell-feed-input!` delivers the client's bytes
+  only while the taker reads, as libuv does. `fake-shell-deliver!` hands over an event
+  whatever the read state. So a test of read-stop feeds its bytes. The driver suite
+  holds a read stopped from inside the taker's own read, as the binding stops at a full
+  queue.
+- **The pin lands alone.** The pin is a PR of its own, #35, under the driver's. A squash
+  merge makes one commit of a PR's commits, and a pin moves alone (global-constraints).

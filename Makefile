@@ -27,9 +27,7 @@ SRFI_DIR         := $(SERVER_DIR)/vendor/chez-srfi
 # The server's, behind this project's own src/ and tests/.  chez-libuv locates
 # its C shim by an absolute path baked into a config.sls it generates at its
 # build, so only its src/ is needed here.  build/scheme-libs carries
-# (srfi :64).  The server's tests/ comes last: its (fake-shell) is the
-# binding's test driver (decision 0004), and the directories before it win
-# any name it shares with them.
+# (srfi :64).
 BUILD_DIR := build
 SRFI_LIBS := $(BUILD_DIR)/scheme-libs
 EMPTY :=
@@ -39,9 +37,19 @@ LIBDIR_LIST := src tests \
   $(LIBUV_DIR)/src \
   $(HTTPARSE_DIR)/src $(BYTE_MACHINE_DIR)/src \
   $(URIPARSE_DIR)/src \
-  $(SRFI_LIBS) \
-  $(SERVER_DIR)/tests
+  $(SRFI_LIBS)
 LIBDIRS := $(subst $(SPACE),:,$(strip $(LIBDIR_LIST)))
+
+# --- the suites' path ---------------------------------------------------------
+# The suites run on LIBDIRS and then the test code they borrow, last, so the
+# directories before it win any name it shares with them (the driver suite
+# checks that none does): the server's tests/, whose (fake-shell) is the
+# binding's test driver (decision 0004), and chez-httparse's test harness, on
+# which the server's (response-reader) reads a response as a client would.
+# Test code stays off LIBDIRS, the path `make run` and `make dev` use, and
+# `make test` refuses to run if it is there.
+TEST_ONLY_DIRS := $(SERVER_DIR)/tests $(HTTPARSE_DIR)/test/support/harness
+TEST_LIBDIRS := $(LIBDIRS):$(subst $(SPACE),:,$(strip $(TEST_ONLY_DIRS)))
 
 # Each tests/test-*.sps is its own process with its own (exit ...) status.
 TESTS := $(wildcard tests/test-*.sps)
@@ -113,7 +121,7 @@ deps: submodules ## Build chez-libuv's shim and link SRFI-64 onto the path
 	done
 
 build: deps ## Build dependencies and assemble the one library path
-	@echo "build: chez-libuv shim built; library path = $(LIBDIRS)"
+	@echo "build: chez-libuv shim built; library path = $(LIBDIRS); the suites' adds $(TEST_ONLY_DIRS)"
 
 dev: build ## Start a REPL with everything on the library path
 	CHEZSCHEMELIBDIRS=$(LIBDIRS) $(CHEZ)
@@ -125,10 +133,15 @@ run: build ## Run a program on the library path: make run PROGRAM=echo.sps
 test: build check-pins ## Run every tests/test-*.sps (status 0/1/2/3, keep-going)
 	@test -n "$(TESTS)" || { echo "test: empty selection — no tests/test-*.sps (failure)" >&2; exit 2; }
 	@test -n "$(TIMEOUT_BIN)" || echo "note: no timeout(1) on PATH; a hung suite will not be capped"
+	@for d in $(TEST_ONLY_DIRS); do \
+	  case ":$(LIBDIRS):" in *":$$d:"*) \
+	    echo "test: $$d is test code on LIBDIRS, the path make run and make dev use; it belongs on TEST_LIBDIRS alone (decision 0004)" >&2; exit 2;; \
+	  esac; \
+	done
 	@fail=0; \
 	for t in $(TESTS); do \
 	  echo "=== $$t ==="; \
-	  CHEZSCHEMELIBDIRS=$(LIBDIRS) $(TIMEOUT_BIN) $(if $(TIMEOUT_BIN),$(SUITE_TIMEOUT),) $(CHEZ) --program $$t; \
+	  CHEZSCHEMELIBDIRS=$(TEST_LIBDIRS) $(TIMEOUT_BIN) $(if $(TIMEOUT_BIN),$(SUITE_TIMEOUT),) $(CHEZ) --program $$t; \
 	  rc=$$?; \
 	  if [ $$rc -eq 124 ] && [ -n "$(TIMEOUT_BIN)" ]; then \
 	    echo "HUNG: $$t exceeded $(SUITE_TIMEOUT)s and was killed" >&2; fail=1; \

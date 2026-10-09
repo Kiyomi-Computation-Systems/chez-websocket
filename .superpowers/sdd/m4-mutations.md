@@ -604,9 +604,11 @@ Each red set was named and hashed before its run.
 | D-VALUES | `request-header-values` reads every line of a field, in order, through the server's parse, and `request-header` the first |
 
 Specs hashed before the run (`7b25053`, names `2f36490`). The run: 28 rows, 27 mutants and
-the baseline, 0 mismatches. M-2 was drafted and withdrawn before the run: a copy of the
-bytes handed over, one byte short, would raise when nothing was handed over, so its red
-set could not be named.
+the baseline, 0 mismatches. M-2 was drafted and withdrawn before the run, on a premise
+not checked: that a copy of the bytes handed over, one byte short, would raise when nothing
+was handed over. The core hands over #f then (0006 item 3's contract, in its
+`connection.sls`), and the fake copies nothing. M4.2's review ran it: D-RETAINED alone, as
+predicted (below).
 
 | # | mutation | red, as predicted |
 |---|----------|-----|
@@ -666,3 +668,124 @@ both, reddens D-DRAIN.
 
 The door suite's other five checks did not change; their mutants are M0's (M0-7 to
 M0-11) and M4.1's review's (D-SERVER).
+
+## M4.2's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09.
+- **The suites:** `tests/test-driver.sps`, now 14 checks (blob bf02dff), and the door
+  suite, 6 (unchanged).
+- **The Makefile** (blob 0ecfc71): the suites' path, `TEST_LIBDIRS`.
+- **The pinned server**, as M4.2's section has it, and its serializer,
+  `src/http-server/serializer.sls`.
+
+`/code-review` at extra-high effort over #32 to #34 reported nine findings. The owner said
+"fix all".
+
+### The findings and their fixes
+
+1. **Squashing #33 would merge the pin and the driver** on main, where a pin moves alone
+   (global-constraints). The pin commit, a2c6904, is now a PR of its own, #35, and #33 is
+   based on it. Nothing was rewritten.
+2. **`fake-shell-deliver!` hands a taker its events whatever the read state**; only
+   `fake-shell-feed-input!` honours read-stop, as libuv does.
+   - The driver suite's header and the design's §8 now say how a test plays the client.
+   - D-INSIDE holds a read stopped from inside the taker's own read, as the binding stops
+     at a full queue.
+3. **D-BEHIND could not see the wait** (M-12 left it green). It now arms a deadline before
+   the close, as the binding's ping is. A close that has begun disarms it, so the check
+   reads it while the close waits and again after.
+4. **The design's §6 mapped `close-stream` to `transport-close!` alone.** Its row now
+   names `transport-abort!` where the client is not reading what is unsent (0004). M4.3
+   names those places.
+5. **M-2's withdrawal rested on a wrong premise.** The sentence above is corrected, and
+   M-2 and M-2b ran.
+6. **The server's `tests/` was on the one path**, the one `make run` and `make dev` use.
+   - It is now on `TEST_LIBDIRS` alone, with chez-httparse's test harness (finding 9
+     needs it).
+   - `make test` refuses to run if either is on `LIBDIRS`.
+7. **That no borrowed library has one of our names was a comment.** D-NAMES checks it,
+   reading every library under the borrowed directories and ours with Chez's reader.
+8. **The design's §9 compared against the server's v0.1.0 numbers** without saying so.
+   They are now attributed, and M4.3 measures the server's own again at the pin.
+9. **`client-reads` read the status at bytes 9 to 12.** It now reads the head as a client
+   would, by the server's `(response-reader)`, on chez-httparse's strict response parser.
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **R0, the review's suites on the unmutated pin** (`bdefeaf`): every suite green. Ten
+  suites, 266 passes; the driver suite 14.
+- **G-1, the gap run** (in `b303e45`): the driver suite as it was before the review
+  (0f9d1dd), under M-29, the status line ending in a bare LF. All 12 pass. The review's
+  suite reddens seven under it (below).
+
+### The mutants
+
+| key | check |
+|---|---|
+| D-INSIDE | a read stopped from inside the taker's read takes no later delivery: of three frames sent one a read, two are taken and echoed |
+| D-BEHIND | a close asked for behind a write the client has not read waits: the deadline armed before it stays armed, and once the client reads the write the stream closes, the deadline disarmed |
+| D-NAMES | no library of the test code borrowed onto the suites' path has the name of one of this project's, the fake shell and the response reader among them |
+
+**The runner's rows.** M4.2's 27 mutants were re-predicted for the review's suite, and
+the review's five added, with the baseline.
+- Specs hashed before the run: `27d205e`, names `c2e4bc3`.
+- **33 rows, 32 mutants and the baseline: 1 mismatch**, M-5.
+- **M-5, read-start starts nothing**, reddened D-STOP alone. I predicted D-INSIDE too,
+  from a premise not checked: that the core stops reading when it calls the handler. It
+  does so on one path (its `connection.sls`, line 2011), but not for this request, a GET
+  with no body.
+  - A probe found the connection reading at the take-over and after it, with no
+    read-stop among the core's actions.
+  - The libuv shell's hand-off leaves reading as it was, and the taker's read-start
+    replaces what its reads are handed to (`shell.sls`, `taker-read-start!`). The two
+    shells agree.
+  - So D-INSIDE's read-start found reading on, and its check held under M-5. A
+    prediction error; M-4, M-28 and M-29 redden D-INSIDE by value.
+
+| # | mutation | red |
+|---|----------|-----|
+| B-0 | none | none: 20 passes |
+| M-1 | the bytes read past the request are not handed over | D-RETAINED |
+| M-2 | the bytes handed over copied one short at the end | D-RETAINED |
+| M-2b | the bytes handed over copied from one byte late | D-RETAINED |
+| M-3 | a delivery to a taker leaves the scheduler undrained | D-WAKE, D-STOP, D-INSIDE, D-BEHIND, D-ARMED, D-ABORT |
+| M-4 | read-stop stops nothing | D-STOP, D-INSIDE |
+| M-5 | read-start starts nothing | D-STOP (predicted D-INSIDE too: above) |
+| M-6 | the deadline armed a millisecond late | D-CLOCK, D-BEHIND, D-ARMED, D-ABORT, D-RAISE-DL |
+| M-7 | the deadline armed a millisecond early | D-CLOCK, D-BEHIND, D-ARMED |
+| M-8 | the timer fires a millisecond behind the clock | D-CLOCK, D-ABORT, D-RAISE-DL |
+| M-9 | the drain does not call the taker | D-DRAIN |
+| M-10 | the drain's two guards both gone | D-DRAIN |
+| M-10a, M-10b | one of the drain's guards gone | none: the call still once |
+| M-11 | the last write's turn never begins a close asked for | D-BEHIND |
+| M-12 | the close begins at once, whatever is outstanding | D-BEHIND, D-ARMED, D-ABORT |
+| M-13 | no deadline armed once the taker's close is asked for | D-ARMED, D-ABORT |
+| M-14, M-15, M-16 | the abort only asks for the close; marks nothing aborted; an aborted write's bytes the client's | D-ABORT, D-RAISE-THUNK |
+| M-17 | `transport-abort!` calls the transport's close | DR-ABORT, D-ABORT |
+| M-18, M-19 | the close tells no wait; its `&client-closed` counted a failure | D-OUTSIDE, D-RAISE-DL |
+| M-20 | the taker's close call is not made | D-BEHIND, D-ABORT, D-OUTSIDE, D-RAISE-DL, D-RAISE-THUNK |
+| M-21 | the deadline's call unguarded | D-RAISE-DL |
+| M-22, M-23 | a waiting thunk's raise only asks for the close; not recorded | D-RAISE-THUNK |
+| M-24, M-25, M-26 | `request-header-values` the first line only; last first; `request-header` the last | D-VALUES |
+| M-27 | a close begun leaves the deadline armed | D-BEHIND |
+| M-28 | the client's bytes fed whatever the read state | D-STOP, D-INSIDE |
+| M-29 | the status line ends in a bare LF (the serializer) | D-RETAINED, D-WAKE, D-STOP, D-INSIDE, D-BEHIND, D-ABORT, D-RAISE-THUNK |
+
+**The rows outside the runner** (predicted in `b303e45`), each as predicted:
+- **N-1, a borrowed library named as one of ours.** A scratch tree's copy of the
+  server's `tests/` holds a library named `(ws-testing)`. D-NAMES alone goes red, its
+  overlap `((ws-testing))`.
+- **N-2, the borrowed directories read empty.** D-NAMES alone goes red: no fake shell,
+  no response reader.
+- **MK-1, the server's `tests/` back on `LIBDIR_LIST`.** `make test` exits 2, naming it
+  test code on `LIBDIRS`, before any suite runs.
+- **MK-2, `TEST_ONLY_DIRS` without the server's `tests/`.** The driver suite stops at
+  load (`(fake-shell)` not found, exit 255), and the other nine pass.
+
+| check | killers by value |
+|---|---|
+| D-BEHIND | M-3, M-6, M-7, M-11, M-12, M-20, M-27, M-29 |
+| D-INSIDE | M-3, M-4, M-28, M-29 |
+| D-NAMES | N-1, N-2 |

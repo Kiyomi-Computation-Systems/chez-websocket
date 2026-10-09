@@ -1256,3 +1256,40 @@ M4.2 — THE BINDING'S TEST DRIVER. Branches `docs/m4.2-1-decision`, `test/m4.2-
 `make test` green before the commit (Darwin arm64): ten suites, 264 expected passes, every pin ok. `make prod` green.
 
 NEXT: review and the closing ritual, when the owner asks; then M4.3, the binding.
+
+---
+
+M4.2'S REVIEW. Branch `fix/m4.2-review`, stacked on `docs/m4.2-3-ledger`. 2026-10-09.
+
+`/code-review` at extra-high effort over #32 to #34 reported nine findings. The owner said "fix all".
+
+**The pin, alone (finding 1).** The closing ritual squashes each PR, so #33 would have landed the pin and the driver as one commit on main, where a pin moves alone (global-constraints).
+- The pin commit, a2c6904, is now #35, based on #32; #33 is based on it.
+- Nothing was rewritten: the stack is #32, #35, #33, #34 and this PR, renamed "1 of 4" to "4 of 4".
+
+**The suites' path (findings 6, 7, 9).**
+- **`TEST_LIBDIRS`.** The server's `tests/` is on the suites' path alone, last. chez-httparse's test harness is beside it, which the server's `(response-reader)` needs.
+- **`make test` refuses to run** if either is on `LIBDIRS`, the path `make run` and `make dev` use.
+- **D-NAMES** checks, by Chez's reader, that no borrowed library has one of this project's names, and that the fake shell and the response reader are among them.
+- **`client-reads`** reads what the client read as a client would, by `(response-reader)`, not at bytes 9 to 12. Under a serializer whose status line ends in a bare LF, the old suite passed all 12 checks, and the review's reddens seven.
+
+**The driver suite (findings 2, 3).**
+- **How a test plays the client.** `fake-shell-deliver!` hands a taker its events whatever the read state. Only `fake-shell-feed-input!` honours read-stop, as libuv does. The suite's header and the design's §8 say so.
+- **D-INSIDE** holds a read stopped from inside the taker's read, as the binding stops at a full queue.
+- **D-BEHIND** arms a deadline before the close, so a close that had begun at once would show, disarmed.
+
+**The records (findings 4, 5, 8).**
+- The design's §6 names `transport-abort!` beside `close-stream`.
+- The log's M-2 premise is corrected, and M-2 ran.
+- The design's §9 says whose the server's numbers are, and M4.3 measures them again at the pin.
+- Decision 0004 gains an amendment for the path, the client, and the pin's own PR.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **R0, the review's suites on the unmutated pin**: every suite green, 266 passes.
+- **The runner: 33 rows, 1 mismatch, M-5.** I predicted read-start's mutant would redden D-INSIDE too, from a premise not checked: that the core stops reading when it calls the handler. For a GET with no body it does not. A probe found the connection reading through the hand-off, as the libuv shell's is.
+- **The other rows, each as predicted:** two scratch trees for D-NAMES, two Makefile mutants, and the gap run.
+- Every new or changed check has a killer by value.
+
+`make test` green before the commit (Darwin arm64): ten suites, 266 expected passes, every pin ok. `make prod` green.
+
+NEXT: the closing ritual for #32, #35, #33, #34 and this PR, bottom-up, when the owner asks; then M4.3, the binding.
