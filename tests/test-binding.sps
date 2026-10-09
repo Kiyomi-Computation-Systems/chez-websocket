@@ -57,15 +57,11 @@
 ;;; The binding logs to the current output port, which each check that looks
 ;;; for a line takes for its own.
 (import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
-        (only (chezscheme) parameterize system getenv)
-        (rename (only (chezscheme) current-output-port) (current-output-port output-port-parameter))
+        (only (chezscheme) system getenv)
         (only (http-server limits) default-limits)
-        (only (http-server switch) switch? switch-headers switch-take-over)
         (only (http-server private serve) log-line)
         (only (websocket limits) websocket-limits-environment-variables)
-        (websocket))
-
-(define (b s) (string->utf8 s))
+        (websocket) (ws-play))
 
 ;; copy : Bytevector Nat Nat -> Bytevector — bv[from, to), copied.
 (define (copy bv from to)
@@ -78,50 +74,7 @@
                0 bvs)
     out))
 
-(define bv u8-list->bytevector)
-
 ;; --- the frames, by RFC 6455 §5.2 and §5.3 ----------------------------------
-
-;; §5.7's masking key.
-(define key '(#x37 #xFA #x21 #x3D))
-
-;; big-endian : Nat Nat -> (Listof Byte) — n as k bytes, most significant first.
-(define (big-endian n k)
-  (let loop ((n n) (k k) (out '()))
-    (if (= k 0) out (loop (div n 256) (- k 1) (cons (mod n 256) out)))))
-
-;; length-bytes : Nat Byte -> (Listof Byte)
-;; The second byte, the mask bit's value given, then the extended length,
-;; in the shortest form.
-(define (length-bytes n mask)
-  (cond ((< n 126) (list (+ mask n)))
-        ((< n 65536) (cons (+ mask 126) (big-endian n 2)))
-        (else (cons (+ mask 127) (big-endian n 8)))))
-
-;; client-frame : Byte Bytevector -> Bytevector
-;; A client's frame: its first byte, the length masked, the key, the payload
-;; masked, byte i with the key's byte i mod 4.
-(define (client-frame first payload)
-  (let ((p (bytevector->u8-list payload)))
-    (bv (append (list first) (length-bytes (length p) 128) key
-                (let loop ((p p) (i 0) (out '()))
-                  (if (null? p)
-                      (reverse out)
-                      (loop (cdr p) (+ i 1)
-                            (cons (bitwise-xor (car p) (list-ref key (mod i 4))) out))))))))
-
-;; server-frame : Byte Bytevector -> Bytevector
-;; The server's frame: its first byte, the length unmasked, the payload.
-(define (server-frame first payload)
-  (bv (append (list first) (length-bytes (bytevector-length payload) 0) (bytevector->u8-list payload))))
-
-;; close-body : Nat String -> Bytevector — a close's code, then its reason.
-(define (close-body code reason)
-  (bv (append (big-endian code 2) (bytevector->u8-list (b reason)))))
-
-;; RFC 6455 §5.7's examples, as its text prints them.
-(define rfc-masked-hello (bv '(#x81 #x85 #x37 #xFA #x21 #x3D #x7F #x9F #x4D #x51 #x58)))
-(define rfc-hello (bv '(#x81 #x05 #x48 #x65 #x6C #x6C #x6F)))
 
 (define nothing (make-bytevector 0))
 (define ping (bv '(#x89 #x00)))
@@ -176,12 +129,6 @@
 
 ;; --- the server ---------------------------------------------------------------
 
-;; accepting : (WebSocket -> Any) . Any -> (Request -> Answer)
-;; A handler answering what websocket-accept answers, with any settings and
-;; limits given.
-(define (accepting proc . options)
-  (lambda (request) (apply websocket-accept request proc options)))
-
 ;; connect : (Request -> Answer) Bytevector -> FakeShell
 ;; A fake connection, its clock at 5,000 ms, read `input` and settled.
 (define (connect handler input)
@@ -190,17 +137,6 @@
     (fake-shell-settle! sh)
     sh))
 
-;; wrapping : (Request -> Answer) (Transport -> Transport) -> (Request -> Answer)
-;; The handler, its switch's take-over handed `(wrap t)` in place of the
-;; fake's transport t.
-(define (wrapping handler wrap)
-  (lambda (request)
-    (let ((a (handler request)))
-      (if (switch? a)
-          (switch-protocols (switch-headers a)
-                            (lambda (t retained) ((switch-take-over a) (wrap t) retained)))
-          a))))
-
 ;; holding : (Request -> Answer) (Transport -> Any) -> (Request -> Answer)
 ;; The handler, its switch's take-over wrapped to hand the transport to
 ;; `keep` first, so a test can close the stream under the binding, as the
@@ -208,27 +144,11 @@
 (define (holding handler keep)
   (wrapping handler (lambda (t) (keep t) t)))
 
-;; logged : (-> Any) -> (List Any String)
-;; What the thunk answers, and what was written to the current output port
-;; while it ran: the binding's log.  The port is Chez's parameter, which
-;; (rnrs)'s current-output-port reads but cannot be given to parameterize.
-(define (logged thunk)
-  (let-values (((port get) (open-string-output-port)))
-    (let ((v (parameterize ((output-port-parameter port)) (thunk))))
-      (list v (get)))))
-
 ;; server-logged : Symbol (Listof Any) -> String
 ;; The line the server's own log writes for `what` and its details: the
 ;; binding logs as the server does, and this ties the two.
 (define (server-logged what details)
   (cadr (logged (lambda () (log-line what details)))))
-
-;; limits : (Listof (Pair Symbol Nat)) -> WebsocketLimits — the defaults, these replaced.
-(define (limits overrides) (websocket-limits-with default-websocket-limits overrides))
-
-;; closed : Condition -> (List 'closed Nat String Boolean)
-(define (closed e)
-  (list 'closed (websocket-closed-code e) (websocket-closed-reason e) (websocket-closed-clean? e)))
 
 ;; who-of : (-> Any) -> (U Symbol 'no-raise)
 ;; The who of the assertion violation the thunk raises.
