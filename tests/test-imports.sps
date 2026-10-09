@@ -4,9 +4,14 @@
 ;;; A pure library imports R6RS's own libraries, (rnrs ...), and this
 ;;; project's other pure libraries, and nothing else: not (chezscheme), not
 ;;; (http-server), not the facade (websocket), and not (websocket private
-;;; ...), where the binding will live.  Not (rnrs eval) either: an
-;;; environment reaches any library.  Every library under src/ is pure until
-;;; the binding arrives in M4, which this audit will then name.
+;;; ...), where the binding lives.  Not (rnrs eval) either: an environment
+;;; reaches any library.  Every library under src/ is pure but two (M4.3):
+;;;   src/websocket/private/binding.sls, the binding, which may import
+;;;     (chezscheme) and (http-server) too, and is the only one that may;
+;;;   src/websocket.sls, the facade, which may import the binding too, and
+;;;     is the only one that may.
+;;; Both are among the sources, so neither exception names a file that is
+;;; gone.
 ;;;
 ;;; Each source file under src/ is read with Chez's own reader, so a comment
 ;;; or a string cannot pass for an import.  A source file is one whose name
@@ -54,6 +59,23 @@
                 (pair? (cdr spec))
                 (not (eq? (cadr spec) 'private))))))
 
+;; The two libraries that are not pure, each with the imports it may add.
+(define binding "src/websocket/private/binding.sls")
+(define facade "src/websocket.sls")
+(define exceptions
+  (list (list binding "(rnrs ...), (chezscheme), (http-server) and pure (websocket ...)"
+              '(chezscheme) '(http-server))
+        (list facade "(rnrs ...), (websocket private binding) and pure (websocket ...)"
+              '(websocket private binding))))
+
+;; allowed : String -> (List String (Listof Datum))
+;; What the file may import past the pure, and how its check says it.
+(define (allowed path)
+  (let ((e (assoc path exceptions)))
+    (if e
+        (cdr e)
+        (list "(rnrs ...) and pure (websocket ...)"))))
+
 ;; forms : String -> (Listof Datum)
 ;; Every datum in the file, in order.
 (define (forms path)
@@ -63,24 +85,29 @@
         (let ((x (read port)))
           (if (eof-object? x) (reverse acc) (loop (cons x acc))))))))
 
-;; impure-imports : String -> (Listof Datum)
-;; The import specs of the file's library that are not pure.  A file whose
-;; first datum is not a library with an import clause answers that, and so
-;; does one with anything after its library.
-(define (impure-imports path)
+;; impure-imports : String (Listof Datum) -> (Listof Datum)
+;; The import specs of the file's library that are neither pure nor among
+;; `extra`.  A file whose first datum is not a library with an import clause
+;; answers that, and so does one with anything after its library.
+(define (impure-imports path extra)
   (let ((all (forms path)))
     (cond ((not (and (pair? all) (list? (car all)) (>= (length (car all)) 4)
                      (eq? (car (car all)) 'library)
                      (pair? (cadddr (car all))) (eq? (car (cadddr (car all))) 'import)))
            '(not-a-library-with-an-import-clause))
           ((pair? (cdr all)) '(more-after-the-library))
-          (else (filter (lambda (spec) (not (pure-import? spec))) (cdr (cadddr (car all))))))))
+          (else (filter (lambda (spec) (not (or (pure-import? spec) (member spec extra))))
+                        (cdr (cadddr (car all))))))))
 
 (run-suite "imports"
   (lambda ()
+    (test-equal "the binding and the facade are among the sources"
+      (list binding facade)
+      (filter (lambda (path) (member path (sources "src"))) (list binding facade)))
     (for-each
       (lambda (path)
-        (test-equal (string-append path " is one library, importing only (rnrs ...) and pure (websocket ...) libraries")
-          '()
-          (impure-imports path)))
+        (let ((a (allowed path)))
+          (test-equal (string-append path " is one library, importing only " (car a) " libraries")
+            '()
+            (impure-imports path (cdr a)))))
       (sources "src"))))

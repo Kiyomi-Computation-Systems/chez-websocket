@@ -4,10 +4,10 @@
 ;;;
 ;;; Pure: the request is the server's, so this library is given what it
 ;;; reads of it.  The method is the symbol llhttp names.  A reader answers a
-;;; field's value from its name, as the server's request-header reads a
-;;; request's: the value of the first field of that name, without regard to
-;;; ASCII case, or #f.  The host is the request's, as its request-host reads
-;;; it.  A test gives it a table.
+;;; field's value from its name, without regard to ASCII case, or #f: the
+;;; facade gives every line of the field, joined with commas (decision
+;;; 0004).  The host is the request's, as its request-host reads it.  A test
+;;; gives it a table.
 ;;;
 ;;; A handler's settings, its subprotocols and its origins, are made once,
 ;;; with make-handshake-settings, and checked there, so a bad name stops the
