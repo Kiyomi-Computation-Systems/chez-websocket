@@ -39,10 +39,12 @@
 ;;; The binding logs to the current output port, which each check that looks
 ;;; for a line takes for its own.
 (import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
-        (only (chezscheme) parameterize system display-condition)
+        (only (chezscheme) parameterize system getenv)
         (rename (only (chezscheme) current-output-port) (current-output-port output-port-parameter))
         (only (http-server limits) default-limits)
         (only (http-server switch) switch? switch-headers switch-take-over)
+        (only (http-server private serve) log-line)
+        (only (websocket limits) websocket-limits-environment-variables)
         (websocket))
 
 (define (b s) (string->utf8 s))
@@ -191,6 +193,12 @@
     (let ((v (parameterize ((output-port-parameter port)) (thunk))))
       (list v (get)))))
 
+;; server-logged : Symbol (Listof Any) -> String
+;; The line the server's own log writes for `what` and its details: the
+;; binding logs as the server does, and this ties the two.
+(define (server-logged what details)
+  (cadr (logged (lambda () (log-line what details)))))
+
 ;; limits : (Listof (Pair Symbol Nat)) -> WebsocketLimits — the defaults, these replaced.
 (define (limits overrides) (websocket-limits-with default-websocket-limits overrides))
 
@@ -242,6 +250,11 @@
 
 (run-suite "binding"
   (lambda ()
+    ;; Its numbers are the defaults': the binding reads CHEZ_WS_ variables as
+    ;; the program starts, and make test runs the suites with none set.
+    (let ((set (filter getenv websocket-limits-environment-variables)))
+      (unless (null? set)
+        (assertion-violation 'binding-suite "a CHEZ_WS_ variable is set; make test unsets them" set)))
     ;; The suite's own frames are §5.7's.
     (unless (and (equal? (client-frame #x81 (b "Hello")) rfc-masked-hello)
                  (equal? (server-frame #x81 (b "Hello")) rfc-hello))
@@ -291,6 +304,12 @@
       (test-equal "a handler that names no origins refuses a browser's Origin of another host, 403"
         403 (car (answer sh))))
 
+    (let ((sh (connect (accepting (echoing (make-notes)))
+                       (request upgrade connection rfc-key version "Origin: http://server.example.com"
+                                "X-Forwarded-Proto: https" "X-Forwarded-Proto: http"))))
+      (test-equal "X-Forwarded-Proto over two lines is read by its leftmost element, the client-facing hop's: https, so an Origin of http for the request's own host is refused 403"
+        403 (car (answer sh))))
+
     (test-equal "websocket-accept refuses a procedure that is not one, and limits that are not limits, naming itself, before it reads the request"
       '(websocket-accept websocket-accept)
       (list (who-of (lambda () (websocket-accept 'request 42)))
@@ -301,6 +320,18 @@
       (list (who-of (lambda () (websocket-receive 'ws)))
             (who-of (lambda () (websocket-send! 'ws "a")))
             (who-of (lambda () (websocket-close! 'ws)))))
+
+    (let* ((n (make-notes))
+           (sh (connect (accepting (lambda (ws)
+                                     (note! n (who-of (lambda () (websocket-close! ws 1005))))
+                                     (note! n (who-of (lambda () (websocket-close! ws 1000 (make-string 124 #\a)))))
+                                     (note! n (who-of (lambda () (websocket-close! ws 'normal))))
+                                     (websocket-receive ws)))
+                        handshake)))
+      (test-equal "websocket-close! refuses a code an endpoint may not send, a reason past 123 bytes, and a code that is not one, naming itself, and closes nothing; websocket-accept refuses settings that are not settings, naming itself"
+        (list '(websocket-close! websocket-close! websocket-close!) (list 101 nothing) 'websocket-accept)
+        (list (seen n) (after-101 sh)
+              (who-of (lambda () (websocket-accept 'request (lambda (ws) #t) 'settings))))))
 
     ;; --- messages ---
 
@@ -414,6 +445,21 @@
         (test-equal "a queue of one message stops reading, and the ping clock, until it is received; then reading starts again, the clock afresh, and the next is read"
           '(11 0 #f 25000 11 ("Hello" "Hello")) (list first stopped unarmed rearmed again (seen n)))))
 
+    ;; A cap of 5 bytes: Hello's 5 fill the queue by bytes, its one message
+    ;; short of its count.
+    (let* ((n (make-notes))
+           (told (until-told (lambda (ws) (note! n (websocket-receive ws)) (note! n (websocket-receive ws)))))
+           (sh (connect (accepting (car told) (make-handshake-settings '()) (limits '((max-message-bytes . 5))))
+                        handshake))
+           (first (fake-shell-feed-input! sh rfc-masked-hello 4096))
+           (stopped (fake-shell-feed-input! sh rfc-masked-hello 4096)))
+      ((cadr told))
+      (fake-shell-schedule! sh)
+      (let ((again (fake-shell-feed-input! sh rfc-masked-hello 4096)))
+        (fake-shell-settle! sh)
+        (test-equal "a queue of a cap's worth of bytes stops reading until it is received, and then reads the next"
+          '(11 0 11 ("Hello" "Hello")) (list first stopped again (seen n)))))
+
     ;; --- closing ---
 
     (let* ((n (make-notes))
@@ -463,10 +509,12 @@
           (list 15000 '() '((closed 1006 "" #f)) (list 101 (server-close 4000 "bye")))
           (list armed before (seen n) (after-101 sh)))))
 
+    ;; The server closes a stream at once when its drain times out: as an
+    ;; abort does.
     (let* ((n (make-notes))
            (t #f)
            (sh (connect (holding (accepting (echoing n)) (lambda (x) (set! t x))) handshake)))
-      (transport-close! t)
+      (transport-abort! t)
       (fake-shell-settle! sh)
       (test-equal "the stream closed under the binding while receive waits: the wait's &client-closed ends the connection, 1006, not clean"
         (list '((closed 1006 "" #f)) (list 101 nothing))
@@ -475,12 +523,14 @@
     (let* ((n (make-notes))
            (told (until-told (receiving-all n)))
            (sh (connect (accepting (car told)) handshake)))
-      (fake-shell-feed-input! sh (concat (list rfc-masked-hello (client-frame #x81 (b "again")))) 4096)
+      ;; A frame a read: the second read begins 11 bytes into what was fed.
+      (fake-shell-feed-input! sh (concat (list rfc-masked-hello (client-frame #x81 (b "again"))))
+                              (bytevector-length rfc-masked-hello))
       (fake-shell-deliver! sh '(eof))
       ((cadr told))
       (fake-shell-schedule! sh)
       (fake-shell-settle! sh)
-      (test-equal "messages queued before the end are received first, then &websocket-closed"
+      (test-equal "messages queued before the end, read a frame a read, are received first, then &websocket-closed"
         '("Hello" "again" (closed 1006 "" #f)) (seen n)))
 
     (let* ((n (make-notes))
@@ -510,6 +560,140 @@
         (test-equal "a send while the server's close, of a code alone, is under way waits for the connection to close, writes nothing, and raises &websocket-closed at once, before the stream has closed"
           (list '() '((closed 1000 "" #t)) (list 101 (server-close 4000 "")))
           (list before told (after-101 sh)))))
+
+    ;; --- one WebSocket reached from another's procedure (M4.3's review) ---
+
+    ;; A's procedure sends to B's WebSocket until it waits there, B's client
+    ;; reading nothing yet; then A's client leaves.  The &client-closed is
+    ;; A's stream's, so it is A's procedure's, and B goes on.
+    (let* ((na (make-notes))
+           (nb (make-notes))
+           (b-ws #f)
+           (shb (connect (accepting (lambda (ws) (set! b-ws ws) ((echoing nb) ws))
+                                    (make-handshake-settings '())
+                                    (limits '((write-high-water . 7) (write-low-water . 4))))
+                         handshake))
+           (sha (connect (accepting (lambda (ws)
+                                      (guard (e ((client-closed? e) (note! na 'client-closed) (raise e)))
+                                        (websocket-send! b-ws "Hello")
+                                        (websocket-send! b-ws "Hello")
+                                        (note! na 'sent))))
+                         handshake)))
+      (fake-shell-deliver! sha '(eof))
+      (fake-shell-settle! sha)
+      (fake-shell-deliver! shb (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+      (fake-shell-settle! shb)
+      (test-equal "a procedure waiting to send to another connection's WebSocket, whose own client leaves, is told &client-closed, and the other connection goes on: it receives, and its client reads what was sent and the echo"
+        (list '(client-closed) '("Hello") (list 101 (concat (list rfc-hello rfc-hello rfc-hello))))
+        (list (seen na) (seen nb) (after-101 shb))))
+
+    ;; Two procedures, A's and C's, send to B's WebSocket past its high water,
+    ;; B's client reading nothing yet; once it reads, both go on (decision
+    ;; 0005: many senders).
+    (let* ((na (make-notes))
+           (nc (make-notes))
+           (b-ws #f)
+           (shb (connect (accepting (lambda (ws) (set! b-ws ws) ((echoing (make-notes)) ws))
+                                    (make-handshake-settings '())
+                                    (limits '((write-high-water . 7) (write-low-water . 4))))
+                         handshake))
+           (sending (lambda (n first)
+                      (lambda (ws)
+                        (when first (websocket-send! b-ws "Hello"))
+                        (websocket-send! b-ws "Hello")
+                        (note! n 'sent)
+                        (websocket-receive ws))))
+           (sha (connect (accepting (sending na #t)) handshake))
+           (shc (connect (accepting (sending nc #f)) handshake))
+           (waiting (list (seen na) (seen nc))))
+      (fake-shell-settle! shb)
+      (fake-shell-schedule! sha)
+      (fake-shell-schedule! shc)
+      (test-equal "two procedures waiting to send to one WebSocket both go on once its client has read down to the low water"
+        (list '(() ()) '(sent) '(sent) (list 101 (concat (list rfc-hello rfc-hello rfc-hello))))
+        (list waiting (seen na) (seen nc) (after-101 shb))))
+
+    ;; B's procedure waits to receive; A's procedure asks to receive from B's
+    ;; WebSocket too (decision 0005: one receive).
+    (let* ((na (make-notes))
+           (nb (make-notes))
+           (b-ws #f)
+           (shb (connect (accepting (lambda (ws) (set! b-ws ws) ((echoing nb) ws))) handshake))
+           (sha (connect (accepting (lambda (ws)
+                                      (note! na (who-of (lambda () (websocket-receive b-ws))))
+                                      (websocket-receive ws)))
+                         handshake)))
+      (fake-shell-deliver! shb (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+      (fake-shell-settle! shb)
+      (test-equal "a receive while another waits on the same WebSocket is refused, naming websocket-receive, and the waiting one still gets the message"
+        (list '(websocket-receive) '("Hello") (list 101 rfc-hello))
+        (list (seen na) (seen nb) (after-101 shb))))
+
+    ;; B's client has closed; A's procedure receives from B's WebSocket, and
+    ;; lets B's &websocket-closed out.  That is not A's end: any other raise.
+    (let* ((b-ws #f)
+           (shb (connect (accepting (lambda (ws) (set! b-ws ws))) (concat (list handshake (client-close 1000 "")))))
+           (b-closed (guard (e (#t e)) (websocket-receive b-ws)))
+           (run (logged (lambda ()
+                          (after-101 (connect (accepting (lambda (ws) (websocket-receive b-ws))) handshake))))))
+      (test-equal "a procedure that lets another WebSocket's &websocket-closed out has not ended its own: it closes with 1011, logged as any other raise"
+        (list #t (list 101 (server-close 1011 "")) (server-logged 'websocket-handler-failed (list b-closed)))
+        (cons (websocket-closed? b-closed) run)))
+
+    ;; The stream closed under the binding while the procedure waits on a wait
+    ;; of its own: the &client-closed is spent there, and the WebSocket has
+    ;; still ended.
+    (let* ((n (make-notes))
+           (t #f)
+           (sh (connect (holding (accepting (lambda (ws)
+                                              (guard (e ((client-closed? e) (note! n 'client-closed)))
+                                                (await (lambda (resume) #f)))
+                                              (guard (e ((websocket-closed? e) (note! n (closed e))))
+                                                (websocket-receive ws))
+                                              (guard (e ((websocket-closed? e) (note! n (closed e))))
+                                                (websocket-send! ws "late"))))
+                                 (lambda (x) (set! t x)))
+                        handshake)))
+      (transport-abort! t)
+      (fake-shell-settle! sh)
+      (test-equal "a stream closed under the binding while the procedure waits on a wait of its own: the &client-closed is spent there, and a receive and a send after it raise &websocket-closed, 1006, not wait"
+        '(client-closed (closed 1006 "" #f) (closed 1006 "" #f)) (seen n)))
+
+    ;; A handler's own deadline ends its receive: the wait lets go, so a
+    ;; later receive waits as before (decision 0005: one receive at a time).
+    (let* ((n (make-notes))
+           (sh (connect (accepting (lambda (ws)
+                                     (guard (e ((deadline-passed? e) (note! n 'timed-out)))
+                                       (with-deadline 1000 (lambda () (websocket-receive ws))))
+                                     (note! n (websocket-receive ws))))
+                        handshake)))
+      (fake-shell-advance! sh 1000)
+      (fake-shell-fire-waits! sh)
+      (fake-shell-deliver! sh (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+      (fake-shell-settle! sh)
+      (test-equal "a receive a handler's own deadline ends lets go of its wait: a later receive waits as before and gets the next message"
+        '(timed-out "Hello") (seen n)))
+
+    ;; --- what a read costs the binding (M4.3's review) ---
+
+    ;; A read the core answers with nothing but its clock: one byte of a
+    ;; header whose 64-bit length is still to come.  Through the binding, and
+    ;; through a taker that only re-arms its deadline at a read, as the core's
+    ;; clock has the binding do; the fake's own work is the same for both.
+    (let* ((rearming (lambda (r)
+                       (switch-protocols (list (cons (b "Upgrade") (b "websocket")))
+                         (lambda (t retained)
+                           (let ((passed (lambda () #f)))
+                             (transport-read-start! t (lambda (bv start end) (transport-deadline! t 20000 passed))
+                                                    (lambda (why) #f)))
+                           (awaiting (lambda () (await (lambda (resume) #f))))))))
+           (base (connect rearming handshake))
+           (ws-sh (connect (accepting (receiving-all (make-notes))) handshake))
+           (one (list 'bytes-arrived (make-bytevector 1 0) 0 1)))
+      (fake-shell-deliver! ws-sh (list 'bytes-arrived (bv '(#x82 #xFF)) 0 2))
+      (test-equal "a read the core answers with only its clock allocates nothing in the binding: no more than a taker that only re-arms its deadline"
+        0 (- (allocated (lambda () (fake-shell-deliver! ws-sh one)))
+             (allocated (lambda () (fake-shell-deliver! base one))))))
 
     ;; --- the server's drain ---
 
@@ -541,18 +725,13 @@
         (list (list (list 101 (server-close 1011 "")) '()) "websocket-handler-failed oops\n")
         run))
 
-    (let* ((two-lines (condition (make-error) (make-message-condition "line one\nline two")))
+    (let* ((raised (list "hi there" #f (make-oops) '("a b")
+                         (condition (make-error) (make-message-condition "line one\nline two"))))
            (run (logged (lambda ()
                           (for-each (lambda (x) (connect (accepting (lambda (ws) (raise x))) handshake))
-                                    (list "hi there" (make-oops) '("a b") two-lines)))))
-           (shown (let-values (((port get) (open-string-output-port)))
-                    (display-condition two-lines port)
-                    (list->string (map (lambda (c) (if (char=? c #\newline) #\space c)) (string->list (get)))))))
-      (test-equal "a procedure's raise is logged as the server logs a detail: a string displayed, a record by its type's name, a list written, a condition as display-condition shows it, on one line"
-        (string-append "websocket-handler-failed hi there\n"
-                       "websocket-handler-failed #<oops>\n"
-                       "websocket-handler-failed (\"a b\")\n"
-                       "websocket-handler-failed " shown "\n")
+                                    raised)))))
+      (test-equal "a procedure's raise is logged as the server's own log-line writes the detail: a string, #f, a record, a list, and a condition over two lines"
+        (apply string-append (map (lambda (x) (server-logged 'websocket-handler-failed (list x))) raised))
         (cadr run)))
 
     (let* ((n (make-notes))
@@ -593,7 +772,7 @@
       (test-equal "a client silent after the 101 is pinged at 20 s, not before, and failed with 1011 20 s later, not before, logged"
         (list (list 25000 (list 101 nothing) (list 101 ping) (list 101 ping)
                     (list 101 (concat (list ping (server-close 1011 "")))))
-              "websocket-failed 1011 ping-timeout\n")
+              (server-logged 'websocket-failed '(1011 ping-timeout)))
         run))
 
     (let* ((run (logged
