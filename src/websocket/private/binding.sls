@@ -341,12 +341,14 @@
   ;; lets go of its waiter first: a &client-closed on the procedure's own
   ;; WebSocket is its stream's close, which the close call has stepped, so
   ;; the wait ends; anything else goes on out, another stream's close, or a
-  ;; deadline the handler set.  No guard, which costs a waiting coroutine
-  ;; kilobytes.
+  ;; deadline the handler set.  The way back out of the wait is a full
+  ;; continuation: a one-shot one, call/1cc, held a stack segment of its own
+  ;; for as long as the procedure waited, 2.8 to 4.3 KB a connection on a
+  ;; real socket (decision 0005's amendment, by form: "call/cc").
   (define (park! ws send?)
     (let* ((owner (current-websocket))
            (w (make-waiter #f owner #f)))
-      (call/1cc
+      (call/cc
        (lambda (k)
          (with-exception-handler
           (lambda (e)
