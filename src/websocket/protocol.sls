@@ -21,10 +21,12 @@
 ;;;            (end why)              the stream's end: 'eof, or the errno
 ;;;            (taken nbytes)         the handler took a delivered message
 ;;;                                   of nbytes
+;;;            (written nbytes)       a write's bytes are done, whatever its
+;;;                                   done said
 ;;;            (deadline-passed)      the deadline armed has passed
 ;;;   actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
 ;;;            (arm-deadline kind)  (disarm-deadline)  (close-stream)
-;;;            (closed code reason clean?)  (log what . details)
+;;;            (abort-stream)  (closed code reason clean?)  (log what . details)
 ;;;
 ;;; A delivered message is whole (0001): a text's payload is its UTF-8
 ;;; bytes, checked, which the binding decodes, and a binary's its bytes.  A
@@ -64,7 +66,8 @@
 ;;;   message that comes after it is delivered (decided by form,
 ;;;   2026-10-05), and a ping answered, since no close has been received
 ;;;   (§5.5.2).  The client's close ends the handshake.  If its deadline
-;;;   passes first, the stream is closed anyway, and 1006 told.  Once a close
+;;;   passes first, the stream is aborted, what is unsent dropped, and 1006
+;;;   told: websockets' close_timeout ends in transport.abort() (0006).  Once a close
 ;;;   is sent, a send is the caller's mistake (§5.5.1), and another close
 ;;;   answers nothing.
 ;;; - The stream's end with no close received closes the stream and tells
@@ -74,7 +77,7 @@
 ;;;   the queue holds: at most the rest of one read.  A client's close among it ends
 ;;;   the connection as any close does, cleanly, with its code.
 ;;; - Time is a deadline's kind: the step reads no clock, names the deadline
-;;;   it needs, ping, pong or close, one at a time, as the transport has
+;;;   it needs, ping, pong, close or write, one at a time, as the transport has
 ;;;   one, and disarms it if the connection ends before it passes.  A new
 ;;;   connection's is ping, unless pinging is off: no step tells it, and
 ;;;   ws-deadline names it for the binding to arm as it starts.  A deadline
@@ -93,7 +96,21 @@
 ;;;   with a constant tail of actions.
 ;;; - Once the connection has ended, failed or closed, nothing more is read,
 ;;;   the rest of a read among it, and a ping is not answered (§5.5.2).  A
-;;;   close or the stream's end then answers nothing.
+;;;   close or the stream's end then answers nothing, and a done only counts.
+;;; - The write side (0006, by form: "Reading stops past the high water").
+;;;   Each write the step answers counts its bytes unsent, and a done takes
+;;;   them off.  Once a step leaves more than the high water unsent, the
+;;;   client is behind: reading stops, a read at the frame that passed it,
+;;;   the rest waiting, and the ping clock with it; while open, the write
+;;;   deadline is armed, which the binding arms for the write timeout, and
+;;;   after the server's close the close deadline goes on.  Each done while
+;;;   behind re-arms it; one that leaves the low water or less ends it: the
+;;;   write deadline disarmed, what waits read, and reading started, the
+;;;   clock afresh, unless the queue is full.  When the write deadline
+;;;   passes, the client has read nothing for its time: the stream is
+;;;   aborted, nothing written, `failed` logged with no code and
+;;;   write-timeout, what waits let go, and 1006 told.  ws-behind? tells the
+;;;   binding whether the client is behind, and a send waits while it is.
 ;;; - Reading on (0001, and its amendment).  Each delivered message is
 ;;;   queued for the handler until it is taken.  Once the queue holds a
 ;;;   cap's worth of bytes, or max-queue messages, the step answers
@@ -102,7 +119,7 @@
 ;;;   the queue under both reads what waits, a message at a time as the
 ;;;   queue makes room, and then answers read-start.
 (library (websocket protocol)
-  (export make-ws-state ws-step ws-deadline ws-open? ws-sendable-close?)
+  (export make-ws-state ws-step ws-deadline ws-open? ws-behind? ws-sendable-close?)
   (import (rnrs) (websocket frame) (websocket utf8) (websocket limits))
 
   ;; A connection.  `phase` is open, closing once the server's close is
@@ -117,7 +134,10 @@
   ;; wait for the queue to make room, or #f.  `deadline` is the kind of the
   ;; deadline armed, as the steps have told the binding, or #f; a new
   ;; connection's, which no step tells, ws-deadline names.  `ping?` is
-  ;; whether the ping clock runs at all.
+  ;; whether the ping clock runs at all.  `unsent` is what the steps have
+  ;; written and no done has taken off; `high` and `low` the write water
+  ;; marks; `behind?` whether more than the high water was unsent and no done
+  ;; has brought it to the low water since (0006).
   (define-record-type (ws-state new-state ws-state?)
     (fields (immutable decoder) (immutable cap) (immutable max-queue)
             (immutable ping?)
@@ -125,11 +145,12 @@
             (mutable utf8) (immutable control) (mutable control-n)
             (mutable queued-bytes) (mutable queued-count) (mutable reading?)
             (mutable waiting) (mutable waiting-start) (mutable waiting-end)
-            (mutable deadline)))
+            (mutable deadline)
+            (immutable high) (immutable low) (mutable unsent) (mutable behind?)))
 
   ;; make-ws-state : WebsocketLimits -> WsState
-  ;; A connection open, reading, with nothing queued, and its ping deadline
-  ;; armed unless pinging is off.
+  ;; A connection open, reading, with nothing queued or unsent, and its ping
+  ;; deadline armed unless pinging is off.
   (define (make-ws-state limits)
     (unless (websocket-limits? limits)
       (assertion-violation 'make-ws-state "not limits" limits))
@@ -139,9 +160,12 @@
                  (websocket-limits-max-queue limits)
                  ping?
                  'open #f #f 0 utf8-start (make-bytevector 125 0) 0 0 0 #t #f 0 0
-                 (and ping? 'ping))))
+                 (and ping? 'ping)
+                 (websocket-limits-write-high-water limits)
+                 (websocket-limits-write-low-water limits)
+                 0 #f)))
 
-  ;; ws-deadline : WsState -> (U 'ping 'pong 'close #f)
+  ;; ws-deadline : WsState -> (U 'ping 'pong 'close 'write #f)
   ;; The kind of the deadline armed, as the steps have told the binding.  A
   ;; new connection's is ping, unless pinging is off: no step tells it, and
   ;; the binding arms it as it starts.
@@ -157,6 +181,15 @@
     (unless (ws-state? s)
       (assertion-violation 'ws-open? "not a connection" s))
     (eq? (ws-state-phase s) 'open))
+
+  ;; ws-behind? : WsState -> Boolean
+  ;; Whether the client is behind (0006): more than the high water was
+  ;; unsent, and no done has brought it to the low water since.  A send
+  ;; waits while it is.
+  (define (ws-behind? s)
+    (unless (ws-state? s)
+      (assertion-violation 'ws-behind? "not a connection" s))
+    (ws-state-behind? s))
 
   ;; The deadline, one at a time, as the transport has one.  The record and
   ;; what the binding is told change together, here.
@@ -195,16 +228,17 @@
   ;; end! : WsState (Listof Action) (Listof Action) -> (Listof Action)
   ;; Ends the connection with `last`, its last actions, in order, after
   ;; disarming the deadline armed, and lets go of an unfinished message's
-  ;; bytes: a connection lives as long as its WebSocket, and nothing reads
-  ;; it after its end.  Nothing waits for the queue by then: a read comes
-  ;; only while reading, so with nothing waiting; a take, the close timeout
-  ;; and the stream's end let go of what waits as they read it
-  ;; (read-waiting!); and the pong's deadline cannot pass while anything
-  ;; waits, since the clock stops whenever reading does.
+  ;; bytes, and of what waits for the queue: a connection lives as long as
+  ;; its WebSocket, and nothing reads it after its end.  A take, the close
+  ;; timeout and the stream's end read what waits before they end it
+  ;; (read-waiting!), and the pong's deadline cannot pass while anything
+  ;; waits, since the clock stops whenever reading does; the write timeout
+  ;; ends it with what waits unread (0006).
   (define (end! s last acts)
     (let ((acts (if (ws-state-deadline s) (disarm! s acts) acts)))
       (ws-state-phase-set! s 'ended)
       (ws-state-buffer-set! s #f)
+      (ws-state-waiting-set! s #f)
       (append (reverse last) acts)))
 
   ;; unclean : -> Action
@@ -226,7 +260,7 @@
   ;; Fails the connection (§7.1.7).
   (define (fail! s code why acts)
     (let ((open? (eq? (ws-state-phase s) 'open)))
-      (end! s (append (if open? (list (list 'write (close-frame code #vu8()))) '())
+      (end! s (append (if open? (list (write! s (close-frame code #vu8()))) '())
                       (list '(close-stream) (list 'log 'failed (and open? code) why) (unclean)))
             acts)))
 
@@ -245,7 +279,7 @@
       ;; its body, the code's or none, unless the server's was sent.
       (define (clean code reason k)
         (end! s (append (if (eq? (ws-state-phase s) 'open)
-                            (list (list 'write (frame-encode 'close body 0 k)))
+                            (list (write! s (frame-encode 'close body 0 k)))
                             '())
                         (list '(close-stream) (list 'closed code reason #t)))
               acts))
@@ -267,16 +301,64 @@
   ;; A control frame whose payload is whole.
   (define (control! s acts)
     (case (frame-kind (ws-state-decoder s))
-      ((ping) (cons (list 'write (frame-encode 'pong (ws-state-control s) 0 (ws-state-control-n s)))
+      ((ping) (cons (write! s (frame-encode 'pong (ws-state-control s) 0 (ws-state-control-n s)))
                     acts))
       ((pong) acts)
       (else (closing! s acts))))
+
+  ;; --- the write side (0006) ---
+
+  ;; write! : WsState Bytevector -> Action
+  ;; `(write bv)`, its bytes counted unsent until a done takes them off.
+  (define (write! s bv)
+    (ws-state-unsent-set! s (fx+ (ws-state-unsent s) (bytevector-length bv)))
+    (list 'write bv))
+
+  ;; past-high? : WsState -> Boolean
+  ;; Whether the client has fallen behind in this step: not behind yet, the
+  ;; connection not ended, and more than the high water unsent.
+  (define (past-high? s)
+    (and (not (ws-state-behind? s))
+         (not (eq? (ws-state-phase s) 'ended))
+         (fx>? (ws-state-unsent s) (ws-state-high s))))
+
+  ;; Falling behind's actions, a step's last, as constants, so a done that
+  ;; re-arms the write deadline allocates nothing.
+  (define stopped-write-armed '((read-stop) (arm-deadline write)))
+  (define write-armed '((arm-deadline write)))
+  (define stopped '((read-stop)))
+
+  ;; fall-behind! : WsState -> (Listof Action)
+  ;; The client behind: reading stopped, if it runs, and the clock with it;
+  ;; while open, the write deadline armed in the clock's place.  After the
+  ;; server's close, the close deadline goes on.
+  (define (fall-behind! s)
+    (let ((reading? (ws-state-reading? s)) (open? (eq? (ws-state-phase s) 'open)))
+      (ws-state-behind?-set! s #t)
+      (ws-state-reading?-set! s #f)
+      (when open? (arm! s (car write-armed)))
+      (cond ((and reading? open?) stopped-write-armed)
+            (reading? stopped)
+            (open? write-armed)
+            (else '()))))
+
+  ;; fallen : WsState (Listof Action) -> (Listof Action)
+  ;; A step's actions, in order, and then, if they put the client behind,
+  ;; falling behind's.
+  (define (fallen s acts)
+    (if (past-high? s) (append acts (fall-behind! s)) acts))
 
   ;; full? : WsState -> Boolean
   ;; Whether the queue holds a cap's worth of bytes, or max-queue messages.
   (define (full? s)
     (or (>= (ws-state-queued-bytes s) (ws-state-cap s))
         (>= (ws-state-queued-count s) (ws-state-max-queue s))))
+
+  ;; held? : WsState -> Boolean
+  ;; Whether reading waits: the queue full, the client behind, or more than
+  ;; the high water unsent, which puts it behind as the step ends.
+  (define (held? s)
+    (or (full? s) (ws-state-behind? s) (fx>? (ws-state-unsent s) (ws-state-high s))))
 
   ;; deliver! : WsState (Listof Action) -> (Listof Action)
   ;; The message begun, whole: delivered and queued, and reading stopped if
@@ -360,14 +442,15 @@
 
   ;; read! : WsState Bytevector Nat Nat Boolean (Listof Action) -> (Listof Action)
   ;; Reads the bytes from start to end, until the connection ends, or, if
-  ;; `bounded?`, the queue fills and the rest waits.
+  ;; `bounded?`, reading is held, the queue full or the client behind, and
+  ;; the rest waits.
   (define (read! s bv start end bounded? acts)
     (let ((d (ws-state-decoder s)))
       (let loop ((i start) (acts acts))
         (cond
           ((eq? (ws-state-phase s) 'ended) acts)
           ((fx=? i end) acts)
-          ((and bounded? (full? s))
+          ((and bounded? (held? s))
            (ws-state-waiting-set! s bv)
            (ws-state-waiting-start-set! s i)
            (ws-state-waiting-end-set! s end)
@@ -404,10 +487,11 @@
       (assertion-violation 'ws-step "not an event" event)))
 
   ;; bytes! : WsState Any Any Any -> (Listof Action)
-  ;; A read's bytes read, then the ping clock told, if it may run: stopped,
-  ;; if the read filled the queue, after its read-stop, the last action a
-  ;; read that stops reading tells (ping or pong is armed whenever the
-  ;; clock may run and reading does); else re-armed, if bytes came.
+  ;; A read's bytes read, then, if they put the client behind, falling
+  ;; behind's actions; else the ping clock told, if it may run: stopped, if
+  ;; the read filled the queue, after its read-stop, the last action a read
+  ;; that stops reading tells (ping or pong is armed whenever the clock may
+  ;; run and reading does); else re-armed, if bytes came.
   (define (bytes! s bv start end)
     (unless (and (bytevector? bv) (fixnum? start) (fixnum? end)
                  (fx<=? 0 start) (fx<=? start end) (fx<=? end (bytevector-length bv)))
@@ -417,7 +501,8 @@
     (unless (ws-state-reading? s)
       (assertion-violation 'ws-step "a read while reading is stopped"))
     (let ((acts (read! s bv start end #t '())))
-      (cond ((not (clock? s)) (reverse acts))
+      (cond ((past-high? s) (reverse-onto acts (fall-behind! s)))
+            ((not (clock? s)) (reverse acts))
             ((not (ws-state-reading? s)) (reverse (disarm! s acts)))
             ((fx<? start end) (arm! s (car ping-armed)) (reverse-onto acts ping-armed))
             (else (reverse acts)))))
@@ -427,9 +512,9 @@
     (unless (eq? (ws-state-phase s) 'open)
       (assertion-violation 'ws-step "a send after a close was sent, or the connection ended" kind))
     (cond ((and (eq? kind 'text) (string? payload))
-           (list (list 'write (frame-encode 'text (string->utf8 payload)))))
+           (fallen s (list (write! s (frame-encode 'text (string->utf8 payload))))))
           ((and (eq? kind 'binary) (bytevector? payload))
-           (list (list 'write (frame-encode 'binary payload))))
+           (fallen s (list (write! s (frame-encode 'binary payload)))))
           (else (assertion-violation 'ws-step "not a message to send" kind payload))))
 
   ;; taken! : WsState Any -> (Listof Action)
@@ -440,17 +525,44 @@
       (assertion-violation 'ws-step "not a message queued" n))
     (ws-state-queued-bytes-set! s (- (ws-state-queued-bytes s) n))
     (ws-state-queued-count-set! s (- (ws-state-queued-count s) 1))
-    (if (not (ws-state-reading? s))
-        (let ((acts (read-waiting! s #t '())))
-          (if (and (not (eq? (ws-state-phase s) 'ended)) (not (full? s)))
-              (begin
-                (ws-state-reading?-set! s #t)
-                (if (clock? s)
-                    (begin (arm! s (cadr reading-started-ping-armed))
-                           (reverse-onto acts reading-started-ping-armed))
-                    (reverse-onto acts reading-started)))
-              (reverse acts)))
-        '()))
+    (if (ws-state-reading? s) '() (reading-on! s '())))
+
+  ;; reading-on! : WsState (Listof Action) -> (Listof Action)
+  ;; Reading stopped, by the queue or the client's being behind: what waits
+  ;; read, a message at a time as the queue makes room, after `acts`,
+  ;; newest first; then, unless the connection has ended, the read put the
+  ;; client behind, or reading is held, reading started, and the ping clock
+  ;; afresh, at ping.  The actions in order.
+  (define (reading-on! s acts)
+    (let ((acts (read-waiting! s #t acts)))
+      (cond ((eq? (ws-state-phase s) 'ended) (reverse acts))
+            ((past-high? s) (reverse-onto acts (fall-behind! s)))
+            ((held? s) (reverse acts))
+            (else
+             (ws-state-reading?-set! s #t)
+             (if (clock? s)
+                 (begin (arm! s (cadr reading-started-ping-armed))
+                        (reverse-onto acts reading-started-ping-armed))
+                 (reverse-onto acts reading-started))))))
+
+  ;; written! : WsState Any -> (Listof Action)
+  ;; A write's bytes done.  While the client is behind, one that leaves more
+  ;; than the low water unsent re-arms the write deadline, if it is armed;
+  ;; one that leaves the low water or less ends it: the write deadline
+  ;; disarmed, if armed, and reading on.  After the end it only counts:
+  ;; nothing is armed, and reading-on! reads nothing then.
+  (define (written! s n)
+    (unless (and (fixnum? n) (fx>=? n 0) (fx<=? n (ws-state-unsent s)))
+      (assertion-violation 'ws-step "not bytes written and not yet done" n))
+    (ws-state-unsent-set! s (fx- (ws-state-unsent s) n))
+    (cond ((not (ws-state-behind? s)) '())
+          ((fx>? (ws-state-unsent s) (ws-state-low s))
+           (if (eq? (ws-state-deadline s) 'write)
+               (begin (arm! s (car write-armed)) write-armed)
+               '()))
+          (else
+           (ws-state-behind?-set! s #f)
+           (reading-on! s (if (eq? (ws-state-deadline s) 'write) (disarm! s '()) '())))))
 
   ;; fits-close? : String -> Boolean
   ;; Whether the string's UTF-8 is at most 123 bytes, the most a close holds
@@ -483,7 +595,7 @@
     (if (eq? (ws-state-phase s) 'open)
         (begin
           (ws-state-phase-set! s 'closing)
-          (list (list 'write (close-frame code (string->utf8 reason))) (arm! s '(arm-deadline close))))
+          (fallen s (list (write! s (close-frame code (string->utf8 reason))) (arm! s '(arm-deadline close)))))
         '()))
 
   ;; read-waiting! : WsState Boolean (Listof Action) -> (Listof Action)
@@ -500,15 +612,15 @@
             (read! s bv (ws-state-waiting-start s) (ws-state-waiting-end s) bounded? acts))
           acts)))
 
-  ;; lost! : WsState (Listof Action) -> (Listof Action)
+  ;; lost! : WsState Action (Listof Action) -> (Listof Action)
   ;; What waits read, then the connection ended with no close received,
-  ;; unless it has ended, by what waited or before: the stream closed, and
-  ;; 1006 told.
-  (define (lost! s acts)
+  ;; unless it has ended, by what waited or before: the stream closed or
+  ;; aborted, as `closer` says, and 1006 told.
+  (define (lost! s closer acts)
     (let ((acts (read-waiting! s #f acts)))
       (if (eq? (ws-state-phase s) 'ended)
           acts
-          (end! s (list '(close-stream) (unclean)) acts))))
+          (end! s (list closer (unclean)) acts))))
 
   ;; stream-end! : WsState Any -> (Listof Action)
   ;; The stream's end, 'eof or the errno: what waits read, then, with no
@@ -518,15 +630,16 @@
   (define (stream-end! s why)
     (unless (symbol? why)
       (assertion-violation 'ws-step "not why a stream ended" why))
-    (reverse (lost! s '())))
+    (reverse (lost! s '(close-stream) '())))
 
   ;; passed! : WsState -> (Listof Action)
   ;; The deadline armed has passed, and the transport has let it go.  Ping:
   ;; the client has sent nothing for the interval, and is pinged, with no
   ;; payload, and pong armed.  Pong: nothing has come since, and the
   ;; connection fails with 1011.  Close: what waits read, then, if the close
-  ;; sent was not answered there either, the stream closed anyway, and 1006
-  ;; told.
+  ;; sent was not answered there either, the stream aborted, and 1006 told.
+  ;; Write: the client has read nothing for the write timeout: the stream
+  ;; aborted, failed logged, and 1006 told (0006).
   (define (passed! s)
     (let ((kind (ws-state-deadline s)))
       (unless kind
@@ -535,9 +648,11 @@
       (ws-state-deadline-set! s #f)
       (case kind
         ((ping)
-         (list (list 'write (frame-encode 'ping (make-bytevector 0))) (arm! s '(arm-deadline pong))))
+         (fallen s (list (write! s (frame-encode 'ping (make-bytevector 0))) (arm! s '(arm-deadline pong)))))
         ((pong) (reverse (fail! s 1011 'ping-timeout '())))
-        (else (reverse (lost! s '()))))))
+        ((write)
+         (reverse (end! s (list '(abort-stream) (list 'log 'failed #f 'write-timeout) (unclean)) '())))
+        (else (reverse (lost! s '(abort-stream) '()))))))
 
   ;; ws-step : WsState Event -> (values WsState (Listof Action))
   ;; The connection after the event, and what the binding is to do, in
@@ -555,6 +670,9 @@
       ((taken)
        (event-of! event 2)
        (values s (taken! s (cadr event))))
+      ((written)
+       (event-of! event 2)
+       (values s (written! s (cadr event))))
       ((close)
        (event-of! event 3)
        (values s (close! s (cadr event) (caddr event))))

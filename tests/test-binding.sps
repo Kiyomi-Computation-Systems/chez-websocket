@@ -30,11 +30,21 @@
 ;;; - websockets 17.2 (asyncio/connection.py, send_context): a send while the
 ;;;   closing handshake is under way waits for the connection to close, then
 ;;;   raises ConnectionClosed.
+;;; - Decision 0006 (M4.3 step 2): every close the binding asks for gives the
+;;;   client the close timeout to read what was written, then aborts; and by
+;;;   form, "Reading stops past the high water" and "60 s, its own
+;;;   variable": past the high water, reading stops and the write timeout,
+;;;   60 s, runs, re-armed by each done, its passing aborting the stream.
+;;;   The frames' sizes are RFC 6455 §5.2's: a client's ping of 125 bytes is
+;;;   131, masked, and its pong 127.
 ;;;
 ;;; How a test plays the client is the driver suite's: `fake-shell-feed-input!`
 ;;; delivers only while the binding reads, `fake-shell-deliver!` hands over
 ;;; one event whatever the read state, and `fake-shell-deliver-later!` the
-;;; next later turn, such as a write the client reads.  What the client reads
+;;; next later turn, such as a write the client reads.  feed-input! lets
+;;; every later turn happen before each read, a client that reads; `unread!`
+;;; plays one that reads nothing, and a spy sees what the binding asks of
+;;; the transport.  What the client reads
 ;;; is read as a client would, the 101 by the server's (response-reader).
 ;;; The binding logs to the current output port, which each check that looks
 ;;; for a line takes for its own.
@@ -248,6 +258,67 @@
     (guard (e ((websocket-closed? e) (note! n (closed e))))
       (let loop () (note! n (websocket-receive ws)) (loop)))))
 
+;; --- a client that reads nothing (0006) --------------------------------------
+
+;; A spy between the fake's transport and the binding: whether the binding
+;; has asked for the close, and for the abort, and what it has written whose
+;; done has not come, in writes and in bytes.
+(define-record-type spy
+  (fields (mutable closed?) (mutable aborted?) (mutable held) (mutable held-bytes))
+  (protocol (lambda (new) (lambda () (new #f #f 0 0)))))
+
+;; spying : (Request -> Answer) Spy -> (Request -> Answer)
+;; The handler, its switch's take-over given a transport over the fake's
+;; that notes in `spy` what the binding asks of it, and passes each call on.
+(define (spying handler spy)
+  (lambda (request)
+    (let ((a (handler request)))
+      (if (switch? a)
+          (switch-protocols
+           (switch-headers a)
+           (lambda (t retained)
+             ((switch-take-over a)
+              (make-transport
+               (lambda (bytes start end written)
+                 (let ((n (- end start)))
+                   (spy-held-set! spy (+ (spy-held spy) 1))
+                   (spy-held-bytes-set! spy (+ (spy-held-bytes spy) n))
+                   (transport-write! t bytes start end
+                                     (lambda (why)
+                                       (spy-held-set! spy (- (spy-held spy) 1))
+                                       (spy-held-bytes-set! spy (- (spy-held-bytes spy) n))
+                                       (when written (written why))))))
+               (lambda (on-bytes on-end) (transport-read-start! t on-bytes on-end))
+               (lambda () (transport-read-stop! t))
+               (lambda () (spy-closed?-set! spy #t) (transport-close! t))
+               (lambda (ms passed) (if ms (transport-deadline! t ms passed) (transport-deadline! t #f)))
+               (lambda (thunk) (transport-on-drain! t thunk))
+               (lambda (thunk) (transport-on-close! t thunk))
+               (lambda () (spy-aborted?-set! spy #t) (transport-abort! t)))
+              retained)))
+          a))))
+
+;; unread! : FakeShell Bytevector -> Nat
+;; The client's bytes, 4 KiB a read, delivered only while the binding reads,
+;; as libuv delivers them, and no later turn between: a client that reads
+;; nothing.  Returns how many bytes were delivered.
+(define (unread! sh bytes)
+  (let ((len (bytevector-length bytes)))
+    (let loop ((from 0))
+      (if (and (< from len) (fake-shell-reading? sh))
+          (let ((to (min len (+ from 4096))))
+            (fake-shell-deliver! sh (list 'bytes-arrived bytes from to))
+            (loop to))
+          from))))
+
+;; tick! : FakeShell Nat -> Void
+;; The fake clock moved on ms, its timer fired, and the scheduler drained,
+;; as the libuv shell drains it after every turn.
+(define (tick! sh ms)
+  (fake-shell-advance! sh ms)
+  (fake-shell-fire! sh)
+  (fake-shell-schedule! sh))
+
 (run-suite "binding"
   (lambda ()
     ;; Its numbers are the defaults': the binding reads CHEZ_WS_ variables as
@@ -428,6 +499,116 @@
       (test-equal "a send waiting when the connection ends is woken at once, before the client reads, and raises &websocket-closed"
         '(1 (closed 1006 "" #f)) (seen n)))
 
+    ;; --- a client that does not read (0006; M4.3 step 2) ---
+
+    ;; An unmasked frame fails the connection with 1002: its close written,
+    ;; the stream's close asked for.  The client reads none of it.
+    (let* ((spy (make-spy))
+           (n (make-notes))
+           (run (logged
+                 (lambda ()
+                   (let ((sh (connect (spying (accepting (receiving-all n)) spy) handshake)))
+                     (unread! sh rfc-hello)
+                     (let ((asked (list (spy-closed? spy) (spy-aborted? spy) (fake-shell-armed sh))))
+                       (tick! sh 9999)
+                       (let ((before (spy-aborted? spy)))
+                         (tick! sh 1)
+                         (list asked before (spy-aborted? spy) (seen n)))))))))
+      (test-equal "a close the client does not read: the binding asks for it with the close timeout armed, 10 s, and aborts the stream once it passes, not a millisecond before; the connection ended at once, 1006"
+        (list '(#t #f 15000) #f #t '((closed 1006 "" #f)))
+        (car run)))
+
+    (let* ((spy (make-spy))
+           (n (make-notes))
+           (told (until-told (lambda (ws) (websocket-close! ws 4000 "bye") ((receiving-all n) ws))))
+           (sh (connect (spying (accepting (car told)) spy) handshake)))
+      ((cadr told))
+      (fake-shell-schedule! sh)
+      (tick! sh 9999)
+      (let ((before (list (spy-aborted? spy) (seen n))))
+        (tick! sh 1)
+        (let ((at (list (spy-closed? spy) (spy-aborted? spy) (seen n))))
+          (fake-shell-settle! sh)
+          (test-equal "the server's close not answered by a client that reads nothing: at the close timeout, 10 s, the stream is aborted, not closed, and the close unsent dropped: 1006, not clean"
+            (list '(#f ()) '(#f #t ((closed 1006 "" #f))) (list 101 nothing))
+            (list before at (after-101 sh))))))
+
+    ;; Hello's frame is 7 bytes: with the high water at 7, a second is past it.
+    (let* ((spy (make-spy))
+           (n (make-notes))
+           (told (until-told (lambda (ws)
+                               (guard (e ((websocket-closed? e) (note! n (closed e))))
+                                 (websocket-send! ws "Hello") (note! n 1)
+                                 (websocket-send! ws "Hello") (note! n 2)))))
+           (run (logged
+                 (lambda ()
+                   (let ((sh (connect (spying (accepting (car told) (make-handshake-settings '())
+                                                         (limits '((write-high-water . 7) (write-low-water . 4))))
+                                              spy)
+                                      handshake)))
+                     ((cadr told))
+                     (fake-shell-schedule! sh)
+                     (let ((armed (fake-shell-armed sh)) (reading (fake-shell-reading? sh)))
+                       (tick! sh 30000)
+                       (let ((pinged (unread! sh (client-frame #x89 nothing))))
+                         (tick! sh 29999)
+                         (let ((before (list (seen n) (spy-aborted? spy))))
+                           (tick! sh 1)
+                           (list armed reading pinged before (seen n) (spy-aborted? spy))))))))))
+      (test-equal "a send past the high water to a client that reads nothing waits; reading stops, so the client's ping is not read, and the write timeout, 60 s, the facade's environment's, aborts the stream, not a millisecond before: the send raises &websocket-closed, 1006, logged write-timeout"
+        (list 60000
+              (list (list 65000 #f 0 '((1) #f) '(1 (closed 1006 "" #f)) #t)
+                    (server-logged 'websocket-failed '(#f write-timeout))))
+        (list (websocket-limits-write-timeout-ms environment-websocket-limits) run)))
+
+    ;; A client's ping of 125 bytes is 131 bytes, masked, and its pong 127:
+    ;; the pong that takes what is unsent past the high water, 256 KiB, is
+    ;; the (div 262144 127) + 1st, and the read it came in is the last.
+    (let* ((spy (make-spy))
+           (sh (connect (spying (accepting (receiving-all (make-notes))) spy) handshake))
+           (one (client-frame #x89 (make-bytevector 125 7)))
+           (delivered (unread! sh (concat (vector->list (make-vector (div 1048576 (bytevector-length one)) one))))))
+      (test-equal "a client that sends pings and reads nothing: reading stops at the pong that takes what is unsent past the high water, so the server holds the high water and that one pong"
+        (let ((pongs (+ 1 (div 262144 127))))
+          (list (* 4096 (+ 1 (div (* pongs 131) 4096))) pongs (* pongs 127) #f))
+        (list delivered (spy-held spy) (spy-held-bytes spy) (fake-shell-reading? sh))))
+
+    (let* ((sent 0)
+           (spy (make-spy))
+           (told (until-told (lambda (ws)
+                               (do ((i 0 (+ i 1))) ((= i 300))
+                                 (websocket-send! ws (make-bytevector 1024 7))
+                                 (set! sent (+ sent 1)))
+                               (websocket-receive ws))))
+           (sh (connect (spying (accepting (car told)) spy) handshake)))
+      ((cadr told))
+      (fake-shell-schedule! sh)
+      (let ((behind sent))
+        (let loop ((s 0))
+          (when (and (< sent 300) (< s 300))
+            (fake-shell-deliver-later! sh)
+            (tick! sh 1000)
+            (loop (+ s 1))))
+        (test-equal "a client that reads one write a second is not cut off: past the high water the send waits, each done re-arms the write timeout, and all 300 messages of 1 KiB are sent"
+          '(255 300 #f) (list behind sent (spy-aborted? spy)))))
+
+    (let* ((n (make-notes))
+           (told (until-told (lambda (ws)
+                               (websocket-send! ws "Hello") (websocket-send! ws "Hello") (note! n 'sent)
+                               ((receiving-all n) ws))))
+           (sh (connect (accepting (car told) (make-handshake-settings '())
+                                   (limits '((write-high-water . 7) (write-low-water . 4))))
+                        handshake)))
+      ((cadr told))
+      (fake-shell-schedule! sh)
+      (let ((behind (list (fake-shell-reading? sh) (fake-shell-armed sh))))
+        (fake-shell-settle! sh)
+        (let ((caught-up (list (fake-shell-reading? sh) (fake-shell-armed sh))))
+          (fake-shell-feed-input! sh rfc-masked-hello 4096)
+          (fake-shell-settle! sh)
+          (test-equal "a client that reads down to the low water is read again: reading stops while it is behind, the write timeout armed; once it has read, reading starts, the ping clock armed afresh, and its next message is received"
+            (list '(#f 65000) '(#t 25000) '(sent "Hello")) (list behind caught-up (seen n))))))
+
     ;; --- reading on (0001) ---
 
     (let* ((n (make-notes))
@@ -581,7 +762,8 @@
                          handshake)))
       (fake-shell-deliver! sha '(eof))
       (fake-shell-settle! sha)
-      (fake-shell-deliver! shb (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+      ;; B's client reads what A sent, so B reads again (0006), then sends.
+      (fake-shell-feed-input! shb rfc-masked-hello 4096)
       (fake-shell-settle! shb)
       (test-equal "a procedure waiting to send to another connection's WebSocket, whose own client leaves, is told &client-closed, and the other connection goes on: it receives, and its client reads what was sent and the echo"
         (list '(client-closed) '("Hello") (list 101 (concat (list rfc-hello rfc-hello rfc-hello))))
@@ -694,6 +876,30 @@
       (test-equal "a read the core answers with only its clock allocates nothing in the binding: no more than a taker that only re-arms its deadline"
         0 (- (allocated (lambda () (fake-shell-deliver! ws-sh one)))
              (allocated (lambda () (fake-shell-deliver! base one))))))
+
+    ;; A write's done the core answers with nothing: through the binding,
+    ;; and through a taker whose done does nothing; the fake's own work is
+    ;; the same for both.  Each has three writes the client has not read.
+    (let* ((go-base #f)
+           (writing (lambda (r)
+                      (switch-protocols (list (cons (b "Upgrade") (b "websocket")))
+                        (lambda (t retained)
+                          (awaiting (lambda ()
+                                      (await (lambda (resume) (set! go-base resume)))
+                                      (do ((i 0 (+ i 1))) ((= i 3)) (transport-write! t rfc-hello 0 7 (lambda (why) #f)))
+                                      (await (lambda (resume) #f))))))))
+           (told (until-told (lambda (ws)
+                               (do ((i 0 (+ i 1))) ((= i 3)) (websocket-send! ws "Hello"))
+                               (websocket-receive ws))))
+           (base (connect writing handshake))
+           (ws-sh (connect (accepting (car told)) handshake)))
+      (go-base #t)
+      (fake-shell-schedule! base)
+      ((cadr told))
+      (fake-shell-schedule! ws-sh)
+      (test-equal "a write's done the core answers with nothing allocates nothing in the binding: no more than a taker whose done does nothing"
+        0 (- (allocated (lambda () (fake-shell-deliver-later! ws-sh)))
+             (allocated (lambda () (fake-shell-deliver-later! base))))))
 
     ;; --- the server's drain ---
 

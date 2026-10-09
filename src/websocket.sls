@@ -30,5 +30,5 @@
           websocket-limits-max-message-bytes websocket-limits-max-queue
           websocket-limits-ping-interval-ms websocket-limits-ping-timeout-ms
           websocket-limits-close-timeout-ms websocket-limits-write-high-water
-          websocket-limits-write-low-water)
+          websocket-limits-write-low-water websocket-limits-write-timeout-ms)
   (import (websocket private binding) (websocket handshake) (websocket limits)))

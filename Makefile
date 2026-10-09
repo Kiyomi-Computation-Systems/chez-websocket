@@ -59,7 +59,8 @@ TESTS := $(wildcard tests/test-*.sps)
 # binding suite refuses to run if one is set, so a variable added to (websocket
 # limits) and not here stops it.
 WS_ENV_VARS := CHEZ_WS_MAX_MESSAGE_BYTES CHEZ_WS_MAX_QUEUE CHEZ_WS_PING_INTERVAL \
-  CHEZ_WS_PING_TIMEOUT CHEZ_WS_CLOSE_TIMEOUT CHEZ_WS_WRITE_HIGH_WATER CHEZ_WS_WRITE_LOW_WATER
+  CHEZ_WS_PING_TIMEOUT CHEZ_WS_CLOSE_TIMEOUT CHEZ_WS_WRITE_HIGH_WATER CHEZ_WS_WRITE_LOW_WATER \
+  CHEZ_WS_WRITE_TIMEOUT
 
 # timeout(1) is GNU coreutils; macOS installs it as gtimeout. Absent both, a
 # hung suite is not capped but the run is otherwise identical.
