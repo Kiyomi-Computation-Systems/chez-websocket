@@ -1071,3 +1071,194 @@ Every new or changed check has a killer by value; none is red only through a rai
 | I-binding | A-3, A-4 |
 | I-facade | A-1, A-2 |
 | I-limits, I-protocol | A-5; A-6 |
+
+## M4.3 step 1's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09.
+- **The code:**
+  - `src/websocket/private/binding.sls` (blob 7013300);
+  - `src/websocket/protocol.sls` (1ff1fbf): `ws-open?` and `ws-sendable-close?`;
+  - `src/websocket/handshake.sls` (eea44d4): X-Forwarded-Proto's leftmost element;
+  - the Makefile (27081c1): the suites run with no `CHEZ_WS_` variable set.
+- **The suites:** `tests/test-binding.sps`, 45 checks (50aeeb4);
+  `tests/test-protocol.sps`, 87 (ef62721); `tests/test-handshake.sps`, 26 (5f675ce).
+
+**The runner** is step 1's, extended:
+- a copy of the core or the handshake goes first on the path too, and runs with its
+  own suite and the binding's;
+- the baseline runs the binding, audit, protocol and handshake suites.
+
+### The oracles
+
+Step 1's, and:
+- **Decision 0005**, by form, "Many senders, one receive":
+  - websockets 17.2 refuses a second receive (`asyncio/connection.py:302-306`) and wakes
+    every drained sender together (`:1054-1060`);
+  - coder documents one reader (`read.go:29`);
+  - gorilla documents one reader and one writer (`doc.go:122-134`).
+- **Decision 0003's amendment of 2026-10-09**, by form, "Leftmost element": RFC 7239 §4
+  puts the client-facing hop first.
+- **The server's own `log-line`** (`(http-server private serve)`) writes the binding's
+  expected log lines, so the two formats are tied.
+- **The server's waits** (its `waits.sls` header): a resume called after its wait has
+  ended is logged `late-resume` and wakes nothing.
+
+### The test-first runs
+
+Each red set was named and hashed before its run, but two, said below.
+- **R0** (`ddcf0aa`), as predicted:
+  - the protocol suite stopped at load, `ws-open?` unbound, exit 255;
+  - the binding suite red in exactly its five new checks, each by value (35 passing);
+  - the other nine suites, 184;
+  - with `CHEZ_WS_PING_INTERVAL=30` set, the binding suite refused to run, exit 2.
+- **R0'** (`d95cab7`), the forms' checks, as predicted:
+  - the binding suite red in eight, each by value;
+  - the handshake suite red in its scheme check;
+  - 305 passes in all.
+- **R1** (`251cfcd`): the fixes, 314. **The first run of this tree was not hashed**: I
+  ran `make test` straight after the edit. The prediction was then written, naming that
+  run, and the second run matched it.
+  - R1b, with the variable set: exit 2.
+  - R1c, the Makefile unsetting the seven variables: 314.
+- **Three checks widened after R1c ran green unhashed at 315**:
+  - R-QUEUE-BYTES added;
+  - C-QUEUED fed a frame a read;
+  - E-DETAILS raising `#f`.
+
+  R1d (`414d51c`), with R-DEADLINE added and the parked waiter no longer cleared: 316,
+  as predicted.
+
+### The mutants
+
+New keys, beside step 1's:
+
+| key | check |
+|---|---|
+| H-FWD2 | X-Forwarded-Proto over two lines is read by its leftmost element: an http Origin for the request's host refused 403 |
+| C-ARGS2 | `websocket-close!` refuses a code no endpoint may send, a reason past 123 bytes, a non-code, naming itself; `websocket-accept` refuses settings, naming itself |
+| R-QUEUE-BYTES | a queue of a cap's worth of bytes stops reading until it is received |
+| X-FOREIGN | a procedure waiting to send to another's WebSocket, whose client leaves, is told `&client-closed`; the other goes on |
+| CC-SENDERS | two procedures waiting to send to one WebSocket both go on at the low water |
+| CC-RECEIVE | a receive while another waits is refused, naming `websocket-receive`; the waiting one gets the message |
+| X-FOREIGN-CLOSED | another WebSocket's `&websocket-closed` let out closes with 1011, logged |
+| X-SPENT | the stream closed while the procedure waits on its own: a receive and a send after it raise, 1006 |
+| R-DEADLINE | a receive a handler's deadline ends lets go: a later receive waits and gets the next message |
+| R-ALLOC | a read the core answers with only its clock allocates nothing in the binding |
+| PR-OPEN, PR-SENDABLE | the protocol suite: `ws-open?`, `ws-sendable-close?` |
+| HS-SCHEME | the handshake suite: the Origin's scheme held to X-Forwarded-Proto's leftmost element |
+
+Changed: C-OUTSIDE closes with the abort, as the server's own close is at once;
+C-QUEUED feeds a frame a read; E-DETAILS and P-SILENT read their lines from the server's
+`log-line`, and E-DETAILS raises `#f` too.
+
+Specs hashed before each run, with the names (`e9954ed`) and the runner (`056ee3a`):
+- **`987cfe3`**: stopped at the pre-flight, before any row ran. K-37's cut no longer
+  matched the rewritten `run`.
+- **Run 1** (`c559bef`, K-37's cut fixed): 106 rows, 1 mismatch.
+  - K-34b left X-FOREIGN-CLOSED green, against my prediction. Under it, B's take-over
+    raised, so B's procedure never ran and the test's `b-ws` stayed `#f`. A's receive
+    then raised an assertion with the same text as the one the test had made: the
+    check passed on what it did not mean to show.
+  - The check now also holds that what B raised is a `&websocket-closed`.
+- **Run 2** (`c559bef` again; only the suite changed): 106 rows, 105 mutants and the
+  baseline, 0 mismatches.
+- **Run 3** (`392775c`): the two mutants that undo the allocation fix, R-25 and R-26,
+  and the baseline: 0 mismatches. R-ALLOC's killers had not included them.
+
+Every earlier mutant was re-cut against the rewritten binding and predicted again over
+the 45 checks.
+
+| # | mutation | red, as predicted |
+|---|----------|-----|
+| BASE | none | none: 168 passes over the four suites |
+| K-1, K-3, K-4, K-5 | step 1's | as step 1's |
+| K-58 | no origins named gets `any` | H-ORIGIN, H-FWD2 |
+| R-17 | accept takes any settings | C-ARGS2 |
+| R-16 | close takes any code and reason | C-ARGS2 |
+| K-6 | the bytes read past the request not fed | M-RETAINED, M-BINARY, M-BOM, C-CLIENT, E-CLOSED, L-1002, X-FOREIGN-CLOSED |
+| K-12 | the take-over starts no reading | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE, R-QUEUE-BYTES, C-SERVER, C-EOF, C-QUEUED, C-AGAIN, C-SENDCLOSING, X-FOREIGN, CC-RECEIVE, R-DEADLINE, R-ALLOC, E-CLIENTCLOSED |
+| K-71 | a read's end not stepped | W-END, C-EOF, C-QUEUED, C-AGAIN, E-CLIENTCLOSED, X-FOREIGN |
+| K-72 | every read stepped as no bytes | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE, R-QUEUE-BYTES, C-SERVER, C-QUEUED, C-SENDCLOSING, X-FOREIGN, CC-RECEIVE, R-DEADLINE |
+| R-22 | a read's start not filled in | C-QUEUED |
+| R-24 | a read's bytevector not filled in | K-72's, and R-ALLOC |
+| R-25 | a read steps a fresh event | R-ALLOC |
+| R-26 | a step's actions performed by `for-each` over a closure | R-ALLOC |
+| R-4, R-5 | no close call; the close call steps no end | C-OUTSIDE, X-SPENT |
+| R-3 | the procedure run with no current WebSocket | C-OUTSIDE |
+| R-2 | no waiter's owner | C-OUTSIDE |
+| K-44 | the own wait's `&client-closed` let out | C-OUTSIDE |
+| R-1 | another's wait's `&client-closed` taken as the own | X-FOREIGN |
+| K-38 | a raise not logged | E-RAISE, E-DETAILS, X-FOREIGN-CLOSED |
+| K-39 | a raise closes 1000 | E-RAISE, X-FOREIGN-CLOSED |
+| K-40, K-42 | the own end let out taken as a failure; raised on | E-CLOSED |
+| K-41 | a `&client-closed` let out taken as a failure | E-CLIENTCLOSED |
+| R-14 | any `&websocket-closed` let out taken as the own end | X-FOREIGN-CLOSED |
+| R-15 | the own end matched while none has come | E-DETAILS |
+| K-16 | `close-stream` not performed | E-CLIENTCLOSED, X-FOREIGN |
+| K-17 | `closed` not performed | W-END, C-SERVER, C-CLIENT, C-EOF, C-TIMEOUT, C-OUTSIDE, C-QUEUED, C-AGAIN, C-SENDCLOSING, X-FOREIGN-CLOSED, X-SPENT |
+| K-47 | a delivery wakes no receive | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE, R-QUEUE-BYTES, X-FOREIGN, CC-RECEIVE, R-DEADLINE |
+| K-13, K-14 | read-stop, read-start not performed | R-QUEUE, R-QUEUE-BYTES |
+| K-15 | disarm not performed | R-QUEUE |
+| K-18 | every end clean | W-END, C-EOF, C-TIMEOUT, C-OUTSIDE, C-QUEUED, C-AGAIN, X-SPENT |
+| K-48 | the end wakes no receive | C-SERVER, C-TIMEOUT |
+| K-49 | the end wakes no send | W-END, C-SENDCLOSING |
+| K-50 | a woken receive's waiter kept | M-WAKE, X-FOREIGN, CC-RECEIVE |
+| R-8, R-9 | only the newest sender woken; one sender kept | CC-SENDERS |
+| R-10 | a second receive not refused | CC-RECEIVE |
+| K-45 | a wait that raises keeps its waiter | R-DEADLINE |
+| K-31 | a take not stepped | R-QUEUE, R-QUEUE-BYTES |
+| R-21 | a take's length not filled in | R-QUEUE-BYTES |
+| K-32 | a text received as its bytes | M-RETAINED, M-WAKE, M-BOM, R-QUEUE, R-QUEUE-BYTES, C-QUEUED, X-FOREIGN, CC-RECEIVE, R-DEADLINE |
+| K-66 | the queue's tail kept once empty | R-QUEUE, R-QUEUE-BYTES |
+| K-34b | no length guard before the mark | step 1's set, and X-SPENT, X-FOREIGN-CLOSED |
+| K-22 | a write not counted | W-HIGH, W-LOW, W-END, CC-SENDERS, X-FOREIGN |
+| K-23 | a done not counted | W-HIGH, W-LOW, CC-SENDERS |
+| K-26 | wait at the high water | W-HIGH, W-END, X-FOREIGN, CC-SENDERS |
+| K-27 | a send never waits | W-HIGH, W-LOW, W-END, CC-SENDERS, X-FOREIGN |
+| K-29 | a send while the core is not open sent | C-SENDCLOSING |
+| K-69 | no newline | E-RAISE, E-DETAILS, P-SILENT, X-FOREIGN-CLOSED |
+| K-70a, K-70b | a condition logged as a record; its line breaks kept | E-DETAILS, X-FOREIGN-CLOSED |
+| P-1 | `ws-open?` counts a closing connection open | PR-OPEN, C-SENDCLOSING |
+| P-2 | `ws-open?` checks no connection | PR-OPEN |
+| P-3 | `ws-sendable-close?` does not measure the reason | PR-SENDABLE, PR-CLOSE-REFUSED, PR-REASON-UTF8, C-ARGS2 |
+| HS-1, HS-4 | X-Forwarded-Proto read whole; its leftmost element runs to the end | HS-SCHEME, H-FWD2 |
+| HS-2, HS-3 | the leftmost element's leading, or trailing, OWS kept | HS-SCHEME |
+| the rest of step 1's | re-cut where the rewrite moved their text | as step 1's |
+| A-1, A-3, A-5, A-7 | the audit, a spot check | as step 1's |
+
+**Survivors, as predicted:**
+- **Late resumes, which the fake logs nowhere:**
+  - R-6: the close call marks no wait ended;
+  - R-7: a dead waiter woken;
+  - R-6b: a procedure's wait not recorded as parked;
+  - K-50b: woken senders kept.
+- **R-20**: a read's bytevector kept after its step.
+- Each is held on step 3's real socket, or by its footprint.
+
+**Not run, as equivalent:**
+- K-53 is gone with the binding's closing flag.
+- `close-from!` stepping a close whatever `ws-open?` says: the core answers a close
+  once one is sent, or after the end, with nothing.
+
+**Every new or changed check has a killer by value**; none is red only through a raise.
+
+| check | killers by value |
+|---|---|
+| H-FWD2 | K-58, HS-1, HS-4 |
+| C-ARGS2 | R-16, R-17, P-3 |
+| R-QUEUE-BYTES | K-12, K-13, K-14, K-31, K-32, K-47, K-66, K-72, R-21, R-24 |
+| C-OUTSIDE | K-17, K-18, K-34b, K-44, R-2, R-3, R-4, R-5 |
+| C-QUEUED | K-12, K-17, K-18, K-30, K-32, K-34b, K-66b, K-71, K-72, R-22, R-24 |
+| X-FOREIGN | K-12, K-16, K-22, K-26, K-27, K-32, K-47, K-50, K-71, K-72, R-1, R-24 |
+| CC-SENDERS | K-22, K-23, K-26, K-27, R-8, R-9 |
+| CC-RECEIVE | K-12, K-32, K-47, K-50, K-72, R-10, R-24 |
+| X-FOREIGN-CLOSED | K-6, K-17, K-34b, K-38, K-39, K-69, K-70a, K-70b, R-14 |
+| X-SPENT | K-17, K-18, K-34b, R-4, R-5 |
+| R-DEADLINE | K-12, K-32, K-45, K-47, K-72, R-24 |
+| R-ALLOC | K-12, R-24, R-25, R-26 |
+| E-DETAILS | K-38, K-69, K-70a to K-70e, R-15 |
+| P-SILENT | K-7, K-20, K-21, K-34b, K-69, K-73 |
+| PR-OPEN | P-1, P-2 |
+| PR-SENDABLE | P-3 |
+| HS-SCHEME | HS-1 to HS-4 |
