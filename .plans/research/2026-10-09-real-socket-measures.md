@@ -230,8 +230,8 @@ a collection's; the rest:
 - R-20 kept, at 16,000 bytes: 16,088 to 16,112 B on v0.4.0, 18,872 to 18,968 B on v0.4.1.
   At 40,000 bytes R-20 stayed green: the frame spans three reads of the server's
   16,384-byte buffer, and a kept read holds only the last.
-- Linux, 16,000 bytes: 112 B, and 16,112 kept, on v0.4.0; 2,920 to 2,928 B, and 18,912 to
-  18,920 kept, on v0.4.1.
+- Linux, 16,000 bytes, two runs: 88 to 112 B, and 16,112 kept, on v0.4.0; 2,888 to
+  2,928 B, and 18,896 to 18,920 kept, on v0.4.1.
 
 **The binding suite's done count** (R-DONE-ALLOC-BEHIND), on v0.4.1, Darwin:
 - the suite read 64 B in 4 of 7 runs, and 0 in 6 of 6 on v0.4.0, and 6 of 6 with the
@@ -242,3 +242,33 @@ a collection's; the rest:
   taker 352 B); at eight depths, 50 frames apart, it read 0, and R-ALLOC read −384 B;
 - each count inside a `call/1cc`: 6 of 6 on both servers, on Darwin; the copy read 352 B
   for both in 4 of 4; on Linux every allocation check passed, 6 of 6 on v0.4.1.
+
+### #57's review: the counter, measured again
+
+Darwin arm64. Probes in the scratch `ws-spark/rv/`.
+- **Plain Chez, no server.** An empty thunk, a 1 KiB bytevector, and thunks 50, 150 and
+  400 frames deep, each counted at all 401 depths from 0 to 400, before and after a full
+  capture. Every count was alike, whether counted directly or inside a `call/1cc`: 160 B,
+  1,200 B, and 160 B for the deep ones.
+- **The server's scheduler alone.** A coroutine woken and parked again, and one spawned and
+  parked, each counted three times:
+
+  | counted | wake, v0.4.0 | wake, v0.4.1 | spawn, v0.4.0 | spawn, v0.4.1 |
+  |---|---|---|---|---|
+  | 100 frames apart | 448 / 65,968 / 448 | 576 / 512 / 512 | 66,192 / 66,192 / 672 | 736 / 736 / 736 |
+  | inside a `call/1cc` | 65,968, each | 512 / 448 / 448 | 66,192, each | 736 / 672 / 672 |
+  | both | 448 / 65,968 / 448 | 512 / 512 / 512 | 66,192 / 66,192 / 672 | 672 / 736 / 736 |
+
+- **The binding suite's done check, per call** (the binding's, then the taker's, each
+  three calls 100 frames apart, an empty thunk 160 B throughout). In the layouts that
+  failed: the binding 576 / 576 / 576 and the taker 512 / 576 / 576, the same counted
+  inside a `call/1cc`, under a full `call/cc`, or neither, on v0.4.0 and v0.4.1 alike.
+  Counted in pairs, the binding's call and the taker's at each depth: 64 / 0 / 0 on
+  v0.4.1, and 64 / −64 / 0 on v0.4.0.
+- **The binding suite, whole**, by counter:
+  - the least of three, each inside a `call/1cc` (#57's): 6 of 6 on each server, though it
+    counts a v0.4.0 wake as a new segment every time (above);
+  - the least of three, 100 frames apart, each inside a `call/1cc`: 6 of 6 in one layout,
+    and 1 of 6 once a helper procedure was added, on v0.4.1;
+  - the middle of three, 100 frames apart, with or without a `call/1cc`: 6 of 6 on each
+    server, each way.

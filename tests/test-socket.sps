@@ -27,6 +27,13 @@
 ;;;     senders are let go;
 ;;;   - a read's bytevector let go after its step, held by the heap.
 ;;;
+;;; Not checked here: what a procedure waiting in a receive holds over one at
+;;; a bare `await`.  The suite held it until the server's v0.4.1, whose full
+;;; park leaves no change to the binding's wait that reddens it: its way back
+;;; by call/1cc adds about 150 B, and a guard about 486 B (measured at v0.4.0).
+;;; A message kept is S-LETGO's to catch, and the server's own suite holds
+;;; what its park keeps (decision 0005's amendment of 2026-10-09).
+;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.7's masked "Hello"; §5.5.1, a
 ;;;   close answered with a close echoing its code; §7.4.1's 1001, going
@@ -43,9 +50,11 @@
 ;;;   interval is 100 ms and the timeout 300 ms, so either taken for the other
 ;;;   falls outside its window.
 ;;; - A read's bytevector: a client's 16,000-byte binary is one frame of
-;;;   16,008 bytes, read at once on loopback into the server's 16,384-byte
-;;;   read buffer; kept, it held 16,088 to 18,968 B.  Let go, the heap after
-;;;   it and after a 1-byte message measured 112 B apart on the server's
+;;;   16,008 bytes, which one read of the server's 16,384-byte buffer takes
+;;;   whole; kept, it held 16,088 to 18,968 B.  Should a frame come in pieces,
+;;;   a kept read would hold only the last, the oracle has gone, and the suite
+;;;   says so (status 3), as it did at 40,000 bytes.  Let go, the heap after
+;;;   it and after a 1-byte message measured 88 to 112 B apart on the server's
 ;;;   v0.4.0, and 2,872 to 2,952 B on its v0.4.1, about as after a 4,000-,
 ;;;   40,000- or 400,000-byte message (decision 0007).  The bound is half the
 ;;;   frame.
@@ -196,6 +205,21 @@
    (lambda (thunk) (transport-on-close! t thunk))
    (lambda () (transport-abort! t))))
 
+;; reading : Transport (Nat -> Any) -> Transport
+;; A transport over t that tells `note` each read's length as it arrives,
+;; and passes every call on.
+(define (reading t note)
+  (make-transport
+   (lambda (bytes start end written) (transport-write! t bytes start end written))
+   (lambda (on-bytes on-end)
+     (transport-read-start! t (lambda (bv start end) (note (- end start)) (on-bytes bv start end)) on-end))
+   (lambda () (transport-read-stop! t))
+   (lambda () (transport-close! t))
+   (lambda (ms passed) (if ms (transport-deadline! t ms passed) (transport-deadline! t #f)))
+   (lambda (thunk) (transport-on-drain! t thunk))
+   (lambda (thunk) (transport-on-close! t thunk))
+   (lambda () (transport-abort! t))))
+
 ;; footprint : -> Nat — the heap after two full collections.
 (define (footprint)
   (collect (collect-maximum-generation))
@@ -303,12 +327,14 @@
 
     ;; --- what a connection holds ---
 
-    (let* ((taken 0)
-           (s (serving (accepting (lambda (ws) (let take () (websocket-receive ws) (set! taken (+ taken 1)) (take)))
-                                  no-subprotocols default-websocket-limits)))
-           (cl (connect! s "/" #t))
+    (let* ((taken 0) (whole 0)
            (big (client-frame #x82 (make-bytevector 16000 9)))
-           (small (client-frame #x82 (make-bytevector 1 9))))
+           (small (client-frame #x82 (make-bytevector 1 9)))
+           (s (serving (wrapping (accepting (lambda (ws) (let take () (websocket-receive ws) (set! taken (+ taken 1)) (take)))
+                                            no-subprotocols default-websocket-limits)
+                                 (lambda (t)
+                                   (reading t (lambda (n) (when (>= n (bytevector-length big)) (set! whole (+ whole 1)))))))))
+           (cl (connect! s "/" #t)))
       (define (sent! frame)
         (let ((want (+ taken 1)))
           (client-send! cl frame)
@@ -324,6 +350,9 @@
       (apart)
       (let* ((measured (list (apart) (apart) (apart))) (all-taken taken))
         (finish! s (list cl))
+        (unless (= whole 5)
+          (provenance-failure
+           (string-append "a 16,008-byte frame came in pieces: " (number->string whole) " of 5 read whole")))
         (test-equal "a read's bytevector is let go after its step: the heap after a 16,000-byte message, then after a 1-byte one, three times, differs by less than half its 16,008-byte frame, each message received"
           '(let-go 10)
           (list (if (for-all (lambda (d) (< d 8004)) measured) 'let-go measured) all-taken))))))

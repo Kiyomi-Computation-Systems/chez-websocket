@@ -1764,3 +1764,24 @@ NEXT, by form ("A server slice next"): the server's `suspend!` by `call/cc` in c
 - `make test` green before the commit (Darwin arm64): twelve suites, 348 expected passes, every pin ok. On v0.4.1, twelve suites and 348, on Darwin and on Linux.
 
 NEXT: the PR; review and the closing ritual when the owner asks; then the pin to the server's v0.4.1 (520f70e) alone; then M5, the Autobahn lane, whose image needs the owner's word to pull.
+
+**#57's review, as a stacked PR, on `fix/v0.4.1-fit-review` (2026-10-09):** a /code-review xhigh over #57 reported eight findings. On the owner's "fix all", all eight were fixed, three of them by form, each the recommended: "Record the gap" (finding 3), "Server plan's open list" (finding 4) and "A stacked PR on #57".
+- **Measured first** (Darwin arm64; the research record's newest section; probes in the scratch `ws-spark/rv/`):
+  - **The counter's premise was wrong.** On plain Chez, at 401 depths, no count moved, either way. Near the server's scheduler, #57's counter counted a v0.4.0 coroutine's wake as 65,968 B, a new stack segment, in every call (finding 5).
+  - **The 64 B is the fake shell's.** A taker's write's done counted 512 B, then 576 and 576; the binding's, in the layouts that failed, 576 three times. The same counted inside a `call/1cc`, under a full `call/cc`, or neither, on both servers. A `guard` in the fake shell's `taker-call!` wraps both.
+  - **The least of three fails when only one side's first call counts low;** the middle of three passed the binding suite in every run, on both servers. Written into the tree first as the least, at three depths inside a `call/1cc`, it failed 5 of 6 on v0.4.1: a helper procedure the shadow lacked.
+- **Built:**
+  - `tests/ws-testing.sls`: `middle-counted`, the middle of three counts made 100 frames apart, with no `call/1cc` (findings 2, 5, 6 and 8).
+  - `tests/test-socket.sps`: `reading`, a transport that tells each read's length; S-LETGO stops at status 3 unless all five big frames came whole (finding 1); the header says what is not checked here, and why (finding 3).
+- **Records:**
+  - 0005's amendment, the gap;
+  - 0007 renamed, "an allocation is counted as the middle of three counts", and amended;
+  - the design's §8 and §9, the plan's M4.3 note, the research record;
+  - the per-connection figure, about 620 B more than v0.4.0, not 720 (finding 7).
+  - In chez-http-server, #161 adds what the full drain keeps to its plan's open list (finding 4).
+- **Tests first** (`m4-mutations.md`): stage 1 failed once, a prediction error (above); after the change, twelve suites and 348 on v0.4.0, and on v0.4.1 three times; the binding suite 6 of 6 on each server.
+- **Mutants:** 12 rows on each server, run 2's ten and two for the whole-read check. Run 3, 0 mismatches each, under the counter first written; run 4, 0 mismatches each, under the middle.
+- **Linux** (Docker, libuv 1.48.0): `make test`, twelve suites and 348, twice on each server; the binding suite 6 of 6 on v0.4.1.
+- `make test` green before the commit (Darwin arm64): twelve suites, 348 expected passes, every pin ok.
+
+NEXT: the PRs, #57 and this one stacked on it; the closing ritual when the owner asks, bottom-up; then the pin to the server's v0.4.1 (520f70e) alone; then M5, the Autobahn lane, whose image needs the owner's word to pull.

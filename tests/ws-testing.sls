@@ -29,7 +29,7 @@
 ;;; test libraries can share the library path with it.
 (library (ws-testing)
   (export run-suite provenance-failure provenance-error? allocated keep!)
-  (import (rnrs) (srfi :64) (only (chezscheme) collect statistics sstats-bytes call/1cc))
+  (import (rnrs) (srfi :64) (only (chezscheme) collect statistics sstats-bytes))
 
   ;; provenance-error : a raised marker mapping a suite to status 3.
   (define-record-type provenance-error
@@ -54,25 +54,40 @@
       (thunk)
       (- (sstats-bytes (statistics)) before)))
 
-  ;; least-counted : (-> Any) -> Nat
-  ;; The least of three calls' counts, each made inside a call/1cc, whose
-  ;; receiver Chez runs on a stack segment of its own.  The calls were made
-  ;; 100 frames apart, so that one at least stood clear of a segment's end,
-  ;; until the server's v0.4.1, whose coroutines park and are entered on
-  ;; full continuations: there a write's done counted 64 B more at depths
-  ;; 100 and 200 than at 0, and at all three in 3 of 6 runs of the binding
-  ;; suite.  Each on a segment of its own, it counted alike in every run, on
-  ;; v0.4.0 and v0.4.1 (decision 0007).
-  (define (least-counted thunk)
-    (min (call/1cc (lambda (k) (counted thunk)))
-         (call/1cc (lambda (k) (counted thunk)))
-         (call/1cc (lambda (k) (counted thunk)))))
+  ;; deeper : Nat (-> Any) -> Any
+  ;; The thunk's answer, from a call made n frames deeper than this one.
+  (define (deeper n thunk)
+    (if (= n 0)
+        (thunk)
+        (let ((answer (deeper (- n 1) thunk)))
+          (keep! answer)
+          answer)))
+
+  ;; counted-at : Nat (-> Any) -> Nat
+  ;; One call's count, made n frames deep.
+  (define (counted-at n thunk)
+    (deeper n (lambda () (counted thunk))))
+
+  ;; middle-counted : (-> Any) -> Nat
+  ;; The middle of three calls' counts, made 100 frames apart: one count off
+  ;; the other two, either way, is passed over.  A call from one depth paid
+  ;; for a new stack segment, 65,968 B, on the server's v0.4.0, where the
+  ;; others counted 448.  And a call through the server's fake shell counts
+  ;; 64 B more or less with what ran before it: a taker's first write's done
+  ;; counted 512 B and its next two 576, and in some layouts of the binding
+  ;; suite all three of the binding's counted 576.  The least of the three
+  ;; then read 64 B in 4 of 7 runs on v0.4.1; the middle, in none of 12, six
+  ;; on each server.  Two counts off the same way defeat it (decision
+  ;; 0007's amendment).
+  (define (middle-counted thunk)
+    (let* ((a (counted-at 0 thunk)) (b (counted-at 100 thunk)) (c (counted-at 200 thunk)))
+      (max (min a b) (min (max a b) c))))
 
   ;; Whether the counter has been checked, which the first measurement does.
   (define counter-checked? #f)
 
   ;; allocated : (-> Any) -> Nat
-  ;; The bytes one call of the thunk allocates: the least of three calls'
+  ;; The bytes one call of the thunk allocates: the middle of three calls'
   ;; counts, less what an empty thunk's count is.  A collection inside the
   ;; thunk counts too, so the answer is exact for a thunk that allocates well
   ;; under (collect-trip-bytes).  The first call checks the counter, and
@@ -81,11 +96,11 @@
   ;; alike): a counter that read nothing would pass "allocates nothing".
   (define (allocated thunk)
     (unless counter-checked?
-      (unless (= 1024 (- (least-counted (lambda () (keep! (make-bytevector 2048))))
-                         (least-counted (lambda () (keep! (make-bytevector 1024))))))
+      (unless (= 1024 (- (middle-counted (lambda () (keep! (make-bytevector 2048))))
+                         (middle-counted (lambda () (keep! (make-bytevector 1024))))))
         (assertion-violation 'allocated "the counter does not count a 1,024-byte bytevector"))
       (set! counter-checked? #t))
-    (- (least-counted thunk) (least-counted (lambda () #f))))
+    (- (middle-counted thunk) (middle-counted (lambda () #f))))
 
   ;; suite-status : test-runner -> (U 0 1 2)
   ;; 1 if any assertion failed or unexpectedly passed; 2 if none ran; else 0.

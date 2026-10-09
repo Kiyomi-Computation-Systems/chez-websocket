@@ -442,7 +442,7 @@ is refused.
     what the server writes, through a transport over the shell's (`wrapping`, shared with
     the binding suite in `(ws-play)`);
   - measures the heap back to back: a read's bytevector against half its frame, at
-    16,000 bytes, which one read takes whole (0007). It also measured a receive's wait
+    16,000 bytes, which one read takes whole, and checks that each did (0007). It also measured a receive's wait
     against a wait by `call/1cc` until 2026-10-09, when that check was retired before the
     server's v0.4.1 pin (0005's amendment of that date);
   - caps each wait at 4,000 turns, over ten times the most any took, and ends a check's
@@ -502,8 +502,8 @@ is refused.
     its clients in the same heap). A connection at a bare `await` held 7,907 to 8,484 B at
     v0.4.0 and 5,253 to 5,292 B at v0.4.1. A receive held 462 to 984 B more at v0.4.0, and
     303 to 340 B more at v0.4.1 (0005's amendment of that date). After a 4,000-byte
-    message, v0.4.1 keeps about 2.9 KB more until the next, and about 720 B more for each
-    further connection (0007).
+    message, v0.4.1 keeps about 2.9 KB more until the next, and about 620 B a connection
+    more than v0.4.0 (0007, amended). The server's plan lists it as open.
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`

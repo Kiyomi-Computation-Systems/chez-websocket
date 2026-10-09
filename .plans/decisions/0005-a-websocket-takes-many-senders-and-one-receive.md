@@ -141,5 +141,10 @@ v0.4.0 `park!` by `call/1cc` still reddens it; from v0.4.1 no change to the bind
 - **What a waiting coroutine keeps is the server's to hold.** Its scheduler suite holds a
   coroutine parked 4 calls deep under half of a one-shot continuation's 3,420 B: 802 B, on
   Darwin, Linux aarch64 and x86_64 (its decision 0025).
+- **Nothing here checks what the binding adds to a wait** (#57's review, by form: "Record
+  the gap", the recommended). From v0.4.1 a change to the binding's wait moves it too
+  little for a bound to hold: its way back by `call/1cc` adds about 150 B, and a `guard`
+  about 486 B (measured at v0.4.0, after the 101). A message kept is S-LETGO's to catch.
+  The socket suite's header says so.
 - **`park!` stays `call/cc`**, and its comment gives both servers' numbers.
 - **The same pin turns two more checks red**, through nothing the binding does: decision 0007.
