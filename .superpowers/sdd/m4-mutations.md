@@ -1262,3 +1262,191 @@ the 45 checks.
 | PR-OPEN | P-1, P-2 |
 | PR-SENDABLE | P-3 |
 | HS-SCHEME | HS-1 to HS-4 |
+
+## M4.3 step 2 — a client that does not read
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09.
+- **The code:**
+  - `src/websocket/limits.sls` (blob 959076a): `write-timeout-ms`, `CHEZ_WS_WRITE_TIMEOUT`;
+  - `src/websocket.sls` (387ef63): the facade exports its accessor;
+  - `src/websocket/protocol.sls` (e49b4a3): the write side and the close timeout's abort;
+  - `src/websocket/private/binding.sls` (86a55ce): each done stepped, `abort-stream`,
+    `close-stream` with the close timeout armed first, a send waiting on `ws-behind?`;
+  - the Makefile (d34dce5): `make test` unsets `CHEZ_WS_WRITE_TIMEOUT` too.
+- **The suites:** `tests/test-limits.sps`, 15 checks (829b52f);
+  `tests/test-protocol.sps`, 101 (5609494); `tests/test-binding.sps`, 52 (806b565).
+
+**The runner** (`wsmut2.py`, a29c22e) is the review's, extended:
+- the limits or the facade can go first on the path too: the limits with the limits,
+  protocol and binding suites, the facade with the binding's;
+- a suite that stops at load is named `LOAD:<suite>`, a red like any other.
+
+### The oracles
+
+Step 1's and its review's, and:
+- **Decision 0006**, by form, "Reading stops past the high water" and "60 s, its own
+  variable":
+  - the server's own `CHEZ_HTTP_WRITE_TIMEOUT`, 60 s, for a client that stops reading
+    (its `docs/configuration.org`, `docs/connections.org`);
+  - websockets 17.2's `close_timeout` ends in `transport.abort()`
+    (`asyncio/connection.py:910-911`, `:942-957`).
+- **RFC 6455 §5.2's frame sizes**: a client's ping of 125 bytes is 131, masked; its pong
+  127; Hello's frame 7; a close of 1000, 4; a ping of no payload, 2.
+- **What was measured before the form** (0006's Context, on main 1d8ed80 and on three
+  prototypes, the scratch `s2/measures.md`): the five closes, the send waiting, the
+  pinging client and the 1 MiB of pings, each held for an hour of fake time on main.
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **Stage 0** (`62ec54c`), the tests alone, as predicted:
+  - the limits suite stopped at load, `websocket-limits-write-timeout-ms` unbound, exit 255;
+  - the protocol suite stopped at load, `ws-behind?` unbound, exit 255;
+  - the binding suite red in exactly its six new checks, each by value: the close asked
+    for with no deadline, `(#t #f #f)`; the close timeout closing, not aborting; the
+    send's ping read and `ping` armed at 25,000; all 1,048,524 B of pings read and
+    1,016,508 B of pongs held; the slow reader failed at the pong's timeout with 255
+    sent; reading never stopped. 45 passing.
+- **Stage 1** (`00a89fa`), the limits' field and the facade's export: as predicted, the
+  limits suite 15; the rest as stage 0.
+- **Stage 2** (`ab03f57`), the core, the binding as on main, as predicted:
+  - the protocol suite 100 (W-FAIL came in stage 5);
+  - the binding suite red in a different six: X-FOREIGN in, since the old binding never
+    steps a done and B stays behind; the ping flood's check out, since the core alone
+    stops reading.
+- **Stage 3** (`93bdd4e`), the binding: eleven suites, 335, as predicted.
+- **Stage 4** (`0efa8fa`), the Makefile, red first:
+  - 4a, `CHEZ_WS_WRITE_TIMEOUT=5 make test` before the Makefile unset it: the binding
+    suite refused to run, naming the variable, exit 2, as predicted. **My prediction's
+    count was wrong**: I wrote 320 for the other ten suites, subtracting wrongly; they
+    ran 284, which is 335 less the binding suite's 51, as they ran in stage 3.
+  - 4b, the variable in `WS_ENV_VARS`: 335 with it set.
+- **Stage 5** (`6403988`): four checks the mutant plan found missing, and `written!`'s
+  after-the-end clause taken out as redundant. As predicted, 337:
+  - W-TAKE takes with no more than the high water unsent, so the hold's "behind" term
+    is what stops it;
+  - W-FAIL, a failure whose close passes the high water stops and arms nothing after;
+  - `ws-behind?`'s own refusal, in W-REFUSE;
+  - R-DONE-ALLOC, a write's done allocates nothing in the binding.
+
+### The mutants
+
+New keys, beside step 1's and its review's:
+
+| key | check |
+|---|---|
+| A-LINGER | a close the client does not read: asked for with the close timeout armed, aborted once it passes |
+| A-TIMEOUT | the server's close unanswered by a client that reads nothing: aborted, not closed, at the close timeout |
+| B-STALL | a send past the high water to a client that reads nothing: reading stopped, its ping unread, aborted at 60 s; the facade's 60 s |
+| B-FLOOD | 1 MiB of pings, nothing read: reading stops at the pong that passes the high water; 2,065 pongs, 262,255 B held |
+| B-SLOW | a client reading one write a second: all 300 messages of 1 KiB sent, nothing aborted |
+| B-CATCHUP | a client that reads down to the low water is read again, the ping clock afresh |
+| R-DONE-ALLOC | a write's done allocates nothing in the binding |
+| W-PAST ... W-LETGO | the protocol suite's write side: past the high water, a done, the queue full, a take, pings, the ping, the write timeout, after the server's close, pinging off, a send while behind, a failure, refusals, allocation, letting go |
+| PR-CLOSE-TIMEOUT, PR-QUEUE-CLOSE, PR-END-AFTER, PR-CLOSE-CLOCK | the protocol suite's close-timeout checks, now `(abort-stream)` |
+| PR-DEADLINES | the deadline named against the one told, with the write side's sequence |
+| L-* | the limits suite's fifteen, keyed by their name's start |
+
+Changed: X-FOREIGN's client reads what was sent before it sends, since B reads nothing
+while behind; the four close-timeout checks; PR-DEADLINES; and the limits suite's,
+for an eighth field.
+
+Specs hashed before each run, with the names (`7ece50d`) and the runner (`a29c22e`):
+- **Run 1** (`a40d914`): 42 rows, 41 mutants and the baseline, 0 mismatches.
+- **Run 2** (`0e50362`): step 1's K-16, whose cut the binding's new `close-stream` moved,
+  re-cut and predicted over the 52 checks; and the baseline: 0 mismatches.
+
+| # | mutation | red, as predicted |
+|---|----------|-----|
+| BASE | none | none: 178 passes over the binding, audit, protocol and limits suites |
+| LM-1 | the write timeout's default 20 s | L-DEFAULTS, L-EMPTY, L-MOVES, L-EDGE, L-WATER, L-FIXNUM, L-ZEROS, L-WITH, B-STALL, B-CATCHUP |
+| LM-2 | its least 0 | L-BELOW, L-MAKE-REFUSE |
+| LM-3 | read in ms, not seconds | L-MOVES, L-ALL, L-EDGE, L-FIXNUM |
+| LM-4 | its variable named otherwise | L-VARS, L-MOVES, L-ALL, L-EDGE, L-BELOW, L-MALFORMED, L-FIXNUM |
+| LM-5 | the facade does not export its accessor | LOAD:test-binding |
+| LM-6 | `make-websocket-limits` ignores it | L-MAKE, L-MAKE-REFUSE, L-WITH |
+| P-EDGE-HIGH | the high water unsent counts as past it | W-PAST, W-DONE, W-FULL, W-TAKE, W-PONGS, W-TIMEOUT, W-CLOSING, W-PINGOFF, W-ALLOC, PR-DEADLINES, W-HIGH, W-END, B-STALL, X-FOREIGN, CC-SENDERS |
+| P-EDGE-LOW | the low water unsent still behind | W-DONE, W-CLOSING, W-HIGH |
+| P-NO-STOP | behind, reading goes on | W-PAST, W-DONE, W-PONGS, W-PING, W-TIMEOUT, W-CLOSING, W-PINGOFF, W-SEND-END, B-STALL, B-FLOOD, B-CATCHUP |
+| P-NO-ARM | behind, no write deadline | W-PAST, W-DONE, W-FULL, W-TAKE, W-PONGS, W-PING, W-TIMEOUT, W-PINGOFF, W-SEND-END, W-LETGO, PR-DEADLINES, B-STALL, B-SLOW, B-CATCHUP |
+| P-NO-REARM | a done while behind re-arms nothing | W-DONE, W-FULL, W-TAKE, W-PONGS, B-SLOW |
+| P-NO-DISARM | the end of behind leaves the write deadline | W-DONE, W-FULL, W-TAKE, W-PONGS, W-PINGOFF |
+| P-HELD-HIGH | a read does not stop at the frame that passes | W-PONGS, B-FLOOD |
+| P-HELD-BEHIND | behind, what waits is read | W-TAKE |
+| P-READING-ON | a take while behind starts reading | W-TAKE |
+| P-CLOSING-ARM | behind after the server's close, the write deadline armed | W-CLOSING |
+| P-TIMEOUT-CLOSE | the write timeout closes, not aborts | W-TIMEOUT, B-STALL |
+| P-TIMEOUT-LOG | the write timeout logged as the ping's | W-TIMEOUT, B-STALL |
+| P-LETGO | the end keeps what waits | W-LETGO |
+| P-CLOSE-ABORT | the close timeout closes, not aborts | PR-CLOSE-TIMEOUT, PR-QUEUE-CLOSE, PR-END-AFTER, PR-CLOSE-CLOCK, W-CLOSING, A-TIMEOUT |
+| P-REFUSE | a done of more than is unsent accepted | W-REFUSE |
+| P-SEND-TEXT | a text send never puts the client behind | W-PAST, W-DONE, W-FULL, W-TAKE, W-TIMEOUT, W-PINGOFF, W-SEND-END, W-LETGO, PR-DEADLINES, W-HIGH, W-LOW, W-END, B-STALL, B-CATCHUP, X-FOREIGN, CC-SENDERS |
+| P-SEND-BINARY | a binary send never does | B-SLOW |
+| P-CLOSE-FALLEN | the server's close never does | W-CLOSING |
+| P-PING-FALLEN | the ping never does | W-PING |
+| P-BYTES-FALLEN | a read never does | W-PONGS, B-FLOOD |
+| P-PAST-ENDED | an ended connection falls behind | W-FAIL |
+| P-PAST-BEHIND | a client behind falls behind again | W-SEND-END |
+| P-REARM-FRESH | a re-arming done allocates its action | W-ALLOC |
+| P-BEHIND-CHECK | `ws-behind?` checks no connection | W-REFUSE |
+| B-WROTE-NOWAKE | a done wakes no send | W-HIGH, W-LOW, B-SLOW, B-CATCHUP, CC-SENDERS |
+| B-WAKE-ALWAYS | every done wakes the sends | W-LOW |
+| B-WROTE-NOSTEP | a done not stepped | W-HIGH, W-LOW, B-SLOW, B-CATCHUP, X-FOREIGN, CC-SENDERS |
+| B-WROTE-FRESH | a done's event made afresh | R-DONE-ALLOC |
+| B-LINGER-NONE | the close asked for with no deadline | A-LINGER |
+| B-LINGER-PING | the close's deadline the ping timeout | A-LINGER |
+| B-ABORT-NOP | `abort-stream` does nothing | A-TIMEOUT, B-STALL |
+| B-ABORT-CLOSE | `abort-stream` closes, lingering | A-TIMEOUT, B-STALL |
+| B-ARM-WRITE | the write deadline armed for the close timeout | B-STALL, B-CATCHUP |
+| B-SEND-NOWAIT | a send never waits | W-HIGH, W-LOW, W-END, B-STALL, B-SLOW, X-FOREIGN, CC-SENDERS |
+| K-16' | `close-stream` not performed (run 2) | E-CLIENTCLOSED, X-FOREIGN, A-LINGER |
+
+Three reds came through a raise, besides their value: W-LETGO under P-NO-ARM and
+P-SEND-TEXT, the write deadline passing with none armed; W-CLOSING under
+P-CLOSING-ARM.
+
+**Superseded:** step 1's K-22 and K-23 (a write, a done, not counted), K-24 and K-26
+(the water marks' edges) and K-27 (a send never waits) cut the binding's own count,
+which is gone. P-SEND-TEXT, P-SEND-BINARY, B-WROTE-NOSTEP, P-EDGE-LOW, P-EDGE-HIGH and
+B-SEND-NOWAIT take their places.
+
+**A survivor, as predicted:** B-LINGER-AFTER, the close's deadline armed after the close
+is asked for. Both shells arm a deadline asked for while a close waits for its writes,
+and neither arms one once the close has begun (the fake's `fake-transport`, the libuv
+shell's `taker-deadline!`), so the order is not observable.
+
+**Every new or changed check has a killer by value.**
+
+| check | killers by value |
+|---|---|
+| A-LINGER | B-LINGER-NONE, B-LINGER-PING, K-16' |
+| A-TIMEOUT | P-CLOSE-ABORT, B-ABORT-NOP, B-ABORT-CLOSE |
+| B-STALL | LM-1, B-ARM-WRITE, P-TIMEOUT-CLOSE, P-TIMEOUT-LOG, B-ABORT-NOP, P-NO-STOP, B-SEND-NOWAIT |
+| B-FLOOD | P-HELD-HIGH, P-BYTES-FALLEN, P-NO-STOP |
+| B-SLOW | P-NO-REARM, P-SEND-BINARY, B-WROTE-NOWAKE, B-WROTE-NOSTEP |
+| B-CATCHUP | LM-1, B-ARM-WRITE, P-NO-STOP, B-WROTE-NOWAKE |
+| R-DONE-ALLOC | B-WROTE-FRESH |
+| X-FOREIGN | P-EDGE-HIGH, P-SEND-TEXT, B-WROTE-NOSTEP, B-SEND-NOWAIT, K-16' |
+| W-PAST, W-DONE | P-EDGE-HIGH, P-NO-STOP, P-NO-ARM; and W-DONE P-EDGE-LOW, P-NO-REARM, P-NO-DISARM |
+| W-FULL, W-TAKE | P-NO-REARM, P-NO-DISARM; and W-TAKE P-HELD-BEHIND, P-READING-ON |
+| W-PONGS | P-HELD-HIGH, P-BYTES-FALLEN |
+| W-PING | P-PING-FALLEN |
+| W-TIMEOUT | P-TIMEOUT-CLOSE, P-TIMEOUT-LOG |
+| W-CLOSING | P-CLOSE-FALLEN, P-EDGE-LOW, P-CLOSE-ABORT |
+| W-PINGOFF | P-NO-DISARM |
+| W-SEND-END | P-PAST-BEHIND |
+| W-FAIL | P-PAST-ENDED |
+| W-REFUSE | P-REFUSE, P-BEHIND-CHECK |
+| W-ALLOC | P-REARM-FRESH, P-EDGE-HIGH |
+| W-LETGO | P-LETGO |
+| PR-CLOSE-TIMEOUT, PR-QUEUE-CLOSE, PR-END-AFTER, PR-CLOSE-CLOCK | P-CLOSE-ABORT |
+| PR-DEADLINES | P-EDGE-HIGH, P-NO-ARM, P-SEND-TEXT |
+| L-DEFAULTS, L-EMPTY, L-WATER, L-ZEROS | LM-1 |
+| L-VARS, L-MALFORMED | LM-4 |
+| L-MOVES, L-ALL, L-EDGE, L-FIXNUM | LM-3, LM-4; and all but L-ALL LM-1 |
+| L-BELOW | LM-2, LM-4 |
+| L-MAKE | LM-6 |
+| L-MAKE-REFUSE | LM-2, LM-6 |
+| L-WITH | LM-1, LM-6 |
+| the Makefile's `WS_ENV_VARS` | stage 4a |
