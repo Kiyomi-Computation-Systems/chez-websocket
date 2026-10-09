@@ -1200,3 +1200,59 @@ MERGED to main on 2026-10-07: **M4.1, the handshake, and its review** (the two e
 `make test` green on main: nine suites, 251 expected passes, every pin ok.
 
 NEXT: M4.2, the binding's test driver, by form, when the owner asks: the server's fake shell, or a door change in the server (design §8). The door questions in the design's §9 wait with it: a close the transport cannot force, a client that sends and does not read, and a field split over lines.
+
+---
+
+M4.2 — THE BINDING'S TEST DRIVER. Branches `docs/m4.2-1-decision`, `test/m4.2-2-driver` and `docs/m4.2-3-ledger`, stacked (by form, "Three stacked PRs": about 630 lines, over the ~400 mark). 2026-10-08 to 2026-10-09.
+
+**Where it began.** On the owner's "Lets start the next step", M4.2's form chose, each the recommended: "Server's fake shell", "Door change: abort" and "Every line, in the release" (decision 0004).
+- The door change went into the server as its decision 0024, stacked #146 to #150, merged 2026-10-09 (the last as 79370d3).
+- It shipped in the server's v0.4.0, tagged on 388ec43 on 2026-10-09 (signed; tag object 3eebcd3).
+
+**Delivered:**
+- **The pin.** chez-http-server at v0.4.0 (388ec43), on its own commit. It brings chez-libuv v0.7.4 (27d84bb). The other pins it carries are unchanged: chez-httparse 0b7058e, byte-machine c338a57, uriparse 5ecd88f, chez-srfi 7879b52.
+- **The server's `tests/`, last on the library path**, for its `(fake-shell)`. Its 23 test libraries share no name with this project's eight, and the directories before it would win any they did.
+- **`tests/test-driver.sps`, twelve checks.** The server's fake shell drives a taker shaped as the binding will be (design §6), through the pin:
+  - the bytes handed over with the take-over, echoed after the 101;
+  - a read resuming the thunk parked on `await`;
+  - read-stop and read-start;
+  - the deadline on the fake clock: armed at now plus its time, and passing then, not a millisecond before;
+  - the drain call, once;
+  - a client that reads nothing:
+    - a close waits behind the write it has not read;
+    - a deadline asked for meanwhile is armed;
+    - an abort at that deadline ends the stream, the write told `ECANCELED` and never read;
+  - the stream's close while the thunk waits: `&client-closed`, and no failure;
+  - a raise in the deadline's call, and one in the waiting thunk: each is the taker's failure, recorded, and closes the stream; the thunk's write is never read;
+  - `request-header-values`: every line of a field, in order, through the server's parse; and `request-header`, the first.
+- **The door suite**: an abort is handed to a transport's eighth procedure.
+
+**Records:**
+- decision 0004, from its draft of 2026-10-08;
+- the design's §8 (the binding runs on the fake shell) and §9:
+  - three items decided: a field split over lines, the driver, and a close the transport cannot force;
+  - the send side's bound still M4.3's, by form;
+- the plan's M4.2 and M4.3;
+- the README's `make submodules` line.
+
+**Corrected while writing: the form's "7 of 7".** The form said the fake shell "passed 7 of 7 scenarios at v0.3.0". The prototype ran S1 to S7, and S6, a deadline asked for after the close, was one of the three differences it named. Decision 0004 records six.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **Stage 0, on v0.3.0** (`550cfc1`): both new suites stopped at load, `transport-abort!` unbound, exit 255. The other eight passed: 246.
+- **Stage 1, on v0.4.0** (`560f2b6`): every suite green.
+  - The prediction said 11 checks in the driver suite, as stage 0's did. It has 12, a miscount of my own.
+- **The gap run** (`1c8b920`): the driver suite on v0.4.0, with v0.3.0's fake shell first on the path. Exactly the four predicted went red, each for its reason:
+  - the deadline asked for while the close waits (`#f`);
+  - the abort (no deadline, so the client read the write);
+  - the deadline's raise (it escaped to the test);
+  - the thunk's raise (its write was read).
+
+**Mutants** (`m4-mutations.md`):
+- 27 mutants of the pinned server's fake shell, transport and view, each applied alone to a copy first on the library path, and the baseline.
+- **28 rows, 0 mismatches**, on the first run (specs `7b25053`).
+- Every new or changed check has a killer by value.
+- The drain's "once" is held by two guards, the shell's and the taker's. Taking either away alone leaves the check passing; taking both reddens it.
+
+`make test` green before the commit (Darwin arm64): ten suites, 264 expected passes, every pin ok. `make prod` green.
+
+NEXT: review and the closing ritual, when the owner asks; then M4.3, the binding.
