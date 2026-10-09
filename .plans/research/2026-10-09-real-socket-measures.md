@@ -83,7 +83,8 @@ Through the binding, 16 KiB sends to a client reading nothing returned until it 
 client read nothing for 3 s, then read:
 - For B of 64 KiB and of 1 MiB, the client read every frame and the close, then EOF, on both
   platforms. All of it was in the kernel, every write done, so the close began at once. It
-  was graceful, and the close timeout never armed.
+  was graceful: the shell disarmed the close timeout the binding had armed as it asked for
+  the close.
 - Darwin, 1 MiB, the client then reading nothing, netstat every 10 s: the server's side stayed
   in FIN_WAIT_2 with nothing to send, and the client's Recv-Q held 1,048,965 B, through the
   look at 60 s. By the look at 70 s both were gone. The client, reading at 180 s, read all
@@ -132,3 +133,57 @@ shell, which logs no late resume.
 - **A read's bytevector, kept by R-20.** The heap after a message, less the heap after a
   1-byte one, was 1,016 B for a 1,000-byte message read at once, and 4,112 to 4,136 B for a
   4,000-byte one. Unmutated, it was 8 to 144 B.
+
+## Step 3's review: the server's park, the suite's cap, and a client that stops reading
+
+**The server parks its coroutines by `call/1cc`** (its scheduler's `suspend!`). A shadow
+copy with `call/cc` there, on the server's scheduler alone, measured a coroutine parked at an
+`await` some calls deep (Darwin): 2,000 at once for the heap, and 20,000 wake-and-park cycles
+of one for the time and the allocation.
+
+| depth | parked, `call/1cc` | parked, `call/cc` | a cycle, `call/1cc` | a cycle, `call/cc` |
+|---|---|---|---|---|
+| 4 | 3,836 to 3,864 B | 727 to 728 B | 131 to 136 ns, 403 B | 151 to 154 ns, 493 B |
+| 16 | 4,056 B | 925 to 957 B | 125 to 140 ns, 403 B | 184 to 212 ns, 493 B |
+| 64 | 4,784 B | 1,685 to 1,718 B | 136 to 141 ns, 403 B | 260 to 336 ns, 493 B |
+| 256 | 7,696 B | 4,761 to 4,793 B | 137 to 143 ns, 403 B | 146 to 174 ns, 493 B |
+
+- **Through the server's spike** (`m7-exit-budget.sps`'s last measure), a parked coroutine held
+  3,639 to 3,660 B, and 640 to 679 B with the shadow.
+- **An idle WebSocket**, the binding by `call/cc`, held 8,366 to 8,475 B after the 101 and
+  6,709 to 6,798 B after 10 echoes; with the shadow, 4,867 to 4,879 B and 4,972 to 5,150 B.
+- **An echo round trip** took 101.8 to 112.7 µs and allocated 8,682 to 8,764 B. With the
+  shadow it took 98.9 to 106.4 µs and allocated 8,642 to 8,762 B.
+- **The server's scheduler, waits, shell and contract suites** passed on the shadow: 21, 37,
+  204 and 200.
+- **The server's own records** say why one-shot (its design §5.1 and §5.2):
+  - Its first spike timed suspend and resume alike either way, 30 to 36 ns.
+  - A stale one-shot continuation fails at once, where a stale full one re-ran the program
+    from inside `uv-run`.
+  - It never measured the parked heap by `call/cc`.
+
+So `call/cc` saves about 3 KB a parked coroutine at every depth, for 90 B and 20 to 200 ns
+more a wake and park, and loses that loud failure. Decided by form, "A server slice next":
+the change is the server's own slice, after this step, then a pin here.
+
+**The suite's cap.** The most turns any of its waits took was 366 on Darwin (S-SILENT's 400 ms
+of deadlines) and 205 on Linux. A turn with nothing to do took about 1.2 ms on Darwin (5,000
+in 6,011 ms). At the old cap, 200,000 turns, a wait that never came would have run about 240
+s, past `make test`'s 120 s.
+
+**The park's reference, in the suite's setting.** 100 connections waiting at a bare `await`,
+then 100 by `call/1cc` around `await` (the old `park!`'s shape), then 100 in a receive; the
+heap back to back, five runs each:
+
+| | by `call/1cc`, over `await` | a receive by `call/cc` | a receive by `call/1cc` |
+|---|---|---|---|
+| Darwin | 2,724 to 4,225 B | 12 to 1,027 B | 2,756 to 3,420 B |
+| Linux | 3,908 to 3,971 B | 162 to 781 B | 3,325 to 3,337 B |
+
+A receive by `call/cc` stayed under half the reference in every run, and one by `call/1cc`
+over it.
+
+**A client that stops reading after its handshake** (Darwin): failed at 40,020 and 40,024 ms
+after the take-over, with 1 MiB sent first and with nothing, the ping's 20 s and the pong's
+20 s. A client that sent 17 messages, which the handler never took, and read nothing, was not
+failed in 100 s: with the queue full, reading and the ping clock stop, and nothing is armed.

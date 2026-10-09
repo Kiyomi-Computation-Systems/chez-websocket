@@ -21,8 +21,9 @@ asks, and pings a client gone quiet. So is the opening handshake's check
 and refuses a browser's page from another host unless the handler names it.
 So is the binding (M4): a handler answers what =websocket-accept= returns, and
 its code reads each message with a call that waits, sends, and closes. A client
-that stops reading is cut off after a timeout, never held. An idle connection
-costs the server about 8 KB. Each part is held to its RFC's test vectors and examples, and the
+that stops reading is cut off after a timeout, unless pinging is off or the
+handler has stopped taking its messages. An idle connection costs the server
+about 8 KB. Each part is held to its RFC's test vectors and examples, and the
 binding on a real socket too. The Autobahn lane (M5) is next.
 No compression and no client.
 [[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]] will hold

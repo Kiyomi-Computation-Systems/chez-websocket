@@ -90,7 +90,8 @@ and the door suite.
   it writes too; a frame written in pieces of 64 KiB. Step 3's forms: a receive's
   wait escapes by `call/cc`, about 3 KB a connection less (0005's amendment); and the
   pong stays timed from the ping's queueing, measured with a throttled reader (0001's
-  amendment).
+  amendment). Its review's form: the server's own park by `call/cc`, about 3 KB a waiting
+  coroutine less, in a server slice after step 3, then its release pinned here.
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;
