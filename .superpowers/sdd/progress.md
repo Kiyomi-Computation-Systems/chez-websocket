@@ -1293,3 +1293,35 @@ M4.2'S REVIEW. Branch `fix/m4.2-review`, stacked on `docs/m4.2-3-ledger`. 2026-1
 `make test` green before the commit (Darwin arm64): ten suites, 266 expected passes, every pin ok. `make prod` green.
 
 NEXT: the closing ritual for #32, #35, #33, #34 and this PR, bottom-up, when the owner asks; then M4.3, the binding.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritual": **M4.2, the binding's test driver, and its review** (the two entries above), from the stacked #32, #35, #33, #34 and #36, as 226bafa, 7f3ec58, 6555055, 38b4f76 and 6a9b997, bottom-up.
+- **The squashes.** Each has the tree of the head CI tested:
+  - 226bafa has 4140ae2's, on b1c9a3b;
+  - 7f3ec58 has f688bd6's, on 226bafa: the pin alone on main, as the review asked;
+  - 6555055 has 3532fcf's, on 7f3ec58;
+  - 38b4f76 has a59c2de's, on 6555055;
+  - 6a9b997 has 44e775a's, on 38b4f76.
+
+  #35 was rebased onto #32's squash from a2c6904, #33 onto #35's from 2351f32, #34 onto #33's from 0f9d1dd, and #36 onto #34's from 4d08cae. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #32 at 4140ae2 (run 37912373312): nine suites, 251 expected passes;
+  - #35, rebased onto #32's squash, at f688bd6 (run 37916108397): nine suites, 251;
+  - #33, rebased onto #35's squash, at 3532fcf (run 37916328821): ten suites, 264;
+  - #34, rebased onto #33's squash, at a59c2de (run 37916548401): ten suites, 264;
+  - #36, rebased onto #34's squash, at 44e775a (run 37916761359): ten suites, 266.
+
+  Main's runs on 226bafa (37916077209), 7f3ec58 (37916312031), 6555055 (37916529543) and 38b4f76 (37916744860) each finished before the next merge. Main's run on 6a9b997, 37916959722, was green too, and this reflect was pushed after it.
+- **The subjects.** The squashes' subjects are the PRs' titles, "1 of 4" to "4 of 4". The commits inside #32, #33 and #34 still say "1 of 3" to "3 of 3", from before the review split the pin out.
+- **Branches.** `docs/m4.2-1-decision`, `chore/m4.2-pin`, `test/m4.2-2-driver`, `docs/m4.2-3-ledger` and `fix/m4.2-review` were deleted, local and remote. No PR is open.
+
+**M4.2 is complete on main:**
+- decision 0004 and its amendment;
+- the server pinned at v0.4.0, with chez-libuv v0.7.4;
+- the suites' own path, with the server's fake shell on it;
+- the driver suite.
+
+`make test` green on main: ten suites, 266 expected passes, every pin ok.
+
+NEXT: M4.3, the binding (`(websocket private binding)` and the facade), when the owner asks.
