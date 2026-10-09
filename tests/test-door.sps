@@ -3,10 +3,11 @@
 ;;;
 ;;; chez-http-server's facade loads from the one library path, the pins it
 ;;; carries under it, and the verbs the binding will call behave as its
-;;; v0.3.0 documents them ((http-server transport), (http-server private
+;;; v0.4.0 documents them ((http-server transport), (http-server private
 ;;; waits)): a transport made of procedures hands each its verb's arguments
-;;; in one shape, and `await` refuses where no coroutine may park, before it
-;;; calls `register`.  The binding's own tests will hold the rest.
+;;; in one shape, the abort to its eighth (decision 0024), and `await`
+;;; refuses where no coroutine may park, before it calls `register`.  The
+;;; binding's driver suite holds the rest, on the server's fake shell.
 ;;;
 ;;; And what (websocket handshake) answers is what the server writes: a 101
 ;;; its switch-fault passes against the request's fields, a refusal its
@@ -40,8 +41,8 @@
       (and f (cdr f)))))
 
 ;; noting-transport : (Any -> Any) -> Transport
-;; A transport whose procedures hand `note` what they were called with.
-;; Its read-start delivers two bytes and then the end at once.
+;; A transport whose eight procedures hand `note` what they were called
+;; with.  Its read-start delivers two bytes and then the end at once.
 (define (noting-transport note)
   (make-transport
     (lambda (bv start end written) (note (list 'write (bytevector-length bv) start end written)))
@@ -50,7 +51,8 @@
     (lambda () (note '(close)))
     (lambda (ms on-passed) (note (list 'deadline ms on-passed)))
     (lambda (thunk) (note (list 'on-drain)))
-    (lambda (thunk) (note (list 'on-close)))))
+    (lambda (thunk) (note (list 'on-close)))
+    (lambda () (note '(abort)))))
 
 (run-suite "door"
   (lambda ()
@@ -64,6 +66,10 @@
       (transport-deadline! t #f)
       (test-equal "a deadline disarmed is handed #f twice"
         '(deadline #f #f) (car seen))
+
+      (transport-abort! t)
+      (test-equal "an abort is handed to the transport's eighth procedure"
+        '(abort) (car seen))
 
       (let ((read '()))
         (transport-read-start! t

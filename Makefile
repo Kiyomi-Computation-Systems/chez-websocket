@@ -27,7 +27,9 @@ SRFI_DIR         := $(SERVER_DIR)/vendor/chez-srfi
 # The server's, behind this project's own src/ and tests/.  chez-libuv locates
 # its C shim by an absolute path baked into a config.sls it generates at its
 # build, so only its src/ is needed here.  build/scheme-libs carries
-# (srfi :64).
+# (srfi :64).  The server's tests/ comes last: its (fake-shell) is the
+# binding's test driver (decision 0004), and the directories before it win
+# any name it shares with them.
 BUILD_DIR := build
 SRFI_LIBS := $(BUILD_DIR)/scheme-libs
 EMPTY :=
@@ -37,7 +39,8 @@ LIBDIR_LIST := src tests \
   $(LIBUV_DIR)/src \
   $(HTTPARSE_DIR)/src $(BYTE_MACHINE_DIR)/src \
   $(URIPARSE_DIR)/src \
-  $(SRFI_LIBS)
+  $(SRFI_LIBS) \
+  $(SERVER_DIR)/tests
 LIBDIRS := $(subst $(SPACE),:,$(strip $(LIBDIR_LIST)))
 
 # Each tests/test-*.sps is its own process with its own (exit ...) status.
