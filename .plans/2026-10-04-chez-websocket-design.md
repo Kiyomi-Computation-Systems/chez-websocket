@@ -311,10 +311,12 @@ is refused.
 - **The handshake's answers meet the server's own rules** for what a handler answers,
   its `switch-fault` and `response-fault`. The door suite holds that, beside the
   door's verbs, so the pure suites need no server (M4.1's review).
-- **The binding** runs against a transport made of procedures (`make-transport`, as
-  the door suite does). Its waits need a coroutine, which only the server's shell
-  runs. M4 chooses between the server's fake shell (its `tests/`, put on the test
-  library path) and a door change in the server.
+- **The binding** runs on the server's fake shell (0004, by form in M4.2). Its waits
+  need a coroutine, which only the server's shells run. The server's `tests/` is last
+  on the library path, and its fake shell runs the server's own core, parser and 101,
+  the hand-off, coroutines, and a clock the test moves. The driver suite
+  (`tests/test-driver.sps`) holds, through the pin, what the binding needs of it,
+  since nothing promises the server's test code across versions.
 - **A real socket.** One suite runs a server on `127.0.0.1:0` with a client on the
   same loop, capped by iteration count.
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
@@ -340,9 +342,10 @@ is refused.
     field's lines with commas needs no change in it, and two `Sec-WebSocket-Key` or
     `Sec-WebSocket-Version` lines joined are refused 400, as websockets, coder and ws
     refuse them.
-  - **M4 decides, by form**, with M4.2's door changes, whether the server gives the
-    facade every line.
-- **The binding's test driver** (M4, §8).
+  - **Decided in M4.2, by form** (0004): the server gives every line,
+    `request-header-values` (its v0.4.0), and M4.3's facade joins them with commas.
+- **The binding's test driver**: decided in M4.2, by form: the server's fake shell
+  (0004, §8).
 - **What a connection costs:** measured in M4, beside the server's 20 KB for an idle
   connection and 3,637 to 3,644 B for a parked `await`.
 - **A close the transport cannot force** (M4; found building M3.2).
@@ -356,11 +359,11 @@ is refused.
   - **The server's advice falls short.** Its docs advise a deadline for such a
     client (`docs/handlers.org`). But a deadline's call can only ask for the same
     close again.
-  - **The one way through today is a raise.** A raise in a taker's call closes the
-    stream at once, and the server logs `taker-failed`.
-  - **M4 decides, by form**, between:
-    - a door change in the server: a close that drops what is unsent;
-    - a bound of the binding's own.
+  - **Before v0.4.0, the one way through was a raise.** A raise in a taker's call
+    closes the stream at once, and the server logs `taker-failed`.
+  - **Decided in M4.2, by form** (0004): a door change in the server,
+    `transport-abort!` (its v0.4.0), which closes the stream at once and drops what is
+    unsent. M4.3's binding aborts where it must close a client that does not read.
 - **A client that sends and does not read** (M4; M3.3's review). Nothing in the core
   bounds it.
   - With the queue full, reading and the ping clock stop, and nothing is armed (0001).
@@ -369,7 +372,8 @@ is refused.
   - While reading runs, any bytes re-arm `ping` (0001's amendment of 2026-10-06), so a
     client that keeps sending is never failed with 1011, though it never reads the
     ping.
-  - **M4 decides, by form**, how the send side bounds it.
+  - **M4.3 decides, by form**, how the send side bounds it. With the abort, the bound
+    needs no door change (0004).
 - **When the pong's time starts** (M4.3; M3.3's review). The step arms `pong` as it
   writes the ping, so its 20 s start when the ping is queued. Behind up to 256 KiB
   unsent (§6), and the kernel's buffer, a ping reaches a slow reader late, and a live

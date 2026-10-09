@@ -77,12 +77,16 @@ and the door suite.
   - `Origin`, decided by form here (0022): the request's own host by default, and a
     wrong version refused 400 (0003).
 - **M4.2 the binding's test driver**: the server's fake shell, or a door change in the
-  server (design §8), decided by form.
+  server (design §8), decided by form. Decided (0004): the server's fake shell, and a
+  door change too, `transport-abort!` and `request-header-values` (the server's
+  v0.4.0, pinned here). `tests/test-driver.sps` holds what the binding needs of the
+  fake, through the pin.
 - **M4.3 the binding** `(websocket private binding)` and the facade:
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;
   - the server's drain and the stream's close;
+  - a client that does not read closed with `transport-abort!` (0004);
   - a real-socket suite on `127.0.0.1:0`;
   - a connection's cost, measured;
   - a client silent after the 101, pinged at the ping interval and failed with 1011 a
@@ -91,8 +95,8 @@ and the door suite.
   - when the pong's time starts, measured with a throttled reader (design §9);
   - the send side's bound for a client that sends and does not read, by form
     (design §9);
-  - a field split over lines, which the facade reads only the first line of today
-    (design §9; M4.1).
+  - a field split over lines: the facade reads every line, `request-header-values`
+    joined with commas (0004; design §9; M4.1).
 
 ## M5 — the Autobahn lane
 
