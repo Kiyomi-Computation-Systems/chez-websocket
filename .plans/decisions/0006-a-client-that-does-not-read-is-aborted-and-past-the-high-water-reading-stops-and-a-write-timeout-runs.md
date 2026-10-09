@@ -128,7 +128,8 @@ Weighed:
     16 KiB sends to a client that never read returned 2,867,900 B on Linux before it was
     behind, three runs alike. On macOS it was 770,236 to 2,294,320 B over six runs.
   - **A close behind what the kernel took is graceful.** With every write done, the close
-    begins at once and the close timeout never arms. A client that read nothing for 3 s
+    begins at once, and the shell disarms the close timeout the binding armed as it
+    asked for the close. A client that read nothing for 3 s
     then read every frame and the close, after 64 KiB and after 1 MiB, on both platforms.
     The close timeout reaches only what the binding counts unsent.
 

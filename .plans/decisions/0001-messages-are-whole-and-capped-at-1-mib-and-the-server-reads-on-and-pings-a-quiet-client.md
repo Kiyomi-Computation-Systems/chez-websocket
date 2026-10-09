@@ -239,6 +239,9 @@ tungstenite and ws send no ping of their own (the [peer defaults](../research/20
   The cause is what the kernel holds ahead of the ping, which no server sees. A handler
   whose clients read slowly after large bursts can give a longer ping timeout,
   `CHEZ_WS_PING_TIMEOUT` (`(websocket limits)`).
-- **A client that stops reading is still failed within the interval and the timeout**
-  while what is unsent stays under the high water.
+- **A client that stops reading after its handshake is failed at the interval and the
+  timeout:** 40.02 s after the take-over, whether nothing or 1 MiB had been sent, the
+  kernel taking it (M4.3 step 3's review, Darwin). That needs the clock running. With
+  pinging off, or with the queue full because the handler takes nothing, nothing is
+  armed: a client that sent 17 messages and read nothing was not failed in 100 s.
 

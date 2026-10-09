@@ -436,11 +436,19 @@ is refused.
   iteration count, as the server's own socket lane does it (its `(shell-testing)`, on
   chez-libuv's `(uv-testing)`, both borrowed onto the suites' path). Each check has a
   server of its own, closed with its clients before the next. The suite:
-  - reads the server's log for `late-resume`, through the drain's close under a waiting
-    receive and a send that waited;
-  - fails a silent client on the shell's own timer;
-  - measures the heap back to back, for a read's bytevector and for a receive's wait;
+  - reads the server's log for `late-resume`, through the drain's close under a receive
+    seen to wait and a send seen to wait;
+  - fails a silent client on the shell's own timer, timing the ping and the close from
+    what the server writes, through a transport over the shell's (`wrapping`, shared with
+    the binding suite in `(ws-play)`);
+  - measures the heap back to back: a read's bytevector against half its frame, and a
+    receive's wait against a wait by `call/1cc` measured in the same run;
+  - caps each wait at 4,000 turns, over ten times the most any took, and ends a check's
+    waiting at the first wait that reaches it, so a check that cannot finish costs about
+    5 s, not the suite;
   - and its numbers are both platforms' (the [measures](research/2026-10-09-real-socket-measures.md)).
+  The driver suite holds what it needs of the server's libuv shell and `(shell-testing)`,
+  as it holds the fake's.
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
   server built from this library, 301 cases, the image pinned by digest. A ratchet
   holds each case's result (0022).
@@ -480,6 +488,14 @@ is refused.
     parked at `await` held 6,390 B.
   - **The receive's wait escaped by a one-shot continuation**, which held a stack segment
     while it waited. By `call/cc` it holds about 3 KB less (0005's amendment, by form).
+  - **The server parks its coroutines the same way** (M4.3 step 3's review). Its
+    scheduler's `suspend!` is `call/1cc`, and a parked coroutine held 3,639 to 3,660 B. By
+    `call/cc` it held 640 to 679 B, and an idle WebSocket 4.9 KB, not 8.4 KB. The cost is
+    90 B and 20 to 200 ns more each wake and park, and a stale continuation no longer fails
+    at once ([the measures](research/2026-10-09-real-socket-measures.md)).
+    - **Decided by form, "A server slice next"**: the server changes `suspend!` in a
+      slice of its own after M4.3 step 3, keeping a check that a coroutine's continuation
+      is not invoked twice; then its release is pinned here, alone.
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`
