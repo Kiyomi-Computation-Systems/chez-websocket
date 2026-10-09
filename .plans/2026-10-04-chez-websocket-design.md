@@ -244,7 +244,7 @@ are stepped through the core in place, and the actions run at once:
 | `deliver` | the message queued for `websocket-receive`, which is resumed if it waits |
 | `read-stop`, `read-start` | the transport's verbs |
 | `arm-deadline`, `disarm-deadline` | `transport-deadline!`, the transport's one deadline, armed for the kind's time (`ping` the ping interval, `pong` the ping timeout, `close` the close timeout); when it passes, a `deadline-passed` |
-| `close-stream` | `transport-close!` |
+| `close-stream` | `transport-close!`, which closes once what is unsent has been written; where the client is not reading it, `transport-abort!`, which closes at once and drops it (0004; M4.3 names those places) |
 | `closed` | the WebSocket's end: every receive and send after it raises `&websocket-closed` |
 
 - **`websocket-receive`** answers the oldest queued message and steps `(taken
@@ -312,11 +312,21 @@ is refused.
   its `switch-fault` and `response-fault`. The door suite holds that, beside the
   door's verbs, so the pure suites need no server (M4.1's review).
 - **The binding** runs on the server's fake shell (0004, by form in M4.2). Its waits
-  need a coroutine, which only the server's shells run. The server's `tests/` is last
-  on the library path, and its fake shell runs the server's own core, parser and 101,
-  the hand-off, coroutines, and a clock the test moves. The driver suite
-  (`tests/test-driver.sps`) holds, through the pin, what the binding needs of it,
-  since nothing promises the server's test code across versions.
+  need a coroutine, which only the server's shells run. Its fake shell runs the
+  server's own core, parser and 101, the hand-off, coroutines, and a clock the test
+  moves.
+  - **The suites' path.** The server's `tests/` is last on the suites' library path
+    (`TEST_LIBDIRS`), with chez-httparse's test harness, which the server's
+    `(response-reader)` needs to read what the client reads. Neither is on the path
+    `make run` and `make dev` use, and `make test` refuses to run if one is.
+  - **The driver suite** (`tests/test-driver.sps`) holds, through the pin, what the
+    binding needs of the fake, since nothing promises the server's test code across
+    versions. It also checks that no borrowed library has one of this project's names.
+  - **How a test plays the client.** `fake-shell-feed-input!` delivers the client's
+    bytes only while the taker reads, as libuv does, so a test of read-stop feeds its
+    bytes that way. `fake-shell-deliver!` hands over one event whatever the read
+    state, and places a read, or the client's end, between two turns (M4.2's
+    review).
 - **A real socket.** One suite runs a server on `127.0.0.1:0` with a client on the
   same loop, capped by iteration count.
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
@@ -346,8 +356,11 @@ is refused.
     `request-header-values` (its v0.4.0), and M4.3's facade joins them with commas.
 - **The binding's test driver**: decided in M4.2, by form: the server's fake shell
   (0004, §8).
-- **What a connection costs:** measured in M4, beside the server's 20 KB for an idle
-  connection and 3,637 to 3,644 B for a parked `await`.
+- **What a connection costs:** measured in M4.3, beside the server's own, measured
+  again at the pin. The server's records give about 20 KB for an idle connection (its
+  CHANGELOG's `[0.1.0]`) and 3,637 to 3,644 B for a parked `await` (its design §5.2).
+  Both are from its v0.1.0, before the guards its v0.4.0 hoisted and chez-libuv v0.7.4
+  (M4.2's review).
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`

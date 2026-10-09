@@ -88,7 +88,8 @@ and the door suite.
   - the server's drain and the stream's close;
   - a client that does not read closed with `transport-abort!` (0004);
   - a real-socket suite on `127.0.0.1:0`;
-  - a connection's cost, measured;
+  - a connection's cost, measured beside the server's own, measured again at the pin
+    (design §9);
   - a client silent after the 101, pinged at the ping interval and failed with 1011 a
     timeout later, so a binding that never arms `ws-deadline`'s deadline fails it
     (M3.3's review);

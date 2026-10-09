@@ -14,8 +14,19 @@
 ;;;     not read, a deadline asked for meanwhile is armed, and an abort ends
 ;;;     the stream, the write dropped;
 ;;;   - the stream's close while the thunk waits, and a taker's raise;
-;;;   - every line of a field.
-(import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell)
+;;;   - every line of a field;
+;;;   - and that the test code borrowed onto the suites' path shares no
+;;;     library name with this project's.
+;;;
+;;; How a test plays the client.  `fake-shell-feed-input!` delivers the
+;;; client's bytes only while the taker reads, as libuv does, so a test of
+;;; read-stop feeds its bytes that way.  `fake-shell-deliver!` hands the taker
+;;; one event whatever its read state, a read already under way, and a test
+;;; uses it to place a read, or the client's end, between two turns.  What
+;;; the client reads is read back as a client would, by the server's
+;;; (response-reader), on chez-httparse's strict response parser.
+(import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
+        (only (chezscheme) directory-list file-directory? library-extensions)
         (only (http-server limits) default-limits)
         (websocket handshake))
 
@@ -43,17 +54,49 @@
 ;; arrived : Bytevector -> Event — a read of all of bv, as the shell delivers it.
 (define (arrived bv) (list 'bytes-arrived bv 0 (bytevector-length bv)))
 
-;; client-reads : FakeShell -> (List String Bytevector)
-;; What the client has read: the status code of the head it read first, and
-;; every byte after that head.
+;; client-reads : FakeShell -> (List (U Nat Datum) Bytevector)
+;; What the client has read: the status of the head it read first, as the
+;; server's (response-reader) reads that head alone, and every byte after
+;; it.  A head the reader does not finish exactly at its end is answered
+;; `(unread status)`, with the reader's last status.
 (define (client-reads sh)
   (let* ((all (concat (fake-shell-writes sh)))
-         (n (bytevector-length all)))
-    (let find ((i 0))
-      (cond ((> (+ i 4) n) (list "no head" all))
-            ((equal? (copy all i (+ i 4)) (b "\r\n\r\n"))
-             (list (utf8->string (copy all 9 12)) (copy all (+ i 4) n)))
-            (else (find (+ i 1)))))))
+         (n (bytevector-length all))
+         (blank (b "\r\n\r\n")))
+    (let scan ((i 0))
+      (cond ((> (+ i 4) n) (list 'no-head all))
+            ((equal? (copy all i (+ i 4)) blank)
+             (let ((r (read-response (copy all 0 (+ i 4)) #f #f)))
+               (list (if (eq? (list-ref r 4) 'complete) (car r) (list 'unread (list-ref r 4)))
+                     (copy all (+ i 4) n))))
+            (else (scan (+ i 1)))))))
+
+;; library-names : String -> (Listof Datum)
+;; The name each library under `dir` gives, at any depth, read with Chez's
+;; own reader: a file whose name ends in an extension Chez looks for a
+;; library under, and whose first datum is a library form.
+(define (library-names dir)
+  (apply append
+    (map (lambda (name)
+           (let ((path (string-append dir "/" name)))
+             (cond ((char=? (string-ref name 0) #\.) '())
+                   ((file-directory? path) (library-names path))
+                   ((exists (lambda (x)
+                              (let ((n (string-length name)) (k (string-length x)))
+                                (and (> n k) (string=? (substring name (- n k) n) x))))
+                            (map car (library-extensions)))
+                    (let ((form (call-with-input-file path read)))
+                      (if (and (pair? form) (eq? (car form) 'library) (pair? (cdr form)))
+                          (list (cadr form))
+                          '())))
+                   (else '()))))
+         (directory-list dir))))
+
+;; The test code the suites borrow, last on their path (the Makefile's
+;; TEST_ONLY_DIRS), and this project's own libraries.
+(define borrowed
+  '("vendor/chez-http-server/tests" "vendor/chez-http-server/vendor/chez-httparse/test/support/harness"))
+(define ours '("src" "tests"))
 
 ;; A taker shaped as the binding will be (design §6).  Its take-over keeps
 ;; the bytes handed over, registers its drain and close calls, reads into a
@@ -156,7 +199,7 @@
     (let* ((t (make-taker))
            (sh (connect t none echo (concat (list handshake hello)))))
       (test-equal "a frame sent with the handshake is handed to the take-over, and the client reads its echo after the 101"
-        (list "101" hello) (client-reads sh)))
+        (list 101 hello) (client-reads sh)))
 
     (let* ((t (make-taker))
            (sh (connect t none echo handshake))
@@ -165,7 +208,7 @@
       (fake-shell-settle! sh)
       (let ((read (client-reads sh)))
         (test-equal "a read's bytes resume the thunk parked on await, and the client reads its echo"
-          (list 'parked "101" hello) (cons parked read))))
+          (list 'parked 101 hello) (cons parked read))))
 
     (let* ((t (make-taker))
            (sh (connect t none echo handshake)))
@@ -176,7 +219,26 @@
           (fake-shell-settle! sh)
           (let ((read (client-reads sh)))
             (test-equal "a stopped read takes no delivery, and a read started again takes the next"
-              (list 0 (bytevector-length hello) "101" hello) (cons* stopped started read))))))
+              (list 0 (bytevector-length hello) 101 hello) (cons* stopped started read))))))
+
+    ;; The binding stops reading from inside its read, once its queue is
+    ;; full (0001): three frames sent one a read, and the taker stops after
+    ;; the second.
+    (let* ((t (make-taker))
+           (sh (connect t none echo handshake))
+           (reads 0))
+      (transport-read-start! (taker-transport t)
+        (lambda (bv from to)
+          (set! reads (+ reads 1))
+          ((on-bytes t) bv from to)
+          (when (= reads 2) (transport-read-stop! (taker-transport t))))
+        (on-end t))
+      (let ((delivered (fake-shell-feed-input! sh (concat (list hello hello hello)) (bytevector-length hello))))
+        (fake-shell-settle! sh)
+        (let ((read (client-reads sh)))
+          (test-equal "a read stopped from inside the taker's read takes no later delivery: of three frames sent one a read, two are taken and echoed"
+            (list (* 2 (bytevector-length hello)) 101 (concat (list hello hello)))
+            (cons delivered read)))))
 
     (let* ((t (make-taker))
            (sh (connect t (lambda (tr) (transport-deadline! tr 20000 (lambda () (note! t 'passed))))
@@ -200,17 +262,20 @@
 
     ;; A client that sends "Hello" and ends, and reads nothing until the
     ;; test delivers the later turns: the echo is outstanding when the
-    ;; thunk asks for the close.
+    ;; thunk asks for the close.  A deadline armed before the close, as the
+    ;; binding's ping is, shows whether the close has begun: a close begun
+    ;; disarms it, as the libuv shell's does.
     (let* ((t (make-taker))
-           (sh (connect t none echo handshake)))
+           (sh (connect t (lambda (tr) (transport-deadline! tr 60000 (lambda () (note! t 'passed))))
+                        echo handshake)))
       (fake-shell-deliver! sh (arrived hello))
       (fake-shell-deliver! sh '(eof))
-      (let ((before (log-of t)))
+      (let ((before (list (log-of t) (fake-shell-armed sh))))
         (fake-shell-settle! sh)
-        (let* ((after (log-of t))
+        (let* ((after (list (log-of t) (fake-shell-armed sh)))
                (read (client-reads sh)))
-          (test-equal "a close asked for behind a write the client has not read waits: the client reads the write, then the stream closes"
-            (list '((end eof)) '((end eof) (wrote #f) closed) (list "101" hello))
+          (test-equal "a close asked for behind a write the client has not read waits: the deadline armed before it stays armed, and once the client reads the write the stream closes, the deadline disarmed"
+            (list (list '((end eof)) 65000) (list '((end eof) (wrote #f) closed) #f) (list 101 hello))
             (list before after read)))))
 
     (let* ((t (make-taker))
@@ -226,7 +291,7 @@
         (let* ((log (log-of t))
                (read (client-reads sh)))
           (test-equal "an abort at that deadline ends the stream: the write is told ECANCELED, the client reads none of it, and the close call comes"
-            (list '((end eof) passed (wrote ECANCELED) closed) (list "101" nothing))
+            (list '((end eof) passed (wrote ECANCELED) closed) (list 101 nothing))
             (list log read)))))
 
     (let* ((t (make-taker))
@@ -255,7 +320,7 @@
              (log (log-of t))
              (read (client-reads sh)))
         (test-equal "a waiting thunk's raise is the taker's failure, and ends the stream at once: its write told ECANCELED, and never read"
-          (list '(failed) '((wrote ECANCELED) closed) (list "101" nothing))
+          (list '(failed) '((wrote ECANCELED) closed) (list 101 nothing))
           (list failures log read))))
 
     ;; A field over two lines (RFC 9110 §5.3): the server's parse keeps each.
@@ -275,4 +340,16 @@
         4096)
       (fake-shell-settle! sh)
       (test-equal "request-header-values reads every line of a field, in order, through the server's parse, and request-header the first"
-        '(("keep-alive" "Upgrade") "keep-alive" ("chat" "superchat") ()) seen))))
+        '(("keep-alive" "Upgrade") "keep-alive" ("chat" "superchat") ()) seen))
+
+    ;; Chez takes a library from the first directory on the path that holds
+    ;; its name, so a borrowed library named as one of ours would be ours to
+    ;; whatever imports it.
+    (let* ((theirs (apply append (map library-names borrowed)))
+           (mine (apply append (map library-names ours))))
+      (test-equal "no library of the test code borrowed onto the suites' path has the name of one of this project's, the fake shell and the response reader among them"
+        '(ours fake-shell response-reader ())
+        (list (if (member '(websocket handshake) mine) 'ours 'none-of-ours)
+              (if (member '(fake-shell) theirs) 'fake-shell 'no-fake-shell)
+              (if (member '(response-reader) theirs) 'response-reader 'no-response-reader)
+              (filter (lambda (name) (member name mine)) theirs))))))
