@@ -135,3 +135,30 @@ advising HSTS and an exact https origin.
   `http`, and the site's https pages are refused 403 until Caddy's `trusted_proxies`
   names that hop.
 - **The check only ever refuses more** than M4.1's: with no value it is the same.
+
+## Amendment (2026-10-09): a list in X-Forwarded-Proto, by form, M4.3 step 1's review
+
+**The gap.** M4.3's facade reads every line of a field, joined with commas (0004). So
+`X-Forwarded-Proto` over two lines, `https` then `http`, became "https, http". That
+names neither scheme, and `same-host` stopped comparing the Origin's. M4.1, reading the
+first line, had compared `https`. A single line "https, http" was never compared.
+
+**Measured, from source** (the review's research, 2026-10-09):
+- **Caddy v2.11.7** (`reverseproxy.go:997-1010`) sets the field to the scheme its client
+  used, one value, unless the peer is a trusted proxy. Then it keeps the last line it
+  was sent, whole (`lastHeaderValue`, `:1636-1645`). It never appends.
+- **nginx's** `proxy_set_header X-Forwarded-Proto $scheme` replaces any value a client
+  sent (`ngx_http_proxy_module.c`).
+- **No standard orders the field's values.** RFC 7239 §4 puts the first proxy's element
+  first: the client-facing hop. MDN gives X-Forwarded-For the same order.
+
+**Decided, by form: "Leftmost element"** (the recommended). The field's first element,
+the OWS around it passed over, is the scheme compared: the client-facing hop's.
+"https, http", on one line or two, compares `https`. Behind Caddy's default there is one
+value, so nothing changes there.
+
+Weighed:
+- **"First line only"**, M4.1's reading: a one-line list would still not be compared.
+- **"Refuse a list"**: it would refuse clients behind a trusted proxy chain that
+  forwards one, which Caddy passes on whole.
+- **"Leave it"**, documented.
