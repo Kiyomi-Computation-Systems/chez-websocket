@@ -1785,3 +1785,15 @@ NEXT: the PR; review and the closing ritual when the owner asks; then the pin to
 - `make test` green before the commit (Darwin arm64): twelve suites, 348 expected passes, every pin ok.
 
 NEXT: the PRs, #57 and this one stacked on it; the closing ritual when the owner asks, bottom-up; then the pin to the server's v0.4.1 (520f70e) alone; then M5, the Autobahn lane, whose image needs the owner's word to pull.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "all green, do closing ritual": **the v0.4.1 fit and its review, as two stacked PRs** (the two entries above), bottom-up.
+- **#57**, at 717b538, was squashed as c9b3e7e (tree 717b538's, parent 43b18e7). Its run, 38001010340, passed: twelve suites, 348 expected passes. It merged without `--delete-branch`, since #58 was based on it. Main's run on the squash, 38006065674, passed with the same counts before #58 merged.
+- **#58** was retargeted to main and rebased from 717b538 onto c9b3e7e: 3bef5d1 became 2e35bd3, the tested tree, pushed with the lease. CI passed on both heads (38005793169 on 3bef5d1, 38006098548 on 2e35bd3), each twelve suites and 348. It merged as 851bff0 (tree 2e35bd3's, parent c9b3e7e). Main's run on the squash, 38006442242, passed with the same counts.
+- **Branches.** Both deleted, local and remote; this checkout is on main, fast-forwarded. No PR is open.
+- **Alongside**, in chez-http-server: #161, what the full drain keeps, on its plan's open list (aa7dc93).
+
+`make test` green on main: twelve suites, 348 expected passes, every pin ok.
+
+NEXT: the pin to the server's v0.4.1 (520f70e) alone, its every suite measured green on v0.4.1 already (#57, #58); then M5, the Autobahn lane, whose image needs the owner's word to pull.
