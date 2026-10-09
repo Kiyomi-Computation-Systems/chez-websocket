@@ -108,7 +108,8 @@ in this order, answering the first failure:
     `http` or `https`: the scheme its client used, as Caddy writes it and no browser
     can. Then `same-host` also needs the Origin's scheme to be that one. Any other
     value, or none, is not compared, as coder and gorilla compare no scheme (0003's
-    amendment).
+    amendment). A list is read by its leftmost element, the client-facing hop's, by
+    RFC 7239 §4's order (0003's amendment of 2026-10-09, by form).
   - A handler that names none gets `same-host`, coder's and gorilla's way.
   - A request with no `Origin` is accepted whatever the handler names. It is not a
     browser's, and a client that is not a browser may send any `Origin` it likes.
@@ -280,24 +281,37 @@ are stepped through the core in place, and the actions run at once:
     the caller's mistake, which a drain's close would make of a handler's next send
     (M4.3).
 - **`websocket-close!`** steps a `close` (1000 by default) and returns; the handshake
-  finishes on its own.
+  finishes on its own. A code an endpoint may not send, or a reason past 123 bytes, is
+  refused naming `websocket-close!`, by the core's `ws-sendable-close?`. The binding
+  asks the core whether the connection is open (`ws-open?`), and keeps no phase of
+  its own (M4.3's review).
+- **Many senders, one receive** (0005, by form). Any number of coroutines may wait to
+  send on a WebSocket, and all go on together at the low water. One receive may wait,
+  and a second is refused naming `websocket-receive`. Each wait knows the WebSocket
+  whose procedure runs on its coroutine, from a parameter set around the procedure.
 - **The stream's close.** When the stream closes, whoever closed it, the wait the
   thunk is in raises `&client-closed` (0023). The binding turns that into the
   connection's end: 1006, unless the closing handshake had finished.
-  - A wait of the binding's, a receive's or a send's, steps it as the stream's end,
-    `(end closed)`, so the core reads what waits for the queue first.
-  - **The binding registers no close call** (`transport-on-close!`). Both of the
-    server's shells tell the wait before they run one (its `shell.sls`,
-    `handle-closed!`; its fake's `close-begun!`). So a close call that woke the wait
-    would come after the wait had ended, and the server would log `late-resume
-    await`. Tried in M4.3 and taken out.
-  - A send into a stream closed under it is told at the next wait.
+  - **The close call** (`transport-on-close!`) steps the stream's end, `(end closed)`,
+    so the core reads what waits for the queue first. Both of the server's shells tell
+    the wait before they run the close call (its `shell.sls`, `handle-closed!`; its
+    fake's `close-begun!`; the driver suite's D-OUTSIDE holds the order). So the close
+    call first marks the wait the WebSocket's procedure is in, wherever it waits, as
+    ended, and nothing wakes it: that would be a late resume.
+    - M4.3 first registered a close call that woke every wait, and took it out for
+      that late resume. Without one, a procedure that spent the `&client-closed` in a
+      wait of its own waited forever at its next receive. Its review put it back as
+      above.
+  - **A wait's `&client-closed`** on the procedure's own WebSocket ends the wait, and
+    the receive or send sees the end. On another connection's WebSocket it goes on
+    out, to the procedure whose stream closed, and the other connection goes on (0005).
 - **The server's drain.** On `transport-on-drain!`, the binding starts a closing
   handshake with 1001, "going away" (§7.4.1).
 - **The procedure's end.**
   - If it returns, the binding closes with 1000.
-  - If it lets `&websocket-closed` out, nothing more is done or logged. Nor if it lets
-    `&client-closed` out, from a wait of its own: that is the stream's close (M4.3).
+  - If it lets its own WebSocket's `&websocket-closed` out, nothing more is done or
+    logged. Nor if it lets `&client-closed` out: that is its stream's close (M4.3).
+    Another WebSocket's `&websocket-closed` is any other raise (M4.3's review).
   - Any other raise closes with 1011, and is logged `websocket-handler-failed`, its
     detail as the server logs one: a condition as `display-condition` shows it, on one
     line, a record by its type's name, a string displayed, and anything else written.
@@ -362,9 +376,19 @@ is refused.
       (`(http-server switch)`), as the server does when its drain times out;
     - reads a wait's end before the client has read the close, so the end's own
       wake is seen, not the stream's later close.
-  - **What the fake cannot show.** It logs a late resume nowhere, so the binding
-    letting go of a resume it has called, or one whose wait raised, is held on the
-    real socket (M4.3's step 3).
+    - plays two connections at once, on two fakes, one procedure sending to or
+      receiving from the other's WebSocket (M4.3's review);
+    - holds what a read costs the binding: no more than a taker that only re-arms its
+      deadline, the read and take events being filled in, not made, and a step's
+      actions performed by a loop, not by `for-each` over a closure;
+    - runs with no `CHEZ_WS_` variable set, which `make test` sees to, and refuses to
+      run otherwise, since the binding reads them as the program starts.
+  - **What the fake cannot show.** It logs a late resume nowhere. So these are held on
+    the real socket (M4.3's step 3):
+    - the binding letting go of a resume it has called;
+    - its close call marking its procedure's wait ended.
+    - Whether a read's bytevector is let go after its step is held by step 3's
+      footprint.
 - **A real socket.** One suite runs a server on `127.0.0.1:0` with a client on the
   same loop, capped by iteration count.
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
@@ -432,6 +456,14 @@ is refused.
   (`asyncio/connection.py:822`, `:828`). Arming `pong` on the ping's `written` instead
   would leave nothing armed for a ping stuck behind a client that does not read.
   M4.3's real-socket suite measures it with a throttled reader.
+- **A late resume after a handler's own deadline** (M4.3's review; 0005).
+  - **The gap.** A handler's `with-deadline` can end a waiting receive. A message
+    delivered in that turn, before the coroutine runs, wakes a wait that has ended, and
+    the server logs `late-resume await`. The message stays queued, and the next
+    receive gets it.
+  - **What a fix needs.** The server's waits give no way to ask whether a wait still
+    stands. A door change would: a resume that answers whether it woke, quietly.
+  - Not asked of the server yet.
 - **Every read re-arms the transport's deadline** (M4.3; M3.3's review): 55 to 57 ns a
   read in the review's measure of the transport's `taker-deadline!`, about 0.2% of a
   loopback read. Re-arming only when the deadline passes, from a flag a read sets,
