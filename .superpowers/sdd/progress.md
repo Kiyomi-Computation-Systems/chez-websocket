@@ -1459,3 +1459,55 @@ MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritu
 `make test` green on main: eleven suites, 316 expected passes, every pin ok.
 
 NEXT: M4.3 step 2, a client that does not read: the abort where the binding closes such a client, and the send side's bound by form, measured on this binding first. Step 3's real socket carries the five survivors: four late resumes the fake logs nowhere, and a read's bytevector kept.
+
+---
+
+M4.3 STEP 2: a client that does not read. Branches `docs/m4.3-2-design`, `feat/m4.3-2-bound` and `docs/m4.3-2-ledger`, stacked on main 1d8ed80 (by form, "Three stacked PRs": about 1,240 lines). 2026-10-09.
+
+**Measured first**, on main and on the server's fake shell (Darwin arm64): a client that reads nothing after the 101, an hour of fake time.
+- Each of the five closes the binding asks for (the close timeout, the pong's, a 1002, a close's echo, the stream's end) waited the hour behind one unread write of 4 to 7 B.
+- A send waiting past the high water with the queue full: nothing armed, the hour.
+- The same with the client pinging every 10 s: each ping re-armed the clock; 734 B of pongs held.
+- 1 MiB of 125-byte pings: all read, 1,016,514 B of pongs held.
+- A client reading one write a second, 300 messages of 1 KiB: failed with 1011 at 45 s, 255 sent, the pong's time running from the queued ping.
+
+Three bounds were prototyped and measured the same way, and the peers read at their tags (a Sonnet agent; its citations checked by hand). None of websockets, ws, coder and gorilla bounds a waiting send itself.
+
+**Decision 0006:**
+- **Where the binding aborts**, the design's to name (0004): every close gives the client the close timeout to read what was written, then aborts; the close timeout's own passing aborts at once, as websockets' `close_timeout` ends in `transport.abort()`.
+- **By form, "Reading stops past the high water"**: the core counts what is written and not yet done. Past the high water the client is behind: reading and the ping clock stop, and a write timeout runs, re-armed by each done. At the low water reading starts again. The timeout's passing aborts with 1006, logged `write-timeout`.
+- **By form, "60 s, its own variable"**: `CHEZ_WS_WRITE_TIMEOUT`, the server's own `CHEZ_HTTP_WRITE_TIMEOUT`.
+
+**What landed:**
+- `(websocket limits)`: `write-timeout-ms`, at least 1 s; the facade exports its accessor; `make test` unsets the variable.
+- `(websocket protocol)`: `(written nbytes)`, `(abort-stream)`, the `write` kind and `ws-behind?`. A read stops at the frame that passes the high water, the rest waiting, so a client that does not read makes the server hold the high water and one write past it.
+- `(websocket private binding)`: each done stepped, with an event made once; `abort-stream` performed; `close-stream` arms the close timeout, then asks for the close; a send waits while the core says behind. The binding keeps no unsent count of its own.
+
+**Measured again on this tree**, the same probe:
+- The closes: the close timeout aborted at 15 s; the pong's at 55 s; the 1002, the echo and the end 10 s after each was asked for.
+- A send waiting, with the queue full or the client pinging: aborted at 65 s, 14 B held.
+- 1 MiB of pings: reading stopped at 274,432 B in; 2,065 pongs, 262,255 B, held; aborted at 65 s.
+- The slow reader: all 300 sent by 197 s. Then failed at 237 s, its ping behind the low water's 64 KiB, as the design's §9 now says: step 3's throttled reader.
+- A send and its done, a client that reads: 1,381 B a cycle as on main, about 383 ns against 357. A send that waits for every done: 48.7 B more, the append and the disarm of falling behind and catching up.
+
+**Where it departs from the plan and the design**, each recorded in the design:
+- **The bound is the core's, not the binding's.** The form chose it over a binding-only send timeout, which left pongs unbounded.
+- **A new variable**, by form.
+- **The close timeout now aborts** (M3.2's close timeout closed): the core answers `(abort-stream)`.
+- **X-FOREIGN's client reads before it sends**: B reads nothing while behind, and libuv delivers nothing to a stream that does not read.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **Stage 0**: the limits and protocol suites stopped at load; the binding suite red in exactly its six new checks.
+- **Stages 1 to 3**: the limits, the core, the binding, each as predicted, to 335.
+- **Stage 4**: with `CHEZ_WS_WRITE_TIMEOUT` set, the binding suite refused to run until the Makefile unset it. My prediction's count for the other ten suites was wrong, 320 for 284; the behaviour was as predicted.
+- **Stage 5**: four checks the mutant plan found missing, and a redundant clause taken out: 337.
+
+**Mutants:**
+- **Run 1: 42 rows, 41 mutants and the baseline, 0 mismatches.**
+- **Run 2: step 1's K-16 re-cut**, 0 mismatches.
+- **Every new or changed check has a killer by value.**
+- **One survivor, as predicted**: the close's deadline armed after the close is asked for, which neither shell can tell from before.
+
+`make test` green before each commit (Darwin arm64): eleven suites, 337 expected passes, every pin ok. `make prod` green.
+
+NEXT: the PRs by form; review and the closing ritual when the owner asks; then step 3: the real socket and the measures, the five survivors of step 1's review, and the pong's timing with a throttled reader.
