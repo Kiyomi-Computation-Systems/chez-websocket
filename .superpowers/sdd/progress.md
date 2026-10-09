@@ -1653,3 +1653,53 @@ M4.3 STEP 3, THE REAL SOCKET. On "lets start step 3". Branches `docs/m4.3-3-deci
 With this, every bullet of the plan's M4.3 is held, and M4 is done once it merges.
 
 NEXT: the PRs by form; review and the closing ritual when the owner asks; then M5, the Autobahn lane, whose image needs the owner's word to pull.
+
+---
+
+M4.3 STEP 3'S REVIEW. `/code-review` at xhigh over #50 to #52: 13 findings, the owner's "fix all". Branches `docs/m4.3-3-review-records`, `fix/m4.3-3-review-helpers`, `fix/m4.3-3-review-socket` and `docs/m4.3-3-review-ledger`, stacked on `docs/m4.3-3-ledger`. By form, "Four stacked PRs": the records +88/−11; the helpers +101/−82, measured green alone at 348; the socket suite and the driver +208/−147; then this ledger. 2026-10-09.
+
+**Measured first** ([the research record](../../.plans/research/2026-10-09-real-socket-measures.md), its review section; probes in the scratch `s3rv/`):
+- **The suite's cap** (finding 1). The most turns any wait took was 366 on Darwin and 205 on Linux. An idle turn took about 1.2 ms on Darwin, so the old cap, 200,000 turns, ran a wait that never came for about 240 s, past `make test`'s 120 s.
+- **The park's reference** (finding 4). A wait by `call/1cc` around `await`, the old `park!`'s shape, held 2,724 to 4,225 B over a bare `await` in the suite's own setting. A receive by `call/cc` held 12 to 1,027 B, and one by `call/1cc` 2,756 to 3,420 B, on Darwin and Linux.
+- **The server's park** (finding 7). The server parks every coroutine by `call/1cc` in its scheduler's `suspend!`.
+  - By `call/cc` a parked coroutine held 640 to 679 B, not 3,639 to 3,660 B. An idle WebSocket held 4.9 KB, not 8.4 KB.
+  - The server's scheduler, waits, shell and contract suites passed on that shadow.
+  - By depth, `call/cc` saved about 3 KB at every depth, for 90 B and 20 to 200 ns more each wake and park.
+  - The owner asked why the server chose one-shot continuations. Its records answer: its spike timed them alike, a stale one fails at once, and it never measured the parked heap by `call/cc`.
+- **A client that stops reading** (finding 9). It was failed 40.02 s after the take-over, with or without 1 MiB sent first. One whose 17 messages the handler never took was not failed in 100 s.
+
+**Decided by form:** "A server slice next (Recommended)". After this step the server changes `suspend!` in a slice of its own, keeping a check that a coroutine's continuation is not invoked twice, and its release is then pinned here.
+
+**What landed:**
+- **`tests/ws-play.sls`** (finding 12): the frames, `accepting`, `wrapping`, `logged`, `limits` and `closed`, moved verbatim from the binding suite, which imports them. The socket suite uses them too.
+- **`tests/test-socket.sps`:**
+  - the cap is 4,000 turns, and a check's first wait to reach it ends that check's waiting (finding 1);
+  - S-SILENT times the ping and the close from what the server writes, through a transport over the shell's. The interval is 100 ms and the timeout 300 ms, each with a window of its own (findings 2 and 5);
+  - S-DRAIN and S-SENDERS see the procedure waiting before they go on (finding 6);
+  - a binary's payload is not copied, and the 8 MiB wait counts bytes first (finding 11);
+  - S-PARK compares a receive's wait with the in-run reference, and says status 3 if the reference falls under 1 KiB (finding 4);
+  - S-LETGO counts its messages.
+- **`tests/test-driver.sps`:** D-SHELL holds the server's libuv shell as the socket suite drives it (finding 8).
+- **The records** (findings 3, 7, 9, 10 and 13):
+  - the README qualifies "never held", and its long line is wrapped;
+  - 0001's claim is measured;
+  - 0006 and the research record say the close timeout is armed, then disarmed;
+  - the design's §8 and §9, the plan, and the research record's review section.
+
+**Where it departs from the review:**
+- **Finding 7's fix is the server's**, by form, after this step. Here it is measured and recorded.
+- **KS-4 and KW-1 ran on the socket suite alone.** Halving the ping interval, or not waiting after a send, changes too many of the binding suite's checks to predict.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **My rewrite's first run had a fault of my own.** S-LETGO counted 4 messages for 10: a `let` read the count before the measure ran. It was made `let*` before stage 0.
+- **Stage 0**, the review's tests on #52's library: twelve suites, 349, as predicted.
+
+**Mutants:** 20 rows, 19 mutants and the baseline.
+- **Run 1: 1 mismatch,** a prediction error. MK-1 stops the driver suite at load too, now that D-SHELL imports `(shell-testing)`.
+- **Run 2: 0 mismatches.**
+- **On Linux** each binding mutant reddened the same socket check, by value. A check that reaches the cap took 10 s; K-47's two took 19 s.
+- **Every new or changed check, and each of S-SILENT's four bounds, has a killer by value.** B-LINGER-AFTER survives, as in step 2.
+
+`make test` green before each commit (Darwin arm64): twelve suites, 349 expected passes, every pin ok. On Linux every suite passed, and the socket suite 10 of 10.
+
+NEXT: the PRs; review and the closing ritual when the owner asks (#50 to #52, then these four, bottom-up); then the server's park slice, by form, and its pin.
