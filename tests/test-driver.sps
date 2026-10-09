@@ -15,8 +15,12 @@
 ;;;     the stream, the write dropped;
 ;;;   - the stream's close while the thunk waits, and a taker's raise;
 ;;;   - every line of a field;
-;;;   - and that the test code borrowed onto the suites' path shares no
-;;;     library name with this project's.
+;;;   - that the test code borrowed onto the suites' path shares no
+;;;     library name with this project's;
+;;;   - and the server's libuv shell as the socket suite drives it: through
+;;;     its private (http-server private shell) and the server's
+;;;     (shell-testing), a shell listening on 127.0.0.1:0, a client on its
+;;;     loop, the shutdown that stops it, and the loop drained.
 ;;;
 ;;; How a test plays the client.  `fake-shell-feed-input!` delivers the
 ;;; client's bytes only while the taker reads, as libuv does, so a test of
@@ -27,7 +31,10 @@
 ;;; (response-reader), on chez-httparse's strict response parser.
 (import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
         (only (chezscheme) directory-list file-directory? library-extensions)
-        (only (http-server limits) default-limits)
+        (only (http-server limits) default-limits limits-with)
+        (only (http-server private shell) make-shell shell-listen! shell-shutdown! wall-clock)
+        (only (libuv) make-uv-loop)
+        (only (shell-testing) open-client client-bytes client-close! run-shell-until run-until-drained responses)
         (websocket handshake))
 
 (define (b s) (string->utf8 s))
@@ -355,4 +362,25 @@
               (if (member '(response-reader) theirs) 'response-reader 'no-response-reader)
               (if (member '(shell-testing) theirs) 'shell-testing 'no-shell-testing)
               (if (member '(uv-testing) theirs) 'uv-testing 'no-uv-testing)
-              (filter (lambda (name) (member name mine)) theirs))))))
+              (filter (lambda (name) (member name mine)) theirs))))
+
+    ;; The socket suite drives the server's libuv shell as the server's own
+    ;; socket lane does: what it needs of the server's code, held through
+    ;; the pin, as the fake's is above (decision 0004).
+    (let* ((loop (make-uv-loop))
+           (logged '())
+           (sh (make-shell loop (lambda (request) (make-response 200 #f '() (b "ok")))
+                           (limits-with default-limits '((drain-timeout-ms . 200) (tick-ms . 10)))
+                           wall-clock
+                           (lambda (what details) (set! logged (cons what logged)))))
+           (port (shell-listen! sh "127.0.0.1" 0))
+           (cl (open-client loop port (b "GET / HTTP/1.1\r\nHost: x\r\n\r\n") #t))
+           (answered (run-shell-until loop sh (lambda () (pair? (responses (client-bytes cl)))) 4000))
+           (status (let ((r (responses (client-bytes cl)))) (if (pair? r) (car (car r)) 'none))))
+      (client-close! cl)
+      (shell-shutdown! sh)
+      (let* ((stopped (run-shell-until loop sh (lambda () (memq 'stopped logged)) 4000))
+             (drained (run-until-drained loop 4000)))
+        (test-equal "the server's libuv shell, as the socket suite drives it: listening on 127.0.0.1:0, a client on its loop answered 200, the shutdown that stops it, and its loop drained, each wait within its turns"
+          '(#t satisfied 200 satisfied satisfied)
+          (list (and (fixnum? port) (> port 0)) answered status stopped drained))))))

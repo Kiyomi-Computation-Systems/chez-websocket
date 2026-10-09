@@ -4,7 +4,9 @@
 ;;; both ends, and every wait capped by an iteration count, as the server's
 ;;; own socket lane runs (its tests/shell-testing.sls).  Each check has a
 ;;; server of its own, closed with its clients and its loop drained before
-;;; the next.
+;;; the next.  A wait that reaches the cap ends its check's waiting: the
+;;; check's later waits are not waited for, so a check that cannot finish
+;;; costs one cap, and is red by its value.
 ;;;
 ;;; What the fake shell cannot show is held here (the design's §8): the
 ;;; server logs a resume called once its wait has ended, `late-resume`, where
@@ -14,18 +16,20 @@
 ;;; The checks:
 ;;;   - the handshake answered 101, a masked text echoed, and the client's
 ;;;     close answered, then the stream's end, with nothing logged;
-;;;   - a client silent after the 101 pinged at the ping interval, then
-;;;     failed with 1011 a ping timeout later, on the shell's own timer;
-;;;   - the server's drain closing the stream under a receive whose client
-;;;     answers nothing: the receive raises 1006, not clean, and no late
-;;;     resume is logged, since the close call marks the procedure's wait
-;;;     ended;
-;;;   - a send that waits on a client reading nothing, then goes on once it
+;;;   - a client silent after the 101 pinged once the ping interval has
+;;;     passed and before it passes twice over, and failed with 1011 within
+;;;     the ping timeout's own window, both timed from what the server writes;
+;;;   - the server's drain closing the stream under a receive that is seen to
+;;;     wait, its client answering nothing: the receive raises 1006, not
+;;;     clean, and no late resume is logged, since the close call marks the
+;;;     procedure's wait ended;
+;;;   - a send seen to wait on a client reading nothing, then going on once it
 ;;;     reads, and the client's close after: no late resume, since the woken
 ;;;     senders are let go;
 ;;;   - a read's bytevector let go after its step, held by the heap;
-;;;   - a procedure waiting in a receive holding about what one waiting at a
-;;;     bare `await` holds (decision 0005's amendment).
+;;;   - a procedure waiting in a receive holding less than half of what a
+;;;     one-shot continuation's wait holds over a bare `await`'s, both measured
+;;;     in the same run (decision 0005's amendment).
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.7's masked "Hello"; §5.5.1, a
@@ -36,54 +40,39 @@
 ;;; - The server's waits (its waits.sls, R4): a resume called after its wait
 ;;;   has ended is logged `late-resume`, naming the verb, and wakes nothing.
 ;;;   Its drain (its M8.1): told to finish, it logs `draining`, then
-;;;   `drain-timeout` and `stopped` once its time is up.
+;;;   `drain-timeout` and `stopped` once its time is up.  Its deadlines are met
+;;;   at the first time its timer fires at or after them, never before.
 ;;; - Decision 0001: a client quiet for the ping interval is pinged, and
-;;;   failed with 1011 when no pong comes within the ping timeout.
-;;; - Decision 0005's amendment, by form ("call/cc (Recommended)"): measured
-;;;   with these clients, 100 connections of each, a receive's wait held
-;;;   2,778 to 3,485 B (Darwin) and 4,237 to 4,277 B (Linux) a connection
-;;;   more than a bare await's while it escaped by call/1cc, and 78 to 294 B
-;;;   and 879 to 980 B by call/cc.  The bound, 2 KiB, lies between.
+;;;   failed with 1011 when no pong comes within the ping timeout.  Here the
+;;;   interval is 100 ms and the timeout 300 ms, so either taken for the other
+;;;   falls outside its window.
+;;; - Decision 0005's amendment, by form ("call/cc (Recommended)"): a wait
+;;;   that escaped by call/1cc held a stack segment of its own.  The reference
+;;;   is the old shape itself, a wait by call/1cc around `await`, measured in
+;;;   the same run: in this setting it held 2,724 to 4,225 B a connection more
+;;;   than a bare `await` (Darwin and Linux), a receive by call/1cc 2,756 to
+;;;   3,420, and one by call/cc 12 to 1,027.  Should the reference fall under
+;;;   1 KiB, the oracle has gone, and the suite says so (status 3).
 ;;; - A read's bytevector: a client's 4,000-byte binary is one frame of
 ;;;   4,008 bytes, read at once on loopback; kept, it would hold at least
 ;;;   that.  Let go, the heap after it and after a 1-byte message measured 8
 ;;;   to 144 B apart.  The bound is half the frame.
-(import (rnrs) (srfi :64) (ws-testing)
-        (only (chezscheme) parameterize collect collect-maximum-generation bytes-allocated
+;;; - The cap, 4,000 turns: over ten times the most a wait here took, 366
+;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
+;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.
+(import (rnrs) (srfi :64) (ws-testing) (ws-play)
+        (only (chezscheme) call/1cc collect collect-maximum-generation bytes-allocated
               current-time time-second time-nanosecond)
-        (rename (only (chezscheme) current-output-port) (current-output-port output-port-parameter))
         (libuv) (uv-testing) (shell-testing) (response-reader)
         (http-server)
         (only (http-server limits) default-limits limits-with)
         (only (http-server private shell) make-shell shell-listen! shell-shutdown! wall-clock)
         (websocket))
 
-(define (b s) (string->utf8 s))
-
 ;; How many turns of the loop any one wait may take.
-(define cap 200000)
+(define cap 4000)
 
-;; --- frames ------------------------------------------------------------------
-
-;; client-frame : Nat Bytevector -> Bytevector
-;; A final frame of the opcode and payload, masked with RFC 6455 §5.7's key.
-(define mask '#vu8(#x37 #xFA #x21 #x3D))
-(define (client-frame op payload)
-  (let* ((n (bytevector-length payload))
-         (head (cond ((< n 126) (list (+ #x80 op) (+ #x80 n)))
-                     ((< n 65536) (list (+ #x80 op) (+ #x80 126) (div n 256) (mod n 256)))
-                     (else (assertion-violation 'client-frame "longer than the suite sends" n))))
-         (h (length head))
-         (out (make-bytevector (+ h 4 n))))
-    (let put ((i 0) (l head))
-      (unless (null? l) (bytevector-u8-set! out i (car l)) (put (+ i 1) (cdr l))))
-    (bytevector-copy! mask 0 out h 4)
-    (do ((i 0 (+ i 1))) ((= i n) out)
-      (bytevector-u8-set! out (+ h 4 i)
-                          (bitwise-xor (bytevector-u8-ref payload i) (bytevector-u8-ref mask (mod i 4)))))))
-
-(define (close-payload code)
-  (let ((bv (make-bytevector 2))) (bytevector-u16-set! bv 0 code (endianness big)) bv))
+;; --- what the client reads -----------------------------------------------------
 
 ;; head-end : Bytevector -> (U Nat #f) — the index just past the first CRLFCRLF.
 (define (head-end bv)
@@ -95,7 +84,7 @@
              (+ i 4))
             (else (scan (+ i 1)))))))
 
-;; status : Bytevector -> (U Nat Symbol)
+;; status : Bytevector -> (U Nat Datum)
 ;; The status of the head the client read first, as the server's
 ;; (response-reader) reads that head alone, or 'no-head.
 (define (status bv)
@@ -107,7 +96,8 @@
 
 ;; frames : Bytevector -> (Listof Datum)
 ;; The whole unmasked frames after the head, each as (text String), (binary
-;; length), (ping String), (pong String) or (close code reason).
+;; length), (ping String), (pong String) or (close code reason).  A binary's
+;; payload is not copied.
 (define (frames bv)
   (let ((n (bytevector-length bv)) (e (head-end bv)))
     (let next ((i (or e n)) (acc '()))
@@ -123,19 +113,20 @@
                                  (else (bytevector-u64-ref bv (+ i 2) (endianness big))))))
                   (if (> (+ i hl len) n)
                       (reverse acc)
-                      (let ((p (bytes-between bv (+ i hl) (+ i hl len))))
-                        (next (+ i hl len)
-                              (cons (case op
-                                      ((1) (list 'text (utf8->string p)))
-                                      ((2) (list 'binary len))
-                                      ((9) (list 'ping (utf8->string p)))
-                                      ((10) (list 'pong (utf8->string p)))
-                                      ((8) (if (>= len 2)
-                                               (list 'close (bytevector-u16-ref p 0 (endianness big))
-                                                     (utf8->string (bytes-between p 2 len)))
-                                               (list 'close)))
-                                      (else (list 'opcode op)))
-                                    acc)))))))))))
+                      (next (+ i hl len)
+                            (cons (if (= op 2)
+                                      (list 'binary len)
+                                      (let ((p (bytes-between bv (+ i hl) (+ i hl len))))
+                                        (case op
+                                          ((1) (list 'text (utf8->string p)))
+                                          ((9) (list 'ping (utf8->string p)))
+                                          ((10) (list 'pong (utf8->string p)))
+                                          ((8) (if (>= len 2)
+                                                   (list 'close (bytevector-u16-ref p 0 (endianness big))
+                                                         (utf8->string (bytes-between p 2 len)))
+                                                   (list 'close)))
+                                          (else (list 'opcode op)))))
+                                  acc))))))))))
 
 (define (handshake path)
   (b (string-append "GET " path " HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -163,8 +154,19 @@
 ;; logged-kinds : WsServer -> (Listof Symbol) — what it logged, in order.
 (define (logged-kinds s) (reverse (ws-server-log s)))
 
-;; run! : WsServer (-> Boolean) -> Symbol — turns until `pred` holds, at most cap.
-(define (run! s pred) (run-shell-until (ws-server-loop s) (ws-server-shell s) pred cap))
+;; Whether a wait of the check under way has reached the cap.
+(define stalled #f)
+
+;; run! : WsServer (-> Boolean) -> Symbol
+;; Turns until `pred` holds, at most cap: 'satisfied or
+;; 'iterations-exhausted; or 'skipped, with no turn, once a wait of the
+;; check has reached the cap.
+(define (run! s pred)
+  (if stalled
+      'skipped
+      (let ((outcome (run-shell-until (ws-server-loop s) (ws-server-shell s) pred cap)))
+        (when (eq? outcome 'iterations-exhausted) (set! stalled #t))
+        outcome)))
 
 ;; settle! : WsServer Nat -> Void — n turns, whatever happens.
 (define (settle! s n) (run-shell-until (ws-server-loop s) (ws-server-shell s) (lambda () #f) n))
@@ -173,33 +175,34 @@
 (define (connect! s path read?) (open-client (ws-server-loop s) (ws-server-port s) (handshake path) read?))
 
 ;; finish! : WsServer (Listof Client) -> Void
-;; The clients closed, the server shut down unless its drain has begun, and
-;; its loop run until nothing but a timer is live on it.
+;; The clients closed, the server shut down unless its drain has begun, and,
+;; unless a wait has reached the cap, its loop run until nothing but a timer
+;; is live on it; then the next check waits afresh.
 (define (finish! s clients)
   (for-each client-close! clients)
   (unless (memq 'draining (logged-kinds s)) (shell-shutdown! (ws-server-shell s)))
   (run! s (lambda () (memq 'stopped (logged-kinds s))))
-  (run-until-drained (ws-server-loop s) cap))
+  (unless stalled (run-until-drained (ws-server-loop s) cap))
+  (set! stalled #f))
 
-;; accepting : (WebSocket -> Any) WebsocketLimits -> (Request -> Answer)
-;; A handler answering websocket-accept's switch, no subprotocols, these limits.
-(define (accepting proc lim)
-  (lambda (request) (websocket-accept request proc (make-handshake-settings '()) lim)))
+;; No subprotocols, and the request's own host as the one origin.
+(define no-subprotocols (make-handshake-settings '()))
 
-;; limits : (Listof (Pair Symbol Nat)) -> WebsocketLimits — the defaults, these replaced.
-(define (limits overrides) (websocket-limits-with default-websocket-limits overrides))
-
-;; closed : Condition -> (List 'closed Nat String Boolean)
-(define (closed e)
-  (list 'closed (websocket-closed-code e) (websocket-closed-reason e) (websocket-closed-clean? e)))
-
-;; captured : (-> Any) -> (List Any String)
-;; What the thunk answers, and what the binding logged on the current output
-;; port while it ran.
-(define (captured thunk)
-  (let-values (((port get) (open-string-output-port)))
-    (let ((v (parameterize ((output-port-parameter port)) (thunk))))
-      (list v (get)))))
+;; timing : Transport (Byte -> Any) -> Transport
+;; A transport over t that tells `note` each write's first byte as the
+;; write is asked for, and passes every call on.
+(define (timing t note)
+  (make-transport
+   (lambda (bytes start end written)
+     (note (bytevector-u8-ref bytes start))
+     (transport-write! t bytes start end written))
+   (lambda (on-bytes on-end) (transport-read-start! t on-bytes on-end))
+   (lambda () (transport-read-stop! t))
+   (lambda () (transport-close! t))
+   (lambda (ms passed) (if ms (transport-deadline! t ms passed) (transport-deadline! t #f)))
+   (lambda (thunk) (transport-on-drain! t thunk))
+   (lambda (thunk) (transport-on-close! t thunk))
+   (lambda () (transport-abort! t))))
 
 ;; footprint : -> Nat — the heap after two full collections.
 (define (footprint)
@@ -207,6 +210,7 @@
   (collect (collect-maximum-generation))
   (bytes-allocated))
 
+;; now-ms : -> Nat — the monotonic clock, in milliseconds.
 (define (now-ms)
   (let ((t (current-time 'time-monotonic)))
     (+ (* 1000 (time-second t)) (div (time-nanosecond t) 1000000))))
@@ -214,19 +218,18 @@
 (run-suite "socket"
   (lambda ()
     ;; The suite's masked frame is §5.7's.
-    (unless (equal? (client-frame 1 (b "Hello"))
-                    '#vu8(#x81 #x85 #x37 #xFA #x21 #x3D #x7F #x9F #x4D #x51 #x58))
+    (unless (equal? (client-frame #x81 (b "Hello")) rfc-masked-hello)
       (provenance-failure "the suite's masked frame is not RFC 6455 §5.7's"))
 
     ;; --- a connection, end to end ---
 
     (let* ((s (serving (accepting (lambda (ws) (let echo () (websocket-send! ws (websocket-receive ws)) (echo)))
-                                  default-websocket-limits)))
+                                  no-subprotocols default-websocket-limits)))
            (cl (connect! s "/" #t)))
       (run! s (lambda () (head-end (client-bytes cl))))
-      (client-send! cl (client-frame 1 (b "Hello")))
+      (client-send! cl (client-frame #x81 (b "Hello")))
       (run! s (lambda () (pair? (frames (client-bytes cl)))))
-      (client-send! cl (client-frame 8 (close-payload 1000)))
+      (client-send! cl (client-frame #x88 (close-body 1000 "")))
       (run! s (lambda () (not (eq? (client-end cl) 'open))))
       (let ((seen (list (status (client-bytes cl)) (frames (client-bytes cl)) (client-end cl) (logged-kinds s))))
         (finish! s (list cl))
@@ -234,59 +237,70 @@
           '(101 ((text "Hello") (close 1000 "")) eof ())
           seen)))
 
-    (let* ((s (serving (accepting (lambda (ws) (websocket-receive ws))
-                                  (limits '((ping-interval-ms . 200) (ping-timeout-ms . 200))))))
+    ;; --- the clock, on the shell's own timer ---
+
+    (let* ((taken-over #f) (writes '())
+           (s (serving (wrapping (accepting (lambda (ws) (websocket-receive ws))
+                                            no-subprotocols
+                                            (limits '((ping-interval-ms . 100) (ping-timeout-ms . 300))))
+                                 (lambda (t)
+                                   (set! taken-over (now-ms))
+                                   (timing t (lambda (first) (set! writes (cons (cons first (now-ms)) writes))))))))
            (cl (connect! s "/" #t))
-           (at-101 #f) (at-ping #f) (at-close #f)
-           (run (captured
-                 (lambda ()
-                   (run! s (lambda ()
-                             (let ((now (now-ms)) (fs (frames (client-bytes cl))))
-                               (unless (or at-101 (not (head-end (client-bytes cl)))) (set! at-101 now))
-                               (unless (or at-ping (null? fs)) (set! at-ping now))
-                               (unless (or at-close (< (length fs) 2)) (set! at-close now))
-                               (not (eq? (client-end cl) 'open)))))
-                   (frames (client-bytes cl))))))
+           (run (logged (lambda ()
+                          (run! s (lambda () (not (eq? (client-end cl) 'open))))
+                          (frames (client-bytes cl)))))
+           (written (lambda (first)
+                      (let ((w (assv first writes))) (and w taken-over (- (cdr w) taken-over))))))
       (finish! s (list cl))
-      (test-equal "a client silent after the 101 is pinged at the ping interval, 200 ms, and failed with 1011 a ping timeout later, 200 ms, on the shell's own timer, its failure logged"
-        '(((ping "") (close 1011 "")) at-or-after-the-interval at-or-after-the-timeout "websocket-failed 1011 ping-timeout\n")
-        (list (car run)
-              (if (and at-101 at-ping (>= (- at-ping at-101) 190)) 'at-or-after-the-interval (list at-101 at-ping))
-              (if (and at-ping at-close (>= (- at-close at-ping) 190)) 'at-or-after-the-timeout (list at-ping at-close))
-              (cadr run))))
+      (test-equal "a client silent after the 101 is pinged once the ping interval, 100 ms, has passed and before 250 ms, and failed with 1011 from 300 ms, its timeout, to 450 ms after the ping, each timed from the take-over to what the server writes, its failure logged"
+        '(((ping "") (close 1011 "")) within-the-interval within-the-timeout "websocket-failed 1011 ping-timeout\n")
+        (let ((ping (written #x89)) (close (written #x88)))
+          (list (car run)
+                (if (and ping (<= 99 ping) (< ping 250)) 'within-the-interval ping)
+                (if (and ping close (<= 299 (- close ping)) (< (- close ping) 450))
+                    'within-the-timeout
+                    (list ping close))
+                (cadr run)))))
 
     ;; --- late resumes, which the fake logs nowhere ---
 
-    (let* ((saw #f)
+    (let* ((receiving #f) (saw #f)
            (s (serving (accepting (lambda (ws)
+                                    (set! receiving #t)
                                     (guard (e ((websocket-closed? e) (set! saw (closed e)) (raise e)))
                                       (websocket-receive ws)))
-                                  default-websocket-limits)))
+                                  no-subprotocols default-websocket-limits)))
            (cl (connect! s "/" #t)))
-      (run! s (lambda () (head-end (client-bytes cl))))
-      (settle! s 20)
-      (shell-shutdown! (ws-server-shell s))
-      (run! s (lambda () (and saw (memq 'stopped (logged-kinds s)))))
-      (settle! s 20)
-      (let ((seen (list saw (frames (client-bytes cl)) (logged-kinds s))))
-        (finish! s (list cl))
-        (test-equal "the server's drain closes the stream under a receive whose client answers nothing: the receive raises &websocket-closed 1006, not clean, the client has read the close 1001, going away, and the server logs its drain and no late resume"
-          '((closed 1006 "" #f) ((close 1001 "going away")) (draining drain-timeout stopped))
-          seen)))
+      (run! s (lambda () receiving))
+      (let ((waiting (if (and receiving (not saw) (null? (frames (client-bytes cl)))) 'waiting 'not-waiting)))
+        (shell-shutdown! (ws-server-shell s))
+        (run! s (lambda () (and saw (memq 'stopped (logged-kinds s)))))
+        (settle! s 20)
+        (let ((seen (list waiting saw (frames (client-bytes cl)) (logged-kinds s))))
+          (finish! s (list cl))
+          (test-equal "the server's drain closes the stream under a receive seen to wait, whose client answers nothing: the receive raises &websocket-closed 1006, not clean, the client has read the close 1001, going away, and the server logs its drain and no late resume"
+            '(waiting (closed 1006 "" #f) ((close 1001 "going away")) (draining drain-timeout stopped))
+            seen))))
 
-    (let* ((sent #f) (saw #f)
+    (let* ((sending #f) (sent #f) (saw #f) (size (* 8 1024 1024))
            (s (serving (accepting (lambda (ws)
-                                    (websocket-send! ws (make-bytevector (* 8 1024 1024) 7))
+                                    (set! sending #t)
+                                    (websocket-send! ws (make-bytevector size 7))
                                     (set! sent #t)
                                     (guard (e ((websocket-closed? e) (set! saw (closed e)) (raise e)))
                                       (websocket-receive ws)))
-                                  default-websocket-limits)))
+                                  no-subprotocols default-websocket-limits)))
            (cl (connect! s "/" #f)))
-      (settle! s 300)
-      (let ((waited (if sent 'sent-at-once 'waited)))
+      ;; Once the procedure has begun its send, the drain it ran in ends with
+      ;; the send returned, or parked.
+      (run! s (lambda () sending))
+      (let ((waited (cond ((not sending) 'not-run) (sent 'sent-at-once) (else 'waited))))
         (client-read! cl)
-        (run! s (lambda () (and sent (= 1 (length (frames (client-bytes cl)))))))
-        (client-send! cl (client-frame 8 (close-payload 1000)))
+        (run! s (lambda () (and sent
+                                (>= (collector-count (client-collector cl)) size)
+                                (= 1 (length (frames (client-bytes cl)))))))
+        (client-send! cl (client-frame #x88 (close-body 1000 "")))
         (run! s (lambda () (and saw (not (eq? (client-end cl) 'open)))))
         (settle! s 20)
         (let ((seen (list waited (frames (client-bytes cl)) saw (logged-kinds s))))
@@ -299,10 +313,10 @@
 
     (let* ((taken 0)
            (s (serving (accepting (lambda (ws) (let take () (websocket-receive ws) (set! taken (+ taken 1)) (take)))
-                                  default-websocket-limits)))
+                                  no-subprotocols default-websocket-limits)))
            (cl (connect! s "/" #t))
-           (big (client-frame 2 (make-bytevector 4000 9)))
-           (small (client-frame 2 (make-bytevector 1 9))))
+           (big (client-frame #x82 (make-bytevector 4000 9)))
+           (small (client-frame #x82 (make-bytevector 1 9))))
       (define (sent! frame)
         (let ((want (+ taken 1)))
           (client-send! cl frame)
@@ -316,20 +330,31 @@
       (run! s (lambda () (head-end (client-bytes cl))))
       (apart)
       (apart)
-      (let ((measured (list (apart) (apart) (apart))))
+      (let* ((measured (list (apart) (apart) (apart))) (all-taken taken))
         (finish! s (list cl))
-        (test-equal "a read's bytevector is let go after its step: the heap after a 4,000-byte message, then after a 1-byte one, three times, differs by less than half its 4,008-byte frame"
-          'let-go
-          (if (for-all (lambda (d) (< d 2004)) measured) 'let-go measured))))
+        (test-equal "a read's bytevector is let go after its step: the heap after a 4,000-byte message, then after a 1-byte one, three times, differs by less than half its 4,008-byte frame, each message received"
+          '(let-go 10)
+          (list (if (for-all (lambda (d) (< d 2004)) measured) 'let-go measured) all-taken))))
 
     (let* ((waiting 0) (n 100)
            (s (serving (lambda (request)
-                         (websocket-accept request
-                                           (if (string=? (request-path request) "/await")
-                                               (lambda (ws) (set! waiting (+ waiting 1)) (await (lambda (resume) #f)))
-                                               (lambda (ws) (set! waiting (+ waiting 1)) (websocket-receive ws)))
-                                           (make-handshake-settings '())
-                                           default-websocket-limits))))
+                         (websocket-accept
+                          request
+                          (let ((path (request-path request)))
+                            (cond ((string=? path "/await")
+                                   (lambda (ws) (set! waiting (+ waiting 1)) (await (lambda (resume) #f))))
+                                  ((string=? path "/one-shot")
+                                   ;; The old park!'s way back, the reference.
+                                   (lambda (ws)
+                                     (set! waiting (+ waiting 1))
+                                     (call/1cc
+                                      (lambda (k)
+                                        (with-exception-handler
+                                         (lambda (e) (k #f))
+                                         (lambda () (await (lambda (resume) #f))))))))
+                                  (else (lambda (ws) (set! waiting (+ waiting 1)) (websocket-receive ws)))))
+                          no-subprotocols
+                          default-websocket-limits))))
            (clients '()))
       (define (opened! path)
         (let ((want (+ waiting n)))
@@ -339,9 +364,17 @@
       (opened! "/await")
       (let* ((none (footprint))
              (awaiting (begin (opened! "/await") (footprint)))
+             (one-shot (begin (opened! "/one-shot") (footprint)))
              (receiving (begin (opened! "/receive") (footprint)))
-             (more (div (- (- receiving awaiting) (- awaiting none)) n)))
+             (base (- awaiting none))
+             (by-one-shot (div (- (- one-shot awaiting) base) n))
+             (by-receive (div (- (- receiving one-shot) base) n))
+             (all-waiting waiting))
         (finish! s clients)
-        (test-equal "a procedure waiting in websocket-receive holds less than 2 KiB a connection more than one waiting at a bare await: 100 of each, footprints back to back"
-          'within
-          (if (< more 2048) 'within more))))))
+        (unless (>= by-one-shot 1024)
+          (provenance-failure
+           (string-append "a wait by call/1cc no longer holds a stack segment here: "
+                          (number->string by-one-shot) " B a connection over a bare await")))
+        (test-equal "a procedure waiting in websocket-receive holds, over one at a bare await, less than half of what a wait by call/1cc holds, all 400 waiting, footprints back to back"
+          '(under-half 400)
+          (list (if (< by-receive (div by-one-shot 2)) 'under-half (list by-receive by-one-shot)) all-waiting))))))
