@@ -14,11 +14,14 @@
 ;;; since reading stops once the queue holds a cap's worth, so a cap of 0
 ;;; would stop it for good; a pong timeout of at least a second, since one of
 ;;; 0 would pass as its ping went; a write timeout of at least a second,
-;;; since one of 0 would pass as reading stopped; and 0 for the rest, an
-;;; interval of 0 turning pinging off (0001).  Decision 0006, by form ("60 s,
-;;; its own variable"): CHEZ_WS_WRITE_TIMEOUT, 60 s, the server's own
-;;; CHEZ_HTTP_WRITE_TIMEOUT.  A value is a whole number, written in ASCII
-;;; digits alone.
+;;; since one of 0 would pass as reading stopped; a close timeout of at
+;;; least a second, since every close the binding asks for is aborted once
+;;; it passes, so one of 0 would abort a close before the client could read
+;;; it (decision 0006, and its amendment at step 2's review, by form: "From
+;;; queueing, as peers do"); and 0 for the rest, an interval of 0 turning
+;;; pinging off (0001).  Decision 0006, by form ("60 s, its own variable"):
+;;; CHEZ_WS_WRITE_TIMEOUT, 60 s, the server's own CHEZ_HTTP_WRITE_TIMEOUT.  A
+;;; value is a whole number, written in ASCII digits alone.
 ;;;
 ;;; - The defaults, field by field, and the variables, in field order.
 ;;; - Each variable moves its own field alone; absent or empty is the default.
@@ -124,28 +127,30 @@
                       (set-one "CHEZ_WS_CLOSE_TIMEOUT" "3") (set-one "CHEZ_WS_WRITE_HIGH_WATER" "131072")
                       (set-one "CHEZ_WS_WRITE_LOW_WATER" "4096") (set-one "CHEZ_WS_WRITE_TIMEOUT" "7")))
     (test-equal "every variable at once"
-                '(1000 2 0 1000 0 200 100 1000)
+                '(1000 2 0 1000 1000 200 100 1000)
                 (read-env (env '("CHEZ_WS_MAX_MESSAGE_BYTES" . "1000") '("CHEZ_WS_MAX_QUEUE" . "2")
                                '("CHEZ_WS_PING_INTERVAL" . "0") '("CHEZ_WS_PING_TIMEOUT" . "1")
-                               '("CHEZ_WS_CLOSE_TIMEOUT" . "0") '("CHEZ_WS_WRITE_HIGH_WATER" . "200")
+                               '("CHEZ_WS_CLOSE_TIMEOUT" . "1") '("CHEZ_WS_WRITE_HIGH_WATER" . "200")
                                '("CHEZ_WS_WRITE_LOW_WATER" . "100") '("CHEZ_WS_WRITE_TIMEOUT" . "1"))))
 
     ;; --- the bounds ---
-    (test-equal "each bound at its edge is accepted: a cap and a queue of 1, pinging off, a pong timeout of 1 s, a close timeout of 0, both water marks at 0, and a write timeout of 1 s"
+    (test-equal "each bound at its edge is accepted: a cap and a queue of 1, pinging off, a pong timeout of 1 s, a close timeout of 1 s, both water marks at 0, and a write timeout of 1 s"
                 (list (with-field 0 1) (with-field 1 1) (with-field 2 0) (with-field 3 1000)
-                      (with-field 4 0) '(1048576 16 20000 20000 10000 0 0 60000) (with-field 7 1000))
+                      (with-field 4 1000) '(1048576 16 20000 20000 10000 0 0 60000) (with-field 7 1000))
                 (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" "1") (set-one "CHEZ_WS_MAX_QUEUE" "1")
                       (set-one "CHEZ_WS_PING_INTERVAL" "0") (set-one "CHEZ_WS_PING_TIMEOUT" "1")
-                      (set-one "CHEZ_WS_CLOSE_TIMEOUT" "0")
+                      (set-one "CHEZ_WS_CLOSE_TIMEOUT" "1")
                       (read-env (env '("CHEZ_WS_WRITE_HIGH_WATER" . "0") '("CHEZ_WS_WRITE_LOW_WATER" . "0")))
                       (set-one "CHEZ_WS_WRITE_TIMEOUT" "1")))
-    (test-equal "below its bound, each is refused, naming its variable: a cap of 0, a queue of 0, a pong timeout of 0, a write timeout of 0"
+    (test-equal "below its bound, each is refused, naming its variable: a cap of 0, a queue of 0, a pong timeout of 0, a close timeout of 0, a write timeout of 0"
                 '((refused websocket-limits-from-environment "CHEZ_WS_MAX_MESSAGE_BYTES")
                   (refused websocket-limits-from-environment "CHEZ_WS_MAX_QUEUE")
                   (refused websocket-limits-from-environment "CHEZ_WS_PING_TIMEOUT")
+                  (refused websocket-limits-from-environment "CHEZ_WS_CLOSE_TIMEOUT")
                   (refused websocket-limits-from-environment "CHEZ_WS_WRITE_TIMEOUT"))
                 (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" "0") (set-one "CHEZ_WS_MAX_QUEUE" "0")
-                      (set-one "CHEZ_WS_PING_TIMEOUT" "0") (set-one "CHEZ_WS_WRITE_TIMEOUT" "0")))
+                      (set-one "CHEZ_WS_PING_TIMEOUT" "0") (set-one "CHEZ_WS_CLOSE_TIMEOUT" "0")
+                      (set-one "CHEZ_WS_WRITE_TIMEOUT" "0")))
     (test-equal "a low water above the high water is refused, whichever was set, naming the low water's variable; equal marks are accepted"
                 '((refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
                   (refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
@@ -221,7 +226,7 @@
                        (1048576 0 20000 20000 10000 262144 65536 60000)
                        (1048576 16 -1 20000 10000 262144 65536 60000)
                        (1048576 16 20000 0 10000 262144 65536 60000)
-                       (1048576 16 20000 20000 -1 262144 65536 60000)
+                       (1048576 16 20000 20000 0 262144 65536 60000)
                        (1048576 16 20000 20000 10000 -1 0 60000)
                        (1048576 16 20000 20000 10000 262144 -1 60000)
                        (1048576 16 20000 20000 10000 262144 65536 0)

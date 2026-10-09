@@ -34,7 +34,8 @@
 ;;;   no code, 1006 when none came; §7.1.7, failing sends a close, so never
 ;;;   a second; §7.4.1, 1005, 1006 and 1015 never set in a close.  The
 ;;;   design's §5: the close deadline named by its kind, and a close not
-;;;   answered in time closing the stream anyway (websockets' close_timeout).
+;;;   answered in time ending the connection anyway, the stream aborted
+;;;   since decision 0006 (websockets' close_timeout, below).
 ;;;   The form of 2026-10-05, "Deliver as before": messages that come after
 ;;;   the server's close are delivered as before.
 ;;; - For the ping clock (M3.3): decision 0001 item 2, a client that has
@@ -54,7 +55,9 @@
 ;;;   it, one at the low water or under ending it; its passing aborting the
 ;;;   stream, writing nothing, and telling 1006.  And the close timeout
 ;;;   passing aborts the stream: websockets 17.2's close_timeout ends in
-;;;   transport.abort() (asyncio/connection.py:910-911, 942-957).
+;;;   transport.abort() (asyncio/connection.py:910-911, 942-957).  Falling
+;;;   behind and catching up are a step's last actions, constants, as the
+;;;   clock's re-arming is (step 2's review).
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
 ;;; Node's ws 7.5.10 was fed every case in its pieces but the ping clock's,
@@ -1029,6 +1032,19 @@
                       timed-out)
                 (step* (make-ws-state (marks 7 4))
                        '((send text "Hello") (close 1000 "") (written 7) (deadline-passed))))
+    ;; Behind when the server's close is sent: the close deadline takes the
+    ;; write timeout's place, and a done after it re-arms nothing, though more
+    ;; than the low water is still unsent; one that brings it to the low water
+    ;; starts reading, and arms and disarms nothing.  No deadline passes, so
+    ;; each step's actions are seen.
+    (test-equal "behind when the server's close is sent, its close deadline replaces the write timeout; a done above the low water then re-arms nothing, and one at it starts reading, arming and disarming nothing"
+                (list (list (wrote #x81 hello))
+                      (list (wrote #x81 hello) '(read-stop) writing)
+                      (list (server-close 1000 '()) armed)
+                      '()
+                      (list '(read-start)))
+                (step* (make-ws-state (marks 7 4))
+                       '((send text "Hello") (send text "Hello") (close 1000 "") (written 7) (written 7))))
     (test-equal "pinging off, the client behind still arms the write timeout, and its end disarms it, starts reading and arms nothing"
                 (list (list (wrote #x81 hello))
                       (list (wrote #x81 hello) '(read-stop) writing)
@@ -1064,6 +1080,26 @@
                   '(0 0)
                   (list (done-cost '((send text "Hello")) 7)
                         (done-cost '((send text "Hello") (send text "Hello")) 7))))
+    ;; Falling behind costs a step nothing more: a send, the server's close
+    ;; and a ping that take what is unsent past the high water allocate what
+    ;; each allocates when they do not, Hello's frame 7 bytes, a close of a
+    ;; code alone 4, a ping 2.  And a done that catches the client up,
+    ;; nothing waiting, allocates nothing.
+    (let ((step-cost (lambda (limits events event)
+                       (let ((prepared (lambda () (let ((s (make-ws-state limits))) (step* s events) s))))
+                         (- (allocated (lambda ()
+                                         (let-values (((s actions) (ws-step (prepared) event)))
+                                           (keep! actions))))
+                            (allocated (lambda () (keep! (prepared)))))))))
+      (test-equal "falling behind and catching up allocate nothing more: a send, the server's close and a ping that put the client behind allocate what they do when they do not, and a done that catches it up, nothing waiting, allocates nothing"
+                  '(0 0 0 0)
+                  (list (- (step-cost (marks 6 4) '() '(send text "Hello"))
+                           (step-cost (marks 7 4) '() '(send text "Hello")))
+                        (- (step-cost (marks 3 0) '() '(close 1000 ""))
+                           (step-cost (marks 4 0) '() '(close 1000 "")))
+                        (- (step-cost (marks 1 0) '() '(deadline-passed))
+                           (step-cost (marks 2 0) '() '(deadline-passed)))
+                        (step-cost (marks 7 4) '((send text "Hello") (send text "Hello") (written 7)) '(written 7)))))
 
     ;; --- sending ---
     (let ((s (make-ws-state open)))

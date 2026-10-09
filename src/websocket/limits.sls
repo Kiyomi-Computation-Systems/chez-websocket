@@ -16,7 +16,11 @@
 ;;;   ping-interval-ms   20 s of quiet before a ping; 0 turns pinging off (0001)
 ;;;   ping-timeout-ms    20 s for its pong; past it, 1011 (0001)
 ;;;   close-timeout-ms   10 s for the client's close, after the server's
-;;;                      (websockets' close_timeout)
+;;;                      (websockets' close_timeout), and for a client to read
+;;;                      what was unsent when a close was asked for; past it,
+;;;                      the stream aborted (decision 0006): at a close, a
+;;;                      client reads the high water within it, 25.6 KiB/s
+;;;                      by default
 ;;;   write-high-water   256 KiB unsent before a send waits, and reading
 ;;;                      stops, and
 ;;;   write-low-water    64 KiB unsent when both go on: the server's own
@@ -35,7 +39,9 @@
 ;;; so a cap of 0 would stop it for good.  A pong's timeout is at least
 ;;; 1 ms, since one of 0 would pass as its ping went; read in whole seconds,
 ;;; that is at least 1 s.  So is a write's timeout, since one of 0 would
-;;; pass as reading stopped.  The rest are at least 0.  Each is a fixnum at
+;;; pass as reading stopped, and a close's, since one of 0 would abort a
+;;; close before the client could read it (0006's amendment, by form).  The
+;;; rest are at least 0.  Each is a fixnum at
 ;;; most: the server's transport arms a deadline only for a fixnum of ms
 ;;; (transport-deadline!), and the step counts in fixnums, so a value past
 ;;; one is refused here, as the program starts, not where it is used.  A low
@@ -75,7 +81,7 @@
           (list 'max-queue         "CHEZ_WS_MAX_QUEUE"         1 1    websocket-limits-max-queue)
           (list 'ping-interval-ms  "CHEZ_WS_PING_INTERVAL"     0 1000 websocket-limits-ping-interval-ms)
           (list 'ping-timeout-ms   "CHEZ_WS_PING_TIMEOUT"      1 1000 websocket-limits-ping-timeout-ms)
-          (list 'close-timeout-ms  "CHEZ_WS_CLOSE_TIMEOUT"     0 1000 websocket-limits-close-timeout-ms)
+          (list 'close-timeout-ms  "CHEZ_WS_CLOSE_TIMEOUT"     1 1000 websocket-limits-close-timeout-ms)
           (list 'write-high-water  "CHEZ_WS_WRITE_HIGH_WATER"  0 1    websocket-limits-write-high-water)
           (list 'write-low-water   "CHEZ_WS_WRITE_LOW_WATER"   0 1    websocket-limits-write-low-water)
           (list 'write-timeout-ms  "CHEZ_WS_WRITE_TIMEOUT"     1 1000 websocket-limits-write-timeout-ms)))
