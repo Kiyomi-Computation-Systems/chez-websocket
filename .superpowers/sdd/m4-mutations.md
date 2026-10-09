@@ -1450,3 +1450,130 @@ shell's `taker-deadline!`), so the order is not observable.
 | L-MAKE-REFUSE | LM-2, LM-6 |
 | L-WITH | LM-1, LM-6 |
 | the Makefile's `WS_ENV_VARS` | stage 4a |
+
+## M4.3 step 2's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09. `/code-review` at xhigh over #43 to #45, 12 findings; the owner's "fix all".
+- **The code:**
+  - `src/websocket/limits.sls` (blob 6e3b181): the close timeout at least 1 ms;
+  - `src/websocket/protocol.sls` (c34839a): `over-high?`, `behind-tail`, the constant
+    `caught-up`, `written!` testing the phase;
+  - `src/websocket/private/binding.sls` (eb27e37): `write-piece`, 64 KiB; a failed
+    done stepped as the end; a send waiting before it writes.
+- **The suites:** `tests/test-limits.sps`, 15 checks (3c53516);
+  `tests/test-protocol.sps`, 103 (af23fa8); `tests/test-binding.sps`, 55 (7989bc3).
+
+**The runner** is step 2's (`wsmut2.py`), its specs file named for each run.
+
+### The oracles
+
+Step 2's, and:
+- **0006's amendment, by form**: "From queueing, as peers do" (websockets 17.2's
+  `close_deadline` as the close is sent, `asyncio/connection.py:910-911`; ws 8.22.0's
+  30 s from `close()`, `websocket.js:1323-1327`; coder v1.8.15's 5 s, `close.go:185`);
+  "Wait before writing too"; "In 64 KiB writes" (nginx's `send_timeout`, "between two
+  successive write operations", its docs).
+- **RFC 6455 §5.2's frame sizes**: a 1 KiB binary's frame 1,028 bytes, a 16-bit length;
+  one of 300,000 bytes 300,010, a 64-bit length; a pong of no payload 2.
+- **What was measured before the forms** (0006's amendment, the scratch
+  `rv/measures.md`): the close, the large message and the senders, on the tree and
+  four prototypes.
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **Stage 0** (`919d4eb`), the tests alone, on b9c9d77's library, as predicted:
+  - the limits suite red in L-BELOW and L-MAKE-REFUSE, a close timeout of 0 accepted;
+  - the protocol suite red in W-TAIL-ALLOC: 16, 32, 32 and 32 bytes, not 0;
+  - the binding suite red in CC-SENDERS (28 bytes held, not 14), B-PIECES (one write of
+    300,010, aborted) and B-WRITE-ERROR (nothing closed, nothing told).
+- **Stage 1** (`65cb802`), the library: **not as predicted**, 339 and four red, for 341:
+  - W-DONE, W-TAKE and W-PONGS expected the catch-up's `(disarm-deadline)`, which the
+    first cut dropped, the clock's arm replacing it. Put back, as the constant
+    `caught-up`.
+  - B-PIECES's 150 s outlasted the clock armed afresh as the client caught up: a ping
+    of 2 bytes written at 152 s, a sixth write. My check's design; it now turns
+    pinging off.
+- **Stage 1b** (`be48013`): eleven suites, 341, as predicted.
+- **Stage 2** (`41edd15`): W-CLOSING-REARM, the check run 1 found missing: 342, as
+  predicted.
+
+### The mutants
+
+New keys, beside step 2's:
+
+| key | check |
+|---|---|
+| B-PIECES | a message past 64 KiB written in writes of 64 KiB, so a client reading 2 KiB a second is not cut off |
+| B-WRITE-ERROR | a write's done that tells a failure ends the connection: the close asked for, 1006 told |
+| R-DONE-ALLOC-BEHIND | a done the core answers by re-arming the write timeout allocates nothing in the binding |
+| W-TAIL-ALLOC | falling behind and catching up allocate nothing more |
+| W-CLOSING-REARM | behind when the server's close is sent: a done above the low water re-arms nothing, one at it starts reading |
+
+Changed: CC-SENDERS (three procedures; the later two wait before they write, 14 bytes
+held); B-SLOW (its 255 derived); C-TIMEOUT, P-SILENT and P-OWN (`tick!`); L-EDGE, L-ALL,
+L-BELOW and L-MAKE-REFUSE (a close timeout of 1 s at least).
+
+Specs hashed before each run:
+- **Run 1** (specs `0cf1ecc`, names `0df4877`): step 2's 42 rows and run 2's K-16',
+  nine re-cut where the review moved their code, all predicted again over the new
+  and changed checks; and 15 rows of the review's. **58 rows, 57 mutants and the
+  baseline, 2 mismatches, each a prediction error:**
+  - **P-EDGE-HIGH**, re-cut onto `over-high?`, now makes the read's hold `>=` too, so
+    W-FAIL, whose high water is 0, holds its read before the frame: red, not predicted.
+    W-ALLOC stayed green, predicted red from step 2's run: its catch-up no longer
+    allocates (finding 11).
+  - **P-NO-ARM**: B-SLOW stayed green, predicted red from step 2's run. `written!` now
+    re-arms by the phase (finding 10), so the first done replaces the stale ping
+    deadline that failed B-SLOW in step 2.
+  - **PW-1 reddened W-CLOSING only through a raise**: no check stepped a done above the
+    low water after the server's close. Stage 2 added W-CLOSING-REARM.
+- **Run 2** (specs `f4037a3`, names `5f312fc`): the core's 31 rows again over
+  W-CLOSING-REARM, P-EDGE-HIGH's and P-NO-ARM's predicted as run 1 found them, and PW-2
+  and PW-3 splitting PW-1's phase test; and the baseline. **0 mismatches.**
+
+| # | mutation | red, as found |
+|---|----------|-----|
+| BASE | none | none: 183 passes over the binding, audit, protocol and limits suites |
+| LM-1 | the write timeout's default 20 s | step 2's, and B-PIECES |
+| P-EDGE-HIGH | the high water unsent counts as past it (re-cut: `over-high?`) | W-HIGH, W-END, B-STALL, X-FOREIGN, CC-SENDERS, PR-DEADLINES, W-PAST, W-DONE, W-FULL, W-TAKE, W-PONGS, W-TIMEOUT, W-CLOSING, W-CLOSING-REARM, W-PINGOFF, W-FAIL |
+| P-EDGE-LOW | the low water unsent still behind | W-HIGH, W-DONE, W-CLOSING, W-CLOSING-REARM |
+| P-NO-STOP | behind, reading goes on | step 2's, and R-DONE-ALLOC-BEHIND, W-CLOSING-REARM |
+| P-NO-ARM | behind, no write deadline | step 2's, less B-SLOW, and W-CLOSING-REARM |
+| P-NO-REARM | a done while behind re-arms nothing | step 2's, and B-PIECES |
+| P-NO-DISARM | the end of behind leaves the write deadline (re-cut: `written!`'s catch-up) | as step 2's |
+| P-HELD-HIGH, P-HELD-BEHIND | re-cut onto `over-high?` | as step 2's |
+| P-SEND-TEXT, P-SEND-BINARY | re-cut: a send's tail skipped for its kind | step 2's, P-SEND-TEXT with W-CLOSING-REARM |
+| P-CLOSE-FALLEN, P-PING-FALLEN | re-cut: their tails `'()` | as step 2's |
+| P-BYTES-FALLEN | a read never puts the client behind | step 2's, and R-DONE-ALLOC-BEHIND |
+| P-REARM-FRESH | a re-arming done allocates its action | W-ALLOC, R-DONE-ALLOC-BEHIND |
+| B-WROTE-NOWAKE, B-WROTE-NOSTEP, B-ARM-WRITE | as step 2's | step 2's, and B-PIECES |
+| B-WROTE-FRESH | a done's event made afresh | R-DONE-ALLOC, R-DONE-ALLOC-BEHIND |
+| B-SEND-NOWAIT | a send never waits (re-cut: before and after) | as step 2's |
+| K-16' | `close-stream` not performed | E-CLIENTCLOSED, X-FOREIGN, A-LINGER, B-WRITE-ERROR |
+| LM-C1 | the close timeout's least 0 | L-BELOW, L-MAKE-REFUSE |
+| LM-C2 | its least just past 1 s | L-EDGE, L-ALL, L-MAKE, L-WITH |
+| PT-S, PT-C, PT-P | a send, the server's close, a ping, falling behind, copy their actions, as `fallen` did | W-TAIL-ALLOC |
+| PT-K | catching up conses its disarm | W-TAIL-ALLOC |
+| PW-1 | after the server's close a done re-arms and disarms as while open | W-CLOSING, W-CLOSING-REARM |
+| PW-2 | a done while behind re-arms whatever the phase | W-TIMEOUT, W-CLOSING-REARM |
+| PW-3 | a done that catches up disarms whatever the phase | W-CLOSING, W-CLOSING-REARM |
+| BP-1 | a frame in one write | B-PIECES |
+| BP-2 | pieces of 65,535 bytes | B-PIECES |
+| BP-3 | each piece's done steps the whole frame's bytes | B-PIECES |
+| BS-1 | a send does not wait before it writes | CC-SENDERS |
+| BE-1 | a done's failure is not the stream's end | B-WRITE-ERROR |
+| BA-1 | arming the write deadline allocates a call | R-DONE-ALLOC-BEHIND |
+| BT-1 | the close deadline armed for the ping interval | C-TIMEOUT, A-TIMEOUT |
+| BT-2 | the pong deadline a millisecond late | P-SILENT, P-OWN |
+
+The other step 2 rows went red as in step 2.
+
+Reds through a raise, besides their value: W-LETGO under P-NO-ARM and P-SEND-TEXT, as in
+step 2; L-MAKE and L-WITH under LM-C2, the constructor refusing outside the check's
+guard; W-CLOSING under PW-1 and PW-3, a deadline passing with none armed.
+
+**The survivor, as predicted:** B-LINGER-AFTER, as in step 2.
+
+**Every new or changed check has a killer by value.**

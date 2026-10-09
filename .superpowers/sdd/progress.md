@@ -1511,3 +1511,47 @@ Three bounds were prototyped and measured the same way, and the peers read at th
 `make test` green before each commit (Darwin arm64): eleven suites, 337 expected passes, every pin ok. `make prod` green.
 
 NEXT: the PRs by form; review and the closing ritual when the owner asks; then step 3: the real socket and the measures, the five survivors of step 1's review, and the pong's timing with a throttled reader.
+
+---
+
+M4.3 STEP 2'S REVIEW. `/code-review` at xhigh over #43 to #45: 12 findings, the owner's "fix all". Branches `docs/m4.3-2-review-decision`, `fix/m4.3-2-review-core`, `fix/m4.3-2-review-binding` and `docs/m4.3-2-review-ledger`, stacked on `docs/m4.3-2-ledger` (by form, "Four stacked PRs": +630 −172; the decision and design 133 lines, the core and limits 187, measured green alone at 339, the binding 311, the ledger 171). 2026-10-09.
+
+**Measured first** (the scratch `rv/measures.md`), on the fake shell, the tree as built beside four prototypes: 64 KiB writes; a send that waits before it writes; and two ways to time a close, "the write timeout, then the close timeout" and "the close timeout, re-armed by each done".
+- **The close** (findings 1 and 4): 200 KiB sent then a close, read at 15 KiB/s, was aborted at 15 s, none of the message read. Both prototypes closed it cleanly at 18 s; at 5 KiB/s only the first did. A client reading nothing was aborted 10 s after a close, or 60 s under the first. A close timeout of 0 aborted every close at the next tick.
+- **A large message** (finding 3): 10 MiB read at 100 KiB/s was aborted at 65 s as one write, read whole in 64 KiB writes; +14,294 B a 1 MiB send on the fake, a small send unchanged.
+- **Many senders** (finding 2): 20 procedures sending 64 KiB to a client reading nothing held 1,310,920 B; 262,184 B with a send that waits before it writes.
+
+**Decided by form**, 0006's amendment:
+- **"From queueing, as peers do"**, not the recommended ("Write timeout, then close timeout"): the close timeout runs from the close's queueing, as websockets', ws's and coder's do, documented (25.6 KiB/s at the default high water), and is at least 1 s.
+- **"Wait before writing too"**, the recommended.
+- **"In 64 KiB writes"**, the recommended, asked again after the owner's "what do peers do": none of websockets, ws, coder and gorilla measures progress inside a message; nginx's `send_timeout` runs between two writes, and the server's own write timeout covers each piece of a streamed body.
+
+**What landed:**
+- `(websocket limits)`: the close timeout at least 1 ms, so 1 s read from the environment.
+- `(websocket protocol)` (findings 10 and 11): `over-high?`, the one comparison `held?` and `past-high?` share; falling behind's actions consed onto a step's own, not appended; a done that catches the client up, nothing waiting, answers the constant `caught-up`; `written!` tests the phase once. A send that waits for every done costs 2,325.2 B a cycle, main's 2,324.9, not step 2's 2,373.6.
+- `(websocket private binding)`: a frame in writes of 64 KiB at most, each done its own (finding 3); a done that tells a failure stepped as the stream's end too (finding 5, the design's); a send that waits before it writes while the client is behind (finding 2).
+- The docs (findings 1, 4, 6, 7): 0006's amendment; the design's §5 to §9; the limits' header; the core suite's header.
+- The binding suite (findings 8, 9, 12): B-SLOW's 255 derived; `holding` and `spying` share `wrapping`; three older checks drive the clock with `tick!`; a client that reads at a rate, `reading-at!`.
+
+**Measured again on this tree:** 200 KiB then a close at 15 KiB/s is aborted at 15 s, the client given two of its 64 KiB writes; a close timeout of 0 is refused; 10 MiB at 100 KiB/s is read whole; 20 senders hold 262,184 B. A send and its done, 1,381.2 B a cycle, as before.
+
+**Where it departs from the plan and the design**, each recorded in the design:
+- **The close keeps its timing**, by form, against the recommendation: a client reading under 25.6 KiB/s loses the end at a close.
+- **The close timeout's least is 1 s**, not 0.
+- **A send waits before it writes** too, so 0005's "all go on together" is now "each in turn while the client is not behind".
+- **A frame goes in several writes.**
+- **A failed done ends the connection**: 0006's "whatever it says" now steps the failure as the stream's end too.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **Stage 0**: the tests alone, as predicted: six red, each by value.
+- **Stage 1** did not match: four red for none. Three core checks expected the catch-up's disarm, which the first cut dropped as the clock's arm replaces it; it was put back, as a constant. The pieces check's 150 s outlasted the clock armed afresh at the catch-up, a ping written; the check now turns pinging off.
+- **Stage 1b**: 341, as predicted. **Stage 2**: W-CLOSING-REARM, the check run 1 found missing: 342, as predicted.
+
+**Mutants:**
+- **Run 1: 58 rows, 57 mutants and the baseline, 2 mismatches**, each my prediction: P-EDGE-HIGH's re-cut reaches the read's hold too, and two of step 2's reds no longer happen since findings 10 and 11. And PW-1 reddened W-CLOSING only through a raise, which stage 2's check closed.
+- **Run 2: the core's 31 rows and the baseline, 0 mismatches.**
+- **Every new or changed check has a killer by value.** The one survivor is step 2's, as predicted.
+
+`make test` green before each commit (Darwin arm64): eleven suites, 342 expected passes, every pin ok. `make prod` green.
+
+NEXT: the PRs by form; review and the closing ritual when the owner asks; then step 3: the real socket and the measures, step 1's review's survivors, and the pong's timing with a throttled reader.
