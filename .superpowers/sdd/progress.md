@@ -1589,3 +1589,67 @@ MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritu
 `make test` green on main: eleven suites, 342 expected passes, every pin ok.
 
 NEXT: M4.3 step 3, when asked: the real socket on 127.0.0.1:0 and the measures (a connection's cost beside the server's, the pong's timing with a throttled reader, what the kernel holds at a close), and step 1's review's survivors (four late resumes the fake logs nowhere, a read's bytevector kept).
+
+---
+
+M4.3 STEP 3, THE REAL SOCKET. On "lets start step 3". Branches `docs/m4.3-3-decisions`, `feat/m4.3-3-socket` and `docs/m4.3-3-ledger`, stacked on bb9c226 (by form, "Three stacked PRs": the records 263+/9−, measured green alone at 342; the code 376+/16−; the ledger). 2026-10-09.
+
+**Measured first**, on Darwin and on Linux in Docker (libuv 1.48.0, CI's): [the research record](../../.plans/research/2026-10-09-real-socket-measures.md), and the probes in the scratch `s3/`.
+- **The survivors, on the real shell.** R-6, R-7 and R-6b each logged `late-resume await` when the drain closed the stream under a waiting receive, and K-50b logged three after a send that waited. R-20 kept 1,016 B of a 1,000-byte read on the heap.
+- **A connection's cost,** by the server's own method:
+  - an idle WebSocket in a receive held 11,096 to 11,414 B;
+  - the server at v0.4.0 held 1,793 to 2,073 B for an idle connection and 3,634 B for a parked `await`, as at v0.1.0;
+  - the receive's way back, `call/1cc`, held about 3 KB of the WebSocket's.
+- **Re-arming at every read:** 100.5 to 102.2 µs an echo with it, and 100.9 to 102.2 µs without it. No difference shows, so it stays, with no form.
+- **The kernel:** Linux took 2,560 KiB from a client that never read; macOS 704 to 3,392 KiB. A close behind what it took is graceful.
+- **The pong with a throttled reader:** after a 4 MiB burst, live readers at 96 KiB/s and below were failed with 1011. Timing the pong from the ping's queueing or from its done made no difference.
+
+**Decided by form**, both the recommended:
+- **"call/cc (Recommended)"**, 0005's amendment: a receive's or send's way back out of `await` is a full continuation. An idle WebSocket holds about 3 KB less, and an echo allocates the same within 0.5%.
+- **"From queueing, as now (Recommended)"**, 0001's amendment: no change.
+  - Timing from the done failed the same readers, and left a client that reads nothing, sent 4.2 or 4.3 MB, with nothing armed.
+  - A 60 s timeout kept readers at 32 to 64 KiB/s. The caveat is now in the limits' header.
+
+**What landed:**
+- `(websocket private binding)`: `park!`'s `call/1cc` is now `call/cc`. Its comment says what was measured; the old one had said a `guard` costs a waiting coroutine kilobytes.
+- `tests/test-socket.sps`, six checks. The server's libuv shell runs on 127.0.0.1:0, its clients on the same loop, every wait capped by turns:
+  - an echo and a close;
+  - a silent client failed on the shell's own timer;
+  - the drain under a waiting receive, with no late resume (R-6, R-7, R-6b);
+  - a send that waited, then the client's close, with no late resume (K-50b);
+  - a read's bytevector let go, by the heap (R-20);
+  - a receive's wait within 2 KiB of a bare `await`'s, by the heap (the form's).
+- The path: chez-libuv's `tests/` among `TEST_ONLY_DIRS`, for `(uv-testing)`, which the server's `(shell-testing)` is built on. The driver suite's borrowed list and its names check include it.
+- The records:
+  - decisions 0001, 0005 and 0006;
+  - the design's §8 and §9, and the plan's M4.3;
+  - the limits' header: the ping timeout's caveat;
+  - the README's status: M4 is done;
+  - the research record.
+
+**Where it departs from the plan and the design:**
+- **A measure changed code.** The plan's step 3 was to measure; a connection's cost led to `call/cc`, by form.
+- **The design's §8 promised the late resumes and the read's bytevector** on the real socket. The suite also holds a receive's wait, by the heap.
+- **The bounds of the two heap checks** are derived from both platforms' numbers, recorded in the suite's header.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **Stage 0:** the suite and the path, on main's binding. As predicted, only the park check was red, at 4,047 B: twelve suites, 347 passes.
+- **Stage 1:** `call/cc`.
+  - Its first run is void. The edit was refused, since the file had not been read in the session, so it ran stage 0's tree, red at 4,006 B.
+  - Rerun on the fixed tree: 348, as predicted.
+
+**Mutants:** 12 rows, 11 mutants and the baseline.
+- **Run 1: 1 mismatch,** a prediction error. K-32 also reddened B-CATCHUP, step 2's check; K-32's set had been predicted in step 1's review.
+- **Run 2: 0 mismatches.** **Run 3,** on the final blobs: 0.
+- **On Linux**, each binding mutant reddened the same socket check, by value.
+- **Every new or changed check has a killer by value.** B-LINGER-AFTER survives, as in step 2.
+
+**Stable:** the socket suite 20 of 20 on Darwin. Its heap checks measured, in the suite:
+- Darwin: let-go 88 to 144 B against 2,004, and park −439 to 911 B against 2,048;
+- Linux: 104 to 136 B, and −432 to 335 B.
+
+`make test` green before the commit (Darwin arm64): twelve suites, 348 expected passes, every pin ok. `make prod` green.
+
+With this, every bullet of the plan's M4.3 is held, and M4 is done once it merges.
+
+NEXT: the PRs by form; review and the closing ritual when the owner asks; then M5, the Autobahn lane, whose image needs the owner's word to pull.
