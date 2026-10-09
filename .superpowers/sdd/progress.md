@@ -1426,3 +1426,36 @@ M4.3 STEP 1'S REVIEW. Branches `docs/m4.3-1-review-decisions`, `fix/m4.3-1-revie
 `make test` green before the commit (Darwin arm64): eleven suites, 316 expected passes, every pin ok. `make prod` green.
 
 NEXT: the PRs by form; then review and the closing ritual for #37 to #39 and this, when the owner asks; then step 2.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritual": **M4.3 step 1, and its review** (the two entries above), from the stacked #37 to #42, as c3936e8, a2d66d1, c6fb0b9, 7e1de70, c24e336 and 7548fcb, bottom-up.
+- **The squashes.** Each has the tree of the head CI tested:
+  - c3936e8 has 200915b's, on 9135b59;
+  - a2d66d1 has 80dd5d8's, on c3936e8;
+  - c6fb0b9 has d1c3e95's, on a2d66d1;
+  - 7e1de70 has c98de54's, on c6fb0b9;
+  - c24e336 has a3f45bb's, on 7e1de70;
+  - 7548fcb has 348d838's, on c24e336.
+
+  #38 was rebased onto #37's squash from df90789 (its two commits), #39 onto #38's from a92b7da (its two), #40 onto #39's from 0753d36, #41 onto #40's from 44fde97, and #42 onto #41's from 10a8074. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #37 at 200915b (run 37921560910): ten suites, 266;
+  - #38, rebased, at 80dd5d8 (run 37929141243): eleven suites, 304;
+  - #39 at d1c3e95 (run 37929372123): 304;
+  - #40 at c98de54 (run 37929601512): 304;
+  - #41 at a3f45bb (run 37929828514): 316;
+  - #42 at 348d838 (run 37930058902): 316.
+
+  Main's runs on c3936e8 (37929110860), a2d66d1 (37929352468), c6fb0b9 (37929584841), 7e1de70 (37929813717) and c24e336 (37930043456) each finished green before the next merge. This reflect was pushed after main's run on 7548fcb, 37930275643, green.
+- **Branches.** `docs/m4.3-1-design`, `feat/m4.3-1-binding`, `docs/m4.3-1-ledger`, `docs/m4.3-1-review-decisions`, `fix/m4.3-1-review` and `docs/m4.3-1-review-ledger` were deleted, local and remote. No PR is open.
+
+**M4.3 step 1 is complete on main:**
+- the binding and the facade, held on the server's fake shell;
+- decision 0005, many senders and one receive;
+- decision 0003's amendment, X-Forwarded-Proto's leftmost element;
+- the suites run with no `CHEZ_WS_` variable set.
+
+`make test` green on main: eleven suites, 316 expected passes, every pin ok.
+
+NEXT: M4.3 step 2, a client that does not read: the abort where the binding closes such a client, and the send side's bound by form, measured on this binding first. Step 3's real socket carries the five survivors: four late resumes the fake logs nowhere, and a read's bytevector kept.
