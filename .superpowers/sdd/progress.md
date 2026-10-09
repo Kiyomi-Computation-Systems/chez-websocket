@@ -1368,6 +1368,11 @@ M4.3, STEP 1 — THE BINDING AND THE FACADE. Branches `docs/m4.3-1-design`, `fea
 - **Every new or changed check has a killer by value.**
 - **Three survivors, as predicted** (K-45, K-50, K-50b): each a late resume, which the fake logs nowhere. Step 3's real socket holds them.
 
+**CI's first run found the suite naming Chez `chez`.** Run 37921568542 failed V-ENV, (127 127): CI names Chez `scheme`, in `CHEZ`.
+- The child now runs `"${CHEZ:-chez}"`. Shown red first on a PATH holding Chez only as `scheme`, then green: 35 there, and 304 under `make test`.
+- Run 5 of the mutants, on the fixed suite: 86 rows, 0 mismatches.
+- The fix is its own commit on the binding's branch. The ledger was rebased onto it.
+
 `make test` green before the commit (Darwin arm64): eleven suites, 304 expected passes, every pin ok.
 
 NEXT: step 2, a client that does not read: the abort where the binding closes such a client, and the send side's bound by form, measured on this binding first.

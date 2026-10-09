@@ -796,7 +796,7 @@ Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
 2026-10-09.
 - **The code:** `src/websocket/private/binding.sls` (blob 6d10ab9) and the facade,
   `src/websocket.sls` (3fac36f).
-- **The suites:** `tests/test-binding.sps`, 35 checks (82b5dfb), with the child program
+- **The suites:** `tests/test-binding.sps`, 35 checks (e9bbc4c), with the child program
   it runs, `tests/start-with-environment.sps` (b3729af); and the import audit,
   `tests/test-imports.sps`, now 10 (9a7964e).
 
@@ -928,6 +928,15 @@ Specs hashed before each run, the names (`750524d`) and the runner (`e2a3035`) w
   - M-BOM gained the three texts one byte off U+FEFF, U+EEFF, U+FEBF and U+FEFE.
   - Their mutants, K-34c to K-34e, each take one of the byte-order mark's three byte
     tests away.
+- **Run 5** (`e4be871` again), after CI's first run: 86 rows, 0 mismatches, on the suite
+  whose child runs on the suites' own Chez (blob e9bbc4c).
+  - CI's run 37921568542 failed V-ENV, (127 127) for (8 255). The child was run as
+    `chez`, and CI names Chez `scheme`, in `CHEZ`.
+  - The child now runs `"${CHEZ:-chez}"`. make hands its recipes a `CHEZ` set in the
+    environment or on its command line (measured with GNU Make 3.81). The Makefile's
+    own default is `chez`.
+  - Test first, on a PATH holding Chez only as `scheme`, with `CHEZ=scheme`: V-ENV red,
+    (127 127), the other 34 green; after the fix, 35 there, and 304 under `make test`.
 
 | # | mutation | red, as predicted |
 |---|----------|-----|
