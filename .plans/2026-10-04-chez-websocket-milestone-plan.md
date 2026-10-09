@@ -85,7 +85,9 @@ and the door suite.
   (2026-10-09): 1, the binding and the facade on the fake shell; 2, a client that does
   not read, with the send side's bound by form; 3, the real socket and the measures.
   Step 2's form (0006): reading stops past the high water, with a write timeout of its
-  own, `CHEZ_WS_WRITE_TIMEOUT`, 60 s.
+  own, `CHEZ_WS_WRITE_TIMEOUT`, 60 s. Its review's forms (0006's amendment): the close
+  timed from queueing, as peers time it, and at least 1 s; a send that waits before
+  it writes too; a frame written in pieces of 64 KiB.
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;

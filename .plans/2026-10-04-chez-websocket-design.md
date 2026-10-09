@@ -200,10 +200,14 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
     delivered, and a ping is answered, since no close has been received (§5.5.2).
     This is websockets' way, decided by form (0001's second amendment). A full
     queue nobody takes from leaves the client's close unread until the close
-    timeout.
+    timeout, and so does a client that is behind (the write side, below).
   - A close sent and not answered within 10 s aborts the stream, writing nothing, and
     1006 is told: websockets' `close_timeout`, which ends in `transport.abort()`.
     The client has had its time, so what is unsent is dropped (0006).
+  - The 10 s run from the close's queueing, as websockets', ws's and coder's do (0006's
+    amendment, by form: "From queueing, as peers do"). So at a close a client reads
+    what was unsent before it, and the close, within them: at the default high water,
+    25.6 KiB/s. The close timeout is at least 1 s.
   - The stream's end with no close received closes the stream, writes nothing, and
     tells 1006 (§7.1.5), as websockets and ws do.
   - At the close timeout and at the stream's end, no more bytes will come, so what
@@ -217,15 +221,21 @@ actions  (write bv)  (deliver kind payload)  (read-stop)  (read-start)
   read side.
   - Each `write` the step answers counts its bytes unsent. `(written nbytes)` takes
     them off: the binding steps it as each write's done comes, whatever the done says.
+    A done that tells a failure is then stepped as the stream's end too (step 2's
+    review).
   - Once a step leaves more than the high water unsent (256 KiB, the server's own),
     the client is behind.
     - Reading stops, and the ping clock with it. A read that passes the high water
       stops at the frame that did, and keeps the rest waiting, as a full queue does.
     - While the connection is open, `write` is armed: the write timeout, 60 s. After
       the server's close, the close deadline goes on in its place.
-  - Each `written` while behind re-arms `write`. One that leaves no more than the low
-    water (64 KiB) ends it: `write` disarmed, what waits read, then reading started,
-    and the clock afresh, unless the queue is full.
+  - While open, each `written` while behind re-arms `write`. After the server's close,
+    nothing is re-armed: the close deadline stands. One that leaves no more than the
+    low water (64 KiB) ends it: `write` disarmed, if armed, what waits read, then
+    reading started, and the clock afresh, unless the queue is full.
+  - Falling behind and catching up, nothing waiting, end a step with constant tails, as
+    the clock's re-arming does, so a send that waits for every done costs what it did
+    before 0006 (step 2's review).
   - When `write` passes, the client has read nothing for the write timeout. The step
     answers `(abort-stream)`, writes nothing, and logs `failed` with no code and
     `write-timeout`. It lets go of what waits for the queue, and tells 1006.
@@ -260,11 +270,11 @@ are stepped through the core in place, and the actions run at once:
 
 | action | performed with |
 |---|---|
-| `write` | `transport-write!`; its done stepped as `(written nbytes)` (0006) |
+| `write` | `transport-write!`, in writes of 64 KiB at most (0006's amendment, by form: "In 64 KiB writes"); each done stepped as `(written nbytes)`, and one that tells a failure as `(end why)` too (0006) |
 | `deliver` | the message queued for `websocket-receive`, which is resumed if it waits |
 | `read-stop`, `read-start` | the transport's verbs |
 | `arm-deadline`, `disarm-deadline` | `transport-deadline!`, the transport's one deadline, armed for the kind's time (`ping` the ping interval, `pong` the ping timeout, `close` the close timeout, `write` the write timeout); when it passes, a `deadline-passed` |
-| `close-stream` | the deadline armed for the close timeout, its call `transport-abort!`, then `transport-close!`, which closes once what is unsent has been written: a client that has not read it within the close timeout is aborted. A close that begins at once, nothing unsent, disarms the deadline, in both of the server's shells (0006) |
+| `close-stream` | the deadline armed for the close timeout, its call `transport-abort!`, then `transport-close!`, which closes once what is unsent has been written: a client that has not read it within the close timeout, timed from here as peers time a close, is aborted. A close that begins at once, nothing unsent, disarms the deadline, in both of the server's shells (0006) |
 | `abort-stream` | `transport-abort!`, which closes at once and drops what is unsent: the close timeout, or the write timeout, has passed (0006) |
 | `closed` | the WebSocket's end: every receive and send after it raises `&websocket-closed`; a receive or a send that waits is woken at once |
 | `log` | a line on the current output port, as the server logs: `websocket-` and the core's name, then each detail (M4.3) |
@@ -292,7 +302,9 @@ are stepped through the core in place, and the actions run at once:
     read raises or returns an error once closed.
 - **`websocket-send!`** steps a `send` and writes its frame. While the core says the
   client is behind (`ws-behind?`), it parks (0006): more than 256 KiB unsent, until a
-  done brings that to 64 KiB or less. These are the server's own stream water marks
+  done brings that to 64 KiB or less. It parks before it writes, and after a write that
+  puts the client behind (0006's amendment, by form: "Wait before writing too"), so
+  many procedures sending make the server hold no more than one does. These are the server's own stream water marks
   (`CHEZ_HTTP_WRITE_HIGH_WATER`, `_LOW_WATER`), compared as the server compares them.
   - A send woken by the connection's end raises `&websocket-closed`.
   - **While the server's close is under way**, a send sends nothing: it waits for the
@@ -306,7 +318,8 @@ are stepped through the core in place, and the actions run at once:
   asks the core whether the connection is open (`ws-open?`), and keeps no phase of
   its own (M4.3's review).
 - **Many senders, one receive** (0005, by form). Any number of coroutines may wait to
-  send on a WebSocket, and all go on together at the low water. One receive may wait,
+  send on a WebSocket. All are woken at the low water, and each goes on in turn while
+  the client is not behind. One receive may wait,
   and a second is refused naming `websocket-receive`. Each wait knows the WebSocket
   whose procedure runs on its coroutine, from a parameter set around the procedure.
 - **The stream's close.** When the stream closes, whoever closed it, the wait the
@@ -349,16 +362,17 @@ there. A handler may give `websocket-accept` limits of its own.
 | `CHEZ_WS_MAX_QUEUE` | 16 | messages queued before reading stops | 0001's amendment; websockets' `max_queue` |
 | `CHEZ_WS_PING_INTERVAL` | 20 s | quiet time before a ping; 0 turns pinging off | 0001; websockets |
 | `CHEZ_WS_PING_TIMEOUT` | 20 s | time for the pong; past it, 1011 | 0001; websockets |
-| `CHEZ_WS_CLOSE_TIMEOUT` | 10 s | time for the client's close, after the server's | websockets' `close_timeout` |
+| `CHEZ_WS_CLOSE_TIMEOUT` | 10 s | time for the client's close, after the server's, and to read what was unsent when a close was asked for; past it, the stream aborted | websockets' `close_timeout`; 0006 |
 | `CHEZ_WS_WRITE_HIGH_WATER` | 262144 | bytes unsent before a send waits, and reading stops | the server's own; 0006 |
 | `CHEZ_WS_WRITE_LOW_WATER` | 65536 | bytes unsent when both go on again | the server's own; 0006 |
-| `CHEZ_WS_WRITE_TIMEOUT` | 60 s | time for a write's done, while more than the high water is unsent; past it, the stream aborted | the server's own `CHEZ_HTTP_WRITE_TIMEOUT` (0006) |
+| `CHEZ_WS_WRITE_TIMEOUT` | 60 s | time for each write's done while the client is behind, from past the high water until the low water; past it, the stream aborted | the server's own `CHEZ_HTTP_WRITE_TIMEOUT` (0006) |
 
 Durations are in seconds, as the server's are. A value is a whole number in ASCII
 digits, nothing else. Each has a least value: a cap and a queue of 1, since a cap
 of 0 would stop reading for good; a pong timeout of 1 s, since one of 0 would pass
 as its ping went; a write timeout of 1 s, since one of 0 would pass as reading
-stopped; 0 for the rest. Each is a fixnum at most, since the server's
+stopped; a close timeout of 1 s, since one of 0 would abort a close before the
+client could read it (0006's amendment); 0 for the rest. Each is a fixnum at most, since the server's
 transport arms a deadline only for a fixnum of ms. A low water above the high water
 is refused.
 
@@ -407,7 +421,9 @@ is refused.
       run otherwise, since the binding reads them as the program starts;
     - plays a client that reads nothing by delivering its bytes while the binding
       reads, with no later turn between: `fake-shell-feed-input!` settles before each
-      delivery, so it plays a client that reads (step 2).
+      delivery, so it plays a client that reads (step 2);
+    - plays a client that reads at a rate, each write the client's once it has read
+      its last byte (`reading-at!`, step 2's review).
   - **What the fake cannot show.** It logs a late resume nowhere. So these are held on
     the real socket (M4.3's step 3):
     - the binding letting go of a resume it has called;
@@ -468,6 +484,13 @@ is refused.
     client the close timeout to read what was written, then aborts; the close timeout
     passing aborts at once, as websockets' does. Measured on the fake shell before:
     each of the five closes waited for the hour.
+  - **Its review, by form** ("From queueing, as peers do"): the close timeout runs
+    from the close's queueing, as peers time theirs, and is at least 1 s. So a client
+    reading slower than the high water over the close timeout, 25.6 KiB/s, is aborted
+    at a close: 200 KiB, then a close, read at 15 KiB/s, is aborted at 15 s, the
+    client given two of its four 64 KiB writes. Timing the close from its done, the
+    write timeout before it, was measured and not taken: a client reading nothing
+    would be held 60 s after a close, not 10 s.
 - **A client that sends and does not read** (M4; M3.3's review). Nothing in the core
   bounds it.
   - With the queue full, reading and the ping clock stop, and nothing is armed (0001).
@@ -481,6 +504,10 @@ is refused.
   - **Decided in M4.3 step 2, by form** (0006, "Reading stops past the high water"):
     past the high water, reading stops and a write timeout runs, 60 s,
     `CHEZ_WS_WRITE_TIMEOUT` ("60 s, its own variable").
+  - **Its review, by form** (0006's amendment): a send waits before it writes too, so
+    20 procedures sending 64 KiB to a client that reads nothing hold 262,184 B, not
+    1,310,920 B; and a frame goes in writes of 64 KiB, so a client reading 10 MiB at
+    100 KiB/s reads it whole, where one write was aborted at 65 s.
 - **When the pong's time starts** (M4.3; M3.3's review). The step arms `pong` as it
   writes the ping, so its 20 s start when the ping is queued. Behind up to 256 KiB
   unsent (§6), and the kernel's buffer, a ping reaches a slow reader late, and a live
