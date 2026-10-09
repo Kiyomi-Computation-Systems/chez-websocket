@@ -17,8 +17,12 @@
 ;;;   ping-timeout-ms    20 s for its pong; past it, 1011 (0001)
 ;;;   close-timeout-ms   10 s for the client's close, after the server's
 ;;;                      (websockets' close_timeout)
-;;;   write-high-water   256 KiB unsent before a send waits, and
-;;;   write-low-water    64 KiB unsent when it goes on: the server's own
+;;;   write-high-water   256 KiB unsent before a send waits, and reading
+;;;                      stops, and
+;;;   write-low-water    64 KiB unsent when both go on: the server's own
+;;;   write-timeout-ms   60 s for a write's done while past the high water;
+;;;                      past it, the stream aborted: the server's own
+;;;                      CHEZ_HTTP_WRITE_TIMEOUT (decision 0006)
 ;;; Durations are given in whole seconds and kept in milliseconds, the unit
 ;;; the server's transport arms a deadline in; sizes and counts are given and
 ;;; kept in their own unit.  A variable absent or empty is its default.  A
@@ -30,7 +34,8 @@
 ;;; queue are at least 1: reading stops once the queue holds a cap's worth,
 ;;; so a cap of 0 would stop it for good.  A pong's timeout is at least
 ;;; 1 ms, since one of 0 would pass as its ping went; read in whole seconds,
-;;; that is at least 1 s.  The rest are at least 0.  Each is a fixnum at
+;;; that is at least 1 s.  So is a write's timeout, since one of 0 would
+;;; pass as reading stopped.  The rest are at least 0.  Each is a fixnum at
 ;;; most: the server's transport arms a deadline only for a fixnum of ms
 ;;; (transport-deadline!), and the step counts in fixnums, so a value past
 ;;; one is refused here, as the program starts, not where it is used.  A low
@@ -43,11 +48,11 @@
           websocket-limits-max-message-bytes websocket-limits-max-queue
           websocket-limits-ping-interval-ms websocket-limits-ping-timeout-ms
           websocket-limits-close-timeout-ms websocket-limits-write-high-water
-          websocket-limits-write-low-water)
+          websocket-limits-write-low-water websocket-limits-write-timeout-ms)
   (import (rnrs))
 
   ;; The record, as made: new-limits checks nothing.  The record type
-  ;; defines its predicate and the seven accessors:
+  ;; defines its predicate and the eight accessors:
   ;;   websocket-limits? : Any -> Boolean
   ;;   websocket-limits-max-message-bytes : WebsocketLimits -> Nat
   ;;   websocket-limits-max-queue : WebsocketLimits -> Nat
@@ -56,11 +61,12 @@
   ;;   websocket-limits-close-timeout-ms : WebsocketLimits -> Nat
   ;;   websocket-limits-write-high-water : WebsocketLimits -> Nat
   ;;   websocket-limits-write-low-water : WebsocketLimits -> Nat
+  ;;   websocket-limits-write-timeout-ms : WebsocketLimits -> Nat
   (define-record-type (websocket-limits new-limits websocket-limits?)
     (fields (immutable max-message-bytes) (immutable max-queue)
             (immutable ping-interval-ms) (immutable ping-timeout-ms)
             (immutable close-timeout-ms) (immutable write-high-water)
-            (immutable write-low-water)))
+            (immutable write-low-water) (immutable write-timeout-ms)))
 
   ;; The fields, in order: each one's name, its variable, its least value,
   ;; how many of its kept unit one of its variable's makes, and its accessor.
@@ -71,7 +77,8 @@
           (list 'ping-timeout-ms   "CHEZ_WS_PING_TIMEOUT"      1 1000 websocket-limits-ping-timeout-ms)
           (list 'close-timeout-ms  "CHEZ_WS_CLOSE_TIMEOUT"     0 1000 websocket-limits-close-timeout-ms)
           (list 'write-high-water  "CHEZ_WS_WRITE_HIGH_WATER"  0 1    websocket-limits-write-high-water)
-          (list 'write-low-water   "CHEZ_WS_WRITE_LOW_WATER"   0 1    websocket-limits-write-low-water)))
+          (list 'write-low-water   "CHEZ_WS_WRITE_LOW_WATER"   0 1    websocket-limits-write-low-water)
+          (list 'write-timeout-ms  "CHEZ_WS_WRITE_TIMEOUT"     1 1000 websocket-limits-write-timeout-ms)))
 
   (define spec-name car)
   (define (spec-variable spec) (cadr spec))
@@ -104,23 +111,23 @@
                              (named 'write-high-water labels) high)))
     vs)
 
-  ;; make-websocket-limits : Nat Nat Nat Nat Nat Nat Nat -> WebsocketLimits
+  ;; make-websocket-limits : Nat Nat Nat Nat Nat Nat Nat Nat -> WebsocketLimits
   ;; Limits of these values, in the fields' order: max-message-bytes
   ;; max-queue ping-interval-ms ping-timeout-ms close-timeout-ms
-  ;; write-high-water write-low-water.  A value below its field's least, or
-  ;; not a fixnum, or a low water above the high water, is an assertion
-  ;; violation naming the field.
+  ;; write-high-water write-low-water write-timeout-ms.  A value below its
+  ;; field's least, or not a fixnum, or a low water above the high water, is
+  ;; an assertion violation naming the field.
   (define (make-websocket-limits max-message-bytes max-queue ping-interval-ms
                                  ping-timeout-ms close-timeout-ms
-                                 write-high-water write-low-water)
+                                 write-high-water write-low-water write-timeout-ms)
     (apply new-limits
            (checked 'make-websocket-limits (map spec-name specs)
                     (list max-message-bytes max-queue ping-interval-ms ping-timeout-ms
-                          close-timeout-ms write-high-water write-low-water))))
+                          close-timeout-ms write-high-water write-low-water write-timeout-ms))))
 
   ;; default-websocket-limits : WebsocketLimits
   (define default-websocket-limits
-    (make-websocket-limits 1048576 16 20000 20000 10000 262144 65536))
+    (make-websocket-limits 1048576 16 20000 20000 10000 262144 65536 60000))
 
   ;; websocket-limits-environment-variables : (Listof String)
   ;; The variables websocket-limits-from-environment reads, in the fields'

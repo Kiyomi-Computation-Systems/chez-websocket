@@ -12,18 +12,24 @@
 ;;; procedure with the WebSocket, on the coroutine the server gives it.
 ;;;
 ;;; Every event the core is told, a read, its end, a deadline passing, a
-;;; take, a send, a close, is stepped at once, and the actions performed at
-;;; once, in order:
-;;;   write            transport-write!, its bytes counted unsent until its
-;;;                    done comes
+;;; take, a write's done, a send, a close, is stepped at once, and the
+;;; actions performed at once, in order:
+;;;   write            transport-write!, its done, whatever it says, stepped
+;;;                    as written (decision 0006)
 ;;;   deliver          the message queued for websocket-receive, which is
 ;;;                    woken if it waits
 ;;;   read-stop, read-start   the transport's verbs
 ;;;   arm-deadline     transport-deadline!, for the kind's time: ping the
 ;;;                    ping interval, pong the ping timeout, close the close
-;;;                    timeout; its passing stepped as deadline-passed
+;;;                    timeout, write the write timeout; its passing stepped
+;;;                    as deadline-passed
 ;;;   disarm-deadline  transport-deadline! with #f
-;;;   close-stream     transport-close!
+;;;   close-stream     the deadline armed for the close timeout, its call
+;;;                    transport-abort!, then transport-close!: a client that
+;;;                    has not read what was written by then is aborted
+;;;                    (0006)
+;;;   abort-stream     transport-abort!: the close timeout, or the write
+;;;                    timeout, has passed
 ;;;   closed           the WebSocket's end, &websocket-closed, kept; a
 ;;;                    receive or a send that waits is woken
 ;;;   log              a line on the current output port, as the server
@@ -32,9 +38,10 @@
 ;;; The waits (decision 0005).  A receive or a send waits on `await`, its
 ;;; waiter kept on the WebSocket, with the WebSocket whose procedure runs on
 ;;; the coroutine that waits, if any (`current-websocket`, set around each
-;;; procedure).  Any number of coroutines may wait to send, and all go on
-;;; together; one receive may wait, and a second while it does is refused,
-;;; as websockets refuses it.  Waking lets the waiter go.
+;;; procedure).  Any number of coroutines may wait to send, while the core
+;;; says the client is behind (ws-behind?, 0006), and all go on together at
+;;; the done that ends it; one receive may wait, and a second while it does
+;;; is refused, as websockets refuses it.  Waking lets the waiter go.
 ;;;
 ;;; The stream's close, whoever closed it (decision 0023).  The server tells
 ;;; the wait the procedure is in, or else its next, raising &client-closed
@@ -92,21 +99,19 @@
   ;; pair or #f; `receiver` the waiter of the receive that waits, or #f;
   ;; `senders` the waiters of the sends that wait; `parked` the waiter its
   ;; own procedure last waited in, on this WebSocket or another, or #f;
-  ;; `unsent`
-  ;; the bytes written whose done has not come; `ended` the
-  ;; &websocket-closed once the connection has ended, or #f.  The core's
-  ;; callbacks are made once, here, and its read and take events too, each
-  ;; filled in before it is stepped, so neither allocates (the core keeps no
-  ;; event).
+  ;; `ended` the &websocket-closed once the connection has ended, or #f.
+  ;; What is unsent is the core's to count (0006).  The core's callbacks are
+  ;; made once, here, and its read, take and done events too, each filled in
+  ;; before it is stepped, so none allocates (the core keeps no event).
   ;;   websocket? : Any -> Boolean
   ;;   websocket-subprotocol : WebSocket -> (U String #f)
   (define-record-type (websocket new-websocket websocket?)
     (fields (immutable transport) (mutable state) (immutable limits)
             (immutable subprotocol)
             (mutable head) (mutable tail) (mutable receiver) (mutable senders)
-            (mutable parked) (mutable unsent) (mutable ended)
+            (mutable parked) (mutable ended)
             (mutable on-bytes) (mutable on-end) (mutable passed)
-            (immutable read-event) (immutable taken-event)))
+            (immutable read-event) (immutable taken-event) (immutable written-event)))
 
   ;; A wait: its resume, the WebSocket whose procedure waits in it, or #f,
   ;; and whether the stream's close has ended it.
@@ -162,8 +167,8 @@
   (define (take-over transport retained proc limits subprotocol)
     (let* ((state (make-ws-state limits))
            (ws (new-websocket transport state limits subprotocol
-                              '() #f #f '() #f 0 #f #f #f #f
-                              (list 'bytes #f 0 0) (list 'taken 0))))
+                              '() #f #f '() #f #f #f #f #f
+                              (list 'bytes #f 0 0) (list 'taken 0) (list 'written 0))))
       (websocket-on-bytes-set! ws
         (lambda (bv start end)
           (let ((event (websocket-read-event ws)))
@@ -221,23 +226,38 @@
         ((read-start) (start-reading! ws))
         ((arm-deadline) (arm! ws (cadr action)))
         ((disarm-deadline) (transport-deadline! t #f))
-        ((close-stream) (transport-close! t))
+        ((close-stream) (close-stream! ws))
+        ((abort-stream) (transport-abort! t))
         ((closed) (ended! ws (cadr action) (caddr action) (cadddr action)))
         ((log) (log-line (string-append "websocket-" (symbol->string (cadr action)))
                          (cddr action))))))
 
   ;; write! : WebSocket Bytevector -> Void
-  ;; The bytes written, and counted unsent until their done comes, which
-  ;; wakes a send that waits once no more than the low water is unsent.
+  ;; The bytes written; their done, whatever it says, a failure or a
+  ;; cancel among them, stepped as written.
   (define (write! ws bv)
     (let ((n (bytevector-length bv)))
-      (websocket-unsent-set! ws (fx+ (websocket-unsent ws) n))
-      (transport-write! (websocket-transport ws) bv 0 n
-                        (lambda (why)
-                          (websocket-unsent-set! ws (fx- (websocket-unsent ws) n))
-                          (when (fx<=? (websocket-unsent ws)
-                                       (websocket-limits-write-low-water (websocket-limits ws)))
-                            (wake-senders! ws))))))
+      (transport-write! (websocket-transport ws) bv 0 n (lambda (why) (wrote! ws n)))))
+
+  ;; wrote! : WebSocket Nat -> Void
+  ;; A write's n bytes done, stepped; the sends that wait woken once the
+  ;; client is no longer behind.
+  (define (wrote! ws n)
+    (let ((event (websocket-written-event ws)))
+      (set-car! (cdr event) n)
+      (step! ws event)
+      (unless (ws-behind? (websocket-state ws)) (wake-senders! ws))))
+
+  ;; close-stream! : WebSocket -> Void
+  ;; The stream closed once what is written has gone, unless the client has
+  ;; not read it within the close timeout: then aborted (0006).  The deadline
+  ;; goes first: a close that begins at once, nothing unsent, disarms it, in
+  ;; both of the server's shells.
+  (define (close-stream! ws)
+    (let ((t (websocket-transport ws)))
+      (transport-deadline! t (websocket-limits-close-timeout-ms (websocket-limits ws))
+                           (lambda () (transport-abort! t)))
+      (transport-close! t)))
 
   ;; arm! : WebSocket Symbol -> Void — the deadline, for its kind's time.
   (define (arm! ws kind)
@@ -246,6 +266,7 @@
                            (case kind
                              ((ping) (websocket-limits-ping-interval-ms limits))
                              ((pong) (websocket-limits-ping-timeout-ms limits))
+                             ((write) (websocket-limits-write-timeout-ms limits))
                              (else (websocket-limits-close-timeout-ms limits)))
                            (websocket-passed ws))))
 
@@ -345,9 +366,9 @@
 
   ;; websocket-send! : WebSocket (U String Bytevector) -> Void
   ;; Sends a text of the string, or a binary of the bytevector, as one
-  ;; frame.  While more than the high water is unsent, it waits until no
-  ;; more than the low water is, beside any other send that waits (decision
-  ;; 0005).  Once the connection has ended it raises &websocket-closed;
+  ;; frame.  While the client is behind, more than the high water unsent, it
+  ;; waits until a done brings that to the low water, beside any other send
+  ;; that waits (decisions 0005 and 0006).  Once the connection has ended it raises &websocket-closed;
   ;; while the server's close is under way it sends nothing, waits for the
   ;; end, and then raises it, as websockets does.
   (define (websocket-send! ws payload)
@@ -361,7 +382,7 @@
              (raise (websocket-ended ws)))
             (else
              (step! ws (list 'send kind payload))
-             (when (fx>? (websocket-unsent ws) (websocket-limits-write-high-water (websocket-limits ws)))
+             (when (ws-behind? (websocket-state ws))
                (park! ws #t)
                (cond ((websocket-ended ws) => raise)))))))
 

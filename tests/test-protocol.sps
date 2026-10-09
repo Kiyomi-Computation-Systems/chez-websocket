@@ -47,6 +47,14 @@
 ;;;   may carry no payload, so its frame is two bytes; §7.4.1, 1011; and
 ;;;   websockets 17.2's keepalive, which fails with 1011 when its ping's pong
 ;;;   does not come in time.
+;;; - For the write side (M4.3 step 2): decision 0006, by form ("Reading stops
+;;;   past the high water"): what is written and not yet done counted; past
+;;;   the high water the client is behind, reading and the ping clock
+;;;   stopped and the write timeout armed while open; each done re-arming
+;;;   it, one at the low water or under ending it; its passing aborting the
+;;;   stream, writing nothing, and telling 1006.  And the close timeout
+;;;   passing aborts the stream: websockets 17.2's close_timeout ends in
+;;;   transport.abort() (asyncio/connection.py:910-911, 942-957).
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
 ;;; Node's ws 7.5.10 was fed every case in its pieces but the ping clock's,
@@ -267,6 +275,11 @@
 ;; not cleanly (§7.1.5, §7.1.6), and nothing written.
 (define lost (list '(close-stream) (list 'closed 1006 no-bytes #f)))
 
+;; The close timeout passed (0006): the stream aborted, nothing written, and
+;; 1006 told, not cleanly; websockets' close_timeout ends in
+;; transport.abort().
+(define timed-out (list '(abort-stream) (list 'closed 1006 no-bytes #f)))
+
 ;; failed-closing : Symbol -> (Listof Action)
 ;; Failing once the server's close is sent: no second close (§7.1.7), the
 ;; deadline disarmed, the stream closed, the reason logged with no code,
@@ -280,6 +293,24 @@
 (define quiet '(arm-deadline ping))
 (define awaiting '(arm-deadline pong))
 (define pinged (wrote #x89 '()))
+
+;; The write timeout armed (0006).
+(define writing '(arm-deadline write))
+
+;; marks : Nat Nat -> WebsocketLimits
+;; The default limits, pinging on, with these write water marks.
+(define (marks high low)
+  (websocket-limits-with default-websocket-limits
+    (list (cons 'write-high-water high) (cons 'write-low-water low))))
+
+;; behinds : WsState (Listof Event) -> (Listof Boolean)
+;; Whether the client is behind after each event, stepped in turn.
+(define (behinds s events)
+  (let loop ((events events) (out '()))
+    (if (null? events)
+        (reverse out)
+        (let-values (((s* actions) (ws-step s (car events))))
+          (loop (cdr events) (cons (ws-behind? s*) out))))))
 
 ;; told : (U Symbol #f) Event (Listof Action) -> (U Symbol #f)
 ;; The deadline a binding has armed after a step, from the one it had and
@@ -703,10 +734,10 @@
                       (step* (make-ws-state (lim 1048576 1))
                              (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))))
     ;; --- the close timeout (design §5; M3.2) ---
-    (test-equal "the close timeout (design §5): a close sent and not answered by its deadline closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written, a message unfinished or not; a close after it answers nothing"
-                (list (list (list (server-close 1000 '()) armed) lost)
-                      (list '() (list (server-close 1000 '()) armed) lost)
-                      (list (list (server-close 1000 '()) armed) lost '()))
+    (test-equal "the close timeout (design §5): a close sent and not answered by its deadline aborts the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written, a message unfinished or not; a close after it answers nothing"
+                (list (list (list (server-close 1000 '()) armed) timed-out)
+                      (list '() (list (server-close 1000 '()) armed) timed-out)
+                      (list (list (server-close 1000 '()) armed) timed-out '()))
                 (list (step* (make-ws-state open) '((close 1000 "") (deadline-passed)))
                       (step* (make-ws-state open)
                              (list (read-event (frame #x01 (ascii "Hel"))) '(close 1000 "") '(deadline-passed)))
@@ -727,7 +758,7 @@
                             (list (deliver 'binary '(2)) '(close-stream) (list 'closed 1001 no-bytes #t)))
                       (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
                             (list (server-close 1000 '()) armed)
-                            (cons (deliver 'binary '(2)) lost)))
+                            (cons (deliver 'binary '(2)) timed-out)))
                 (list (step* (make-ws-state default-websocket-limits)
                              (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))
                                                        (frame #x88 '(#x03 #xE9))))
@@ -753,7 +784,7 @@
     (test-equal "once the connection has ended, the stream's end answers nothing: after a client's close, a failure, the close timeout, or the stream's end; and after the stream's end, a close answers nothing"
                 (list (list (answered 1000 '()) '())
                       (list (failed 1002 'unknown-opcode) '())
-                      (list (list (server-close 1000 '()) armed) lost '())
+                      (list (list (server-close 1000 '()) armed) timed-out '())
                       (list lost '() '()))
                 (list (step* (make-ws-state open) (list (read-event (frame #x88 '(#x03 #xE8))) '(end eof)))
                       (step* (make-ws-state open) (list (read-event (frame #x83 '())) '(end eof)))
@@ -852,12 +883,12 @@
                       (step* (make-ws-state (pinging 1))
                              (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2)))) '(taken 1) '(taken 1)))))
     (test-equal "the server's close takes the connection's one deadline from the ping clock, over ping, over pong, or while the clock is stopped: then bytes re-arm nothing, a take that starts reading arms nothing more, reading stopped leaves the close's deadline armed, and its passing is the close timeout's, not 1011"
-                (list (list (list (server-close 1000 '()) armed) (list (deliver 'text hello)) lost)
-                      (list (list pinged awaiting) (list (server-close 1000 '()) armed) lost)
+                (list (list (list (server-close 1000 '()) armed) (list (deliver 'text hello)) timed-out)
+                      (list (list pinged awaiting) (list (server-close 1000 '()) armed) timed-out)
                       (list (list (deliver 'binary '(1)) '(read-stop) disarmed)
                             (list (server-close 1000 '()) armed)
                             '((read-start)))
-                      (list (list (server-close 1000 '()) armed) (list (deliver 'binary '(1)) '(read-stop)) lost))
+                      (list (list (server-close 1000 '()) armed) (list (deliver 'binary '(1)) '(read-stop)) timed-out))
                 (list (step* (make-ws-state (pinging 16))
                              (list '(close 1000 "") (read-event (frame #x81 hello)) '(deadline-passed)))
                       (step* (make-ws-state (pinging 16)) '((deadline-passed) (close 1000 "") (deadline-passed)))
@@ -898,14 +929,18 @@
                         (refusal (lambda () (ws-deadline (pinging 16)))))))
     (test-equal "the deadline a connection names, as made and after each step, is the one its steps have told the binding: armed by an arm, none once disarmed, none once its passing lets it go with nothing armed again, and none once ended; ended with ping or pong armed, and with pinging off"
                 (map (lambda (kinds) (list kinds kinds))
-                     '((ping #f ping pong ping close #f) (ping #f) (ping pong #f) (ping #f) (#f close #f)))
+                     '((ping #f ping pong ping close #f) (ping #f) (ping pong #f) (ping #f) (#f close #f)
+                       (ping ping write write ping ping write #f)))
                 (list (deadlines (make-ws-state (pinging 1))
                                  (list (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed)
                                        (read-event (frame #x8A '())) '(close 1000 "") '(deadline-passed)))
                       (deadlines (make-ws-state (pinging 16)) (list (read-event (frame #x88 '(#x03 #xE8)))))
                       (deadlines (make-ws-state (pinging 16)) (list '(deadline-passed) (read-event (frame #x83 '()))))
                       (deadlines (make-ws-state (pinging 16)) '((end eof)))
-                      (deadlines (make-ws-state open) '((close 1000 "") (deadline-passed)))))
+                      (deadlines (make-ws-state open) '((close 1000 "") (deadline-passed)))
+                      (deadlines (make-ws-state (marks 7 4))
+                                 '((send text "Hello") (send text "Hello") (written 7) (written 7)
+                                   (send text "Hello") (send text "Hello") (deadline-passed)))))
     ;; Re-arming at every read is the clock's hot path, so it allocates
     ;; nothing: a step allocates the same with pinging on as with it off.
     ;; Each measure makes its connection afresh in the thunk, which
@@ -931,6 +966,105 @@
                   (append (map (lambda (bytes) (- (read-cost (pinging 16) bytes) (read-cost (lim 1048576 16) bytes)))
                                (list (take (frame #x82 '(1)) 1) (frame #x82 '(1 2 3)) (frame #x89 '(1))))
                           (list (- (take-cost (pinging 1)) (take-cost (lim 1048576 1)))))))
+    ;; --- the write side (0006, by form: "Reading stops past the high water"; M4.3 step 2) ---
+
+    ;; Hello's frame is 7 bytes, "ab"'s 4, a close of 1000's 4, a ping's 2.
+    (test-equal "a send that takes what is unsent past the high water puts the client behind: reading stopped, the ping clock with it, and the write timeout armed in its place; one that leaves the high water unsent does not; ws-behind? says so"
+                (list (list (list (wrote #x81 hello)) (list (wrote #x81 hello) '(read-stop) writing))
+                      '(#f #t)
+                      '((ping ping write) (ping ping write)))
+                (list (step* (make-ws-state (marks 7 4)) '((send text "Hello") (send text "Hello")))
+                      (behinds (make-ws-state (marks 7 4)) '((send text "Hello") (send text "Hello")))
+                      (deadlines (make-ws-state (marks 7 4)) '((send text "Hello") (send text "Hello")))))
+    (test-equal "while behind, a done that leaves more than the low water unsent re-arms the write timeout; one that leaves the low water, or less, ends it: the write timeout disarmed, reading started, and the ping clock armed afresh"
+                (list (list (list (wrote #x81 hello)) (list (wrote #x81 hello) '(read-stop) writing)
+                            (list writing) (list disarmed '(read-start) quiet))
+                      (list (list (wrote #x81 hello)) (list (wrote #x81 (ascii "ab")) '(read-stop) writing)
+                            (list disarmed '(read-start) quiet))
+                      '(#f #t #t #f))
+                (list (step* (make-ws-state (marks 7 4)) '((send text "Hello") (send text "Hello") (written 7) (written 7)))
+                      (step* (make-ws-state (marks 7 4)) '((send text "Hello") (send text "ab") (written 7)))
+                      (behinds (make-ws-state (marks 7 4)) '((send text "Hello") (send text "Hello") (written 7) (written 7)))))
+    (test-equal "the client behind with the queue full: the write timeout armed where the clock had stopped; its end leaves reading stopped and nothing armed, and the take then starts reading and the clock"
+                (list (list (deliver 'binary '(1)) '(read-stop) disarmed)
+                      (list (wrote #x81 hello))
+                      (list (wrote #x81 hello) writing)
+                      (list writing)
+                      (list disarmed)
+                      (list '(read-start) quiet))
+                (step* (make-ws-state (websocket-limits-with (marks 7 4) '((max-queue . 1))))
+                       (list (read-event (frame #x82 '(1))) '(send text "Hello") '(send text "Hello")
+                             '(written 7) '(written 7) '(taken 1))))
+    (test-equal "while behind, a take reads nothing, not even what waits for the queue, with the high water unsent or less; once the client has read down to the low water, what waits is read, and reading starts once the queue has room"
+                (list (list (deliver 'binary '(1)) '(read-stop) disarmed)
+                      (list (wrote #x81 hello))
+                      (list (wrote #x81 hello) writing)
+                      (list writing)
+                      '()
+                      (list disarmed (deliver 'binary '(2)))
+                      (list '(read-start) quiet))
+                (step* (make-ws-state (websocket-limits-with (marks 7 4) '((max-queue . 1))))
+                       (list (read-event (append (frame #x82 '(1)) (frame #x82 '(2))))
+                             '(send text "Hello") '(send text "Hello") '(written 7) '(taken 1) '(written 7) '(taken 1))))
+    (test-equal "a read of pings stops at the pong that takes what is unsent past the high water, the rest waiting; read down to the low water, the rest is read and its ping answered, and reading starts again"
+                (list (list (pong hello) (pong hello) '(read-stop) writing)
+                      (list writing)
+                      (list disarmed (pong hello) '(read-start) quiet))
+                (step* (make-ws-state (marks 7 4))
+                       (list (read-event (concat (repeat 3 (frame #x89 hello)))) '(written 7) '(written 7))))
+    (test-equal "the ping that takes what is unsent past the high water: written, the pong's deadline armed, then reading stopped and the write timeout in its place"
+                (list (list (wrote #x81 hello)) (list pinged awaiting '(read-stop) writing))
+                (step* (make-ws-state (marks 8 4)) '((send text "Hello") (deadline-passed))))
+    (test-equal "the write timeout passing aborts the stream, writing nothing: failed logged with no code and write-timeout, and 1006 told, not cleanly; a done after it, and the stream's end, answer nothing"
+                (list (list (wrote #x81 hello))
+                      (list (wrote #x81 hello) '(read-stop) writing)
+                      (list '(abort-stream) (list 'log 'failed #f 'write-timeout) (list 'closed 1006 no-bytes #f))
+                      '() '())
+                (step* (make-ws-state (marks 7 4))
+                       '((send text "Hello") (send text "Hello") (deadline-passed) (written 7) (end eof))))
+    (test-equal "past the high water after the server's close, reading stops and the close deadline goes on, not the write timeout; read down to the low water, reading starts and arms nothing; the close timeout then aborts"
+                (list (list (wrote #x81 hello))
+                      (list (server-close 1000 '()) armed '(read-stop))
+                      (list '(read-start))
+                      timed-out)
+                (step* (make-ws-state (marks 7 4))
+                       '((send text "Hello") (close 1000 "") (written 7) (deadline-passed))))
+    (test-equal "pinging off, the client behind still arms the write timeout, and its end disarms it, starts reading and arms nothing"
+                (list (list (wrote #x81 hello))
+                      (list (wrote #x81 hello) '(read-stop) writing)
+                      (list disarmed '(read-start)))
+                (step* (make-ws-state (websocket-limits-with (marks 7 4) '((ping-interval-ms . 0))))
+                       '((send text "Hello") (send text "Hello") (written 14))))
+    (test-equal "while behind, a send writes and stays behind, and the stream's end disarms the write timeout, closes the stream and tells 1006"
+                (list (list (wrote #x81 hello) '(read-stop) writing)
+                      (list (wrote #x81 (ascii "ab")))
+                      (cons disarmed lost))
+                (step* (make-ws-state (marks 0 0)) '((send text "Hello") (send text "ab") (end eof))))
+    (test-equal "a failure whose close takes what is unsent past the high water ends the connection, and nothing is stopped or armed after its end"
+                (list (cons disarmed (failed 1002 'unknown-opcode)))
+                (step* (make-ws-state (marks 0 0)) (list (read-event (frame #x83 '())))))
+    (test-equal "a done of more than is unsent, of a negative count, or of the wrong shape, is an assertion naming ws-step; one of all that is unsent is accepted; ws-behind? of anything but a connection is an assertion naming ws-behind?"
+                '((refused ws-step) (refused ws-step) (refused ws-step) (refused ws-step) accepted (refused ws-behind?))
+                (let ((sent (lambda () (let ((s (make-ws-state open))) (step* s '((send text "Hello"))) s))))
+                  (list (refusal (lambda () (ws-step (make-ws-state open) '(written 1))))
+                        (refusal (lambda () (ws-step (sent) '(written 8))))
+                        (refusal (lambda () (ws-step (sent) '(written -1))))
+                        (refusal (lambda () (ws-step (sent) '(written))))
+                        (refusal (lambda () (ws-step (sent) '(written 7))))
+                        (refusal (lambda () (ws-behind? (pinging 16)))))))
+    ;; A done comes for every write, so its step allocates nothing.
+    (let ((done-cost (lambda (events n)
+                       (let ((prepared (lambda () (let ((s (make-ws-state (marks 7 4)))) (step* s events) s)))
+                             (event (list 'written n)))
+                         (- (allocated (lambda ()
+                                         (let-values (((s actions) (ws-step (prepared) event)))
+                                           (keep! actions))))
+                            (allocated (lambda () (keep! (prepared)))))))))
+      (test-equal "a done allocates nothing: one that leaves the client not behind, and one while behind that re-arms the write timeout"
+                  '(0 0)
+                  (list (done-cost '((send text "Hello")) 7)
+                        (done-cost '((send text "Hello") (send text "Hello")) 7))))
+
     ;; --- sending ---
     (let ((s (make-ws-state open)))
       (test-equal "a send writes its message as one frame: text in UTF-8 from its string, as §5.7's Hello; binary as given, as §5.7's 256-byte and 64 KiB messages"
@@ -1214,6 +1348,13 @@
     (test-equal "once the stream's end has ended the connection, it keeps no read that waited for the queue"
                 (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
                 (let-go-waiting '((end eof))))
+    (test-equal "once the write timeout has ended the connection, it keeps no read that waited for the queue"
+                (bv (append (frame #x82 '(1)) (frame #x82 '(2))))
+                (let-go (websocket-limits-with (lim 1048576 1) '((write-high-water . 0) (write-low-water . 0)))
+                        (lambda (g s)
+                          (let ((r (bv (append (frame #x82 '(1)) (frame #x82 '(2))))))
+                            (g r)
+                            (step* s (list (list 'bytes r 0 (bytevector-length r)) '(send text "A") '(deadline-passed)))))))
 
     (test-equal "two connections at once are each their own: their messages and their control frames read in turns"
                 (list '() '() (list (deliver 'text hello)) (list (deliver 'binary '(1 2 3)))

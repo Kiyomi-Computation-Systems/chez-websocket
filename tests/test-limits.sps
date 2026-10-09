@@ -13,8 +13,11 @@
 ;;; are each field's least sensible value: a cap or a queue of at least one,
 ;;; since reading stops once the queue holds a cap's worth, so a cap of 0
 ;;; would stop it for good; a pong timeout of at least a second, since one of
-;;; 0 would pass as its ping went; and 0 for the rest, an interval of 0
-;;; turning pinging off (0001).  A value is a whole number, written in ASCII
+;;; 0 would pass as its ping went; a write timeout of at least a second,
+;;; since one of 0 would pass as reading stopped; and 0 for the rest, an
+;;; interval of 0 turning pinging off (0001).  Decision 0006, by form ("60 s,
+;;; its own variable"): CHEZ_WS_WRITE_TIMEOUT, 60 s, the server's own
+;;; CHEZ_HTTP_WRITE_TIMEOUT.  A value is a whole number, written in ASCII
 ;;; digits alone.
 ;;;
 ;;; - The defaults, field by field, and the variables, in field order.
@@ -34,7 +37,8 @@
   (lambda (name) (let ((p (assoc name pairs))) (and p (cdr p)))))
 
 ;; Each field: its name, its accessor, its variable, and its default, from the
-;; design's §7 table and 0001's amendment, in make-websocket-limits' order.
+;; design's §7 table, 0001's amendment and 0006, in make-websocket-limits'
+;; order.
 (define named-fields
   (list (list 'max-message-bytes websocket-limits-max-message-bytes "CHEZ_WS_MAX_MESSAGE_BYTES" 1048576)
         (list 'max-queue websocket-limits-max-queue "CHEZ_WS_MAX_QUEUE" 16)
@@ -42,7 +46,8 @@
         (list 'ping-timeout-ms websocket-limits-ping-timeout-ms "CHEZ_WS_PING_TIMEOUT" 20000)
         (list 'close-timeout-ms websocket-limits-close-timeout-ms "CHEZ_WS_CLOSE_TIMEOUT" 10000)
         (list 'write-high-water websocket-limits-write-high-water "CHEZ_WS_WRITE_HIGH_WATER" 262144)
-        (list 'write-low-water websocket-limits-write-low-water "CHEZ_WS_WRITE_LOW_WATER" 65536)))
+        (list 'write-low-water websocket-limits-write-low-water "CHEZ_WS_WRITE_LOW_WATER" 65536)
+        (list 'write-timeout-ms websocket-limits-write-timeout-ms "CHEZ_WS_WRITE_TIMEOUT" 60000)))
 
 (define field-name car)
 (define (field-accessor f) (cadr f))
@@ -101,7 +106,7 @@
 (run-suite "limits"
   (lambda ()
     ;; --- the defaults (design §7, 0001 and its amendment) ---
-    (test-equal "the defaults: a 1 MiB cap, 16 messages queued, a ping after 20 s and its pong within 20 s, 10 s for a close, and the water marks at 256 KiB and 64 KiB"
+    (test-equal "the defaults: a 1 MiB cap, 16 messages queued, a ping after 20 s and its pong within 20 s, 10 s for a close, the water marks at 256 KiB and 64 KiB, and 60 s for a write"
                 defaults (values-of default-websocket-limits))
     (test-equal "the variables, in the fields' order"
                 (map field-variable named-fields) websocket-limits-environment-variables)
@@ -113,37 +118,39 @@
                       (read-env (apply env (map (lambda (f) (cons (field-variable f) "")) named-fields)))))
     (test-equal "each variable moves its own field alone: sizes and counts in their unit, durations in whole seconds kept in ms"
                 (list (with-field 0 65536) (with-field 1 4) (with-field 2 30000) (with-field 3 5000)
-                      (with-field 4 3000) (with-field 5 131072) (with-field 6 4096))
+                      (with-field 4 3000) (with-field 5 131072) (with-field 6 4096) (with-field 7 7000))
                 (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" "65536") (set-one "CHEZ_WS_MAX_QUEUE" "4")
                       (set-one "CHEZ_WS_PING_INTERVAL" "30") (set-one "CHEZ_WS_PING_TIMEOUT" "5")
                       (set-one "CHEZ_WS_CLOSE_TIMEOUT" "3") (set-one "CHEZ_WS_WRITE_HIGH_WATER" "131072")
-                      (set-one "CHEZ_WS_WRITE_LOW_WATER" "4096")))
+                      (set-one "CHEZ_WS_WRITE_LOW_WATER" "4096") (set-one "CHEZ_WS_WRITE_TIMEOUT" "7")))
     (test-equal "every variable at once"
-                '(1000 2 0 1000 0 200 100)
+                '(1000 2 0 1000 0 200 100 1000)
                 (read-env (env '("CHEZ_WS_MAX_MESSAGE_BYTES" . "1000") '("CHEZ_WS_MAX_QUEUE" . "2")
                                '("CHEZ_WS_PING_INTERVAL" . "0") '("CHEZ_WS_PING_TIMEOUT" . "1")
                                '("CHEZ_WS_CLOSE_TIMEOUT" . "0") '("CHEZ_WS_WRITE_HIGH_WATER" . "200")
-                               '("CHEZ_WS_WRITE_LOW_WATER" . "100"))))
+                               '("CHEZ_WS_WRITE_LOW_WATER" . "100") '("CHEZ_WS_WRITE_TIMEOUT" . "1"))))
 
     ;; --- the bounds ---
-    (test-equal "each bound at its edge is accepted: a cap and a queue of 1, pinging off, a pong timeout of 1 s, a close timeout of 0, and both water marks at 0"
+    (test-equal "each bound at its edge is accepted: a cap and a queue of 1, pinging off, a pong timeout of 1 s, a close timeout of 0, both water marks at 0, and a write timeout of 1 s"
                 (list (with-field 0 1) (with-field 1 1) (with-field 2 0) (with-field 3 1000)
-                      (with-field 4 0) '(1048576 16 20000 20000 10000 0 0))
+                      (with-field 4 0) '(1048576 16 20000 20000 10000 0 0 60000) (with-field 7 1000))
                 (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" "1") (set-one "CHEZ_WS_MAX_QUEUE" "1")
                       (set-one "CHEZ_WS_PING_INTERVAL" "0") (set-one "CHEZ_WS_PING_TIMEOUT" "1")
                       (set-one "CHEZ_WS_CLOSE_TIMEOUT" "0")
-                      (read-env (env '("CHEZ_WS_WRITE_HIGH_WATER" . "0") '("CHEZ_WS_WRITE_LOW_WATER" . "0")))))
-    (test-equal "below its bound, each is refused, naming its variable: a cap of 0, a queue of 0, a pong timeout of 0"
+                      (read-env (env '("CHEZ_WS_WRITE_HIGH_WATER" . "0") '("CHEZ_WS_WRITE_LOW_WATER" . "0")))
+                      (set-one "CHEZ_WS_WRITE_TIMEOUT" "1")))
+    (test-equal "below its bound, each is refused, naming its variable: a cap of 0, a queue of 0, a pong timeout of 0, a write timeout of 0"
                 '((refused websocket-limits-from-environment "CHEZ_WS_MAX_MESSAGE_BYTES")
                   (refused websocket-limits-from-environment "CHEZ_WS_MAX_QUEUE")
-                  (refused websocket-limits-from-environment "CHEZ_WS_PING_TIMEOUT"))
+                  (refused websocket-limits-from-environment "CHEZ_WS_PING_TIMEOUT")
+                  (refused websocket-limits-from-environment "CHEZ_WS_WRITE_TIMEOUT"))
                 (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" "0") (set-one "CHEZ_WS_MAX_QUEUE" "0")
-                      (set-one "CHEZ_WS_PING_TIMEOUT" "0")))
+                      (set-one "CHEZ_WS_PING_TIMEOUT" "0") (set-one "CHEZ_WS_WRITE_TIMEOUT" "0")))
     (test-equal "a low water above the high water is refused, whichever was set, naming the low water's variable; equal marks are accepted"
                 '((refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
                   (refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
                   (refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
-                  (1048576 16 20000 20000 10000 11 11))
+                  (1048576 16 20000 20000 10000 11 11 60000))
                 (list (set-one "CHEZ_WS_WRITE_HIGH_WATER" "65535")
                       (set-one "CHEZ_WS_WRITE_LOW_WATER" "262145")
                       (read-env (env '("CHEZ_WS_WRITE_HIGH_WATER" . "10") '("CHEZ_WS_WRITE_LOW_WATER" . "11")))
@@ -167,7 +174,7 @@
       (test-equal "a value is a fixnum at most: each at the edge is accepted, and one past it refused, naming its variable"
                   (list (with-field 0 gf) (with-field 1 gf) (with-field 2 (* 1000 secs)) (with-field 3 (* 1000 secs))
                         (with-field 4 (* 1000 secs)) (with-field 5 gf)
-                        (list 1048576 16 20000 20000 10000 gf gf)
+                        (list 1048576 16 20000 20000 10000 gf gf 60000) (with-field 7 (* 1000 secs))
                         '(refused websocket-limits-from-environment "CHEZ_WS_MAX_MESSAGE_BYTES")
                         '(refused websocket-limits-from-environment "CHEZ_WS_MAX_QUEUE")
                         '(refused websocket-limits-from-environment "CHEZ_WS_PING_INTERVAL")
@@ -175,24 +182,27 @@
                         '(refused websocket-limits-from-environment "CHEZ_WS_CLOSE_TIMEOUT")
                         '(refused websocket-limits-from-environment "CHEZ_WS_WRITE_HIGH_WATER")
                         '(refused websocket-limits-from-environment "CHEZ_WS_WRITE_LOW_WATER")
+                        '(refused websocket-limits-from-environment "CHEZ_WS_WRITE_TIMEOUT")
                         '(refused make-websocket-limits max-message-bytes))
                   (list (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" (s gf)) (set-one "CHEZ_WS_MAX_QUEUE" (s gf))
                         (set-one "CHEZ_WS_PING_INTERVAL" (s secs)) (set-one "CHEZ_WS_PING_TIMEOUT" (s secs))
                         (set-one "CHEZ_WS_CLOSE_TIMEOUT" (s secs)) (set-one "CHEZ_WS_WRITE_HIGH_WATER" (s gf))
                         (read-env (env (cons "CHEZ_WS_WRITE_HIGH_WATER" (s gf)) (cons "CHEZ_WS_WRITE_LOW_WATER" (s gf))))
+                        (set-one "CHEZ_WS_WRITE_TIMEOUT" (s secs))
                         (set-one "CHEZ_WS_MAX_MESSAGE_BYTES" (s (+ gf 1))) (set-one "CHEZ_WS_MAX_QUEUE" (s (+ gf 1)))
                         (set-one "CHEZ_WS_PING_INTERVAL" (s (+ secs 1))) (set-one "CHEZ_WS_PING_TIMEOUT" (s (+ secs 1)))
                         (set-one "CHEZ_WS_CLOSE_TIMEOUT" (s (+ secs 1)))
                         (read-env (env (cons "CHEZ_WS_WRITE_HIGH_WATER" (s (+ gf 1)))))
                         (read-env (env (cons "CHEZ_WS_WRITE_HIGH_WATER" (s gf)) (cons "CHEZ_WS_WRITE_LOW_WATER" (s (+ gf 1)))))
-                        (refusal (lambda () (make-websocket-limits (+ gf 1) 16 20000 20000 10000 262144 65536))))))
+                        (set-one "CHEZ_WS_WRITE_TIMEOUT" (s (+ secs 1)))
+                        (refusal (lambda () (make-websocket-limits (+ gf 1) 16 20000 20000 10000 262144 65536 60000))))))
     (test-equal "leading zeros are digits too: 007 seconds is 7000 ms"
                 (with-field 2 7000) (set-one "CHEZ_WS_PING_INTERVAL" "007"))
 
     ;; --- what makes limits checks them ---
     (test-equal "make-websocket-limits makes what its arguments say"
-                '(5 6 7 8 9 11 10)
-                (values-of (make-websocket-limits 5 6 7 8 9 11 10)))
+                '(5 6 7 8 9 11 10 12)
+                (values-of (make-websocket-limits 5 6 7 8 9 11 10 12)))
     (test-equal "make-websocket-limits refuses a field below its bound, or not an exact whole number, 16.0 among them, naming the field"
                 '((refused make-websocket-limits max-message-bytes)
                   (refused make-websocket-limits max-queue)
@@ -201,31 +211,33 @@
                   (refused make-websocket-limits close-timeout-ms)
                   (refused make-websocket-limits write-high-water)
                   (refused make-websocket-limits write-low-water)
+                  (refused make-websocket-limits write-timeout-ms)
                   (refused make-websocket-limits max-message-bytes)
                   (refused make-websocket-limits max-queue)
                   (refused make-websocket-limits max-queue)
                   (refused make-websocket-limits write-low-water))
                 (map (lambda (args) (refusal (lambda () (apply make-websocket-limits args))))
-                     '((0 16 20000 20000 10000 262144 65536)
-                       (1048576 0 20000 20000 10000 262144 65536)
-                       (1048576 16 -1 20000 10000 262144 65536)
-                       (1048576 16 20000 0 10000 262144 65536)
-                       (1048576 16 20000 20000 -1 262144 65536)
-                       (1048576 16 20000 20000 10000 -1 0)
-                       (1048576 16 20000 20000 10000 262144 -1)
-                       (1.5 16 20000 20000 10000 262144 65536)
-                       (1048576 "16" 20000 20000 10000 262144 65536)
-                       (1048576 16.0 20000 20000 10000 262144 65536)
-                       (1048576 16 20000 20000 10000 10 11))))
+                     '((0 16 20000 20000 10000 262144 65536 60000)
+                       (1048576 0 20000 20000 10000 262144 65536 60000)
+                       (1048576 16 -1 20000 10000 262144 65536 60000)
+                       (1048576 16 20000 0 10000 262144 65536 60000)
+                       (1048576 16 20000 20000 -1 262144 65536 60000)
+                       (1048576 16 20000 20000 10000 -1 0 60000)
+                       (1048576 16 20000 20000 10000 262144 -1 60000)
+                       (1048576 16 20000 20000 10000 262144 65536 0)
+                       (1.5 16 20000 20000 10000 262144 65536 60000)
+                       (1048576 "16" 20000 20000 10000 262144 65536 60000)
+                       (1048576 16.0 20000 20000 10000 262144 65536 60000)
+                       (1048576 16 20000 20000 10000 10 11 60000))))
     (test-equal "websocket-limits-with replaces each field alone, by name, and keeps the rest of its base, defaults or not"
-                (append (map (lambda (i) (with-field i (if (= i 6) 1 (+ 1 (list-ref defaults i))))) '(0 1 2 3 4 5 6))
-                        (list '(5 2 7 8 9 11 10)))
+                (append (map (lambda (i) (with-field i (if (= i 6) 1 (+ 1 (list-ref defaults i))))) '(0 1 2 3 4 5 6 7))
+                        (list '(5 2 7 8 9 11 10 12)))
                 (append (map (lambda (f i)
                                (values-of (websocket-limits-with default-websocket-limits
                                             (list (cons (field-name f)
                                                         (if (= i 6) 1 (+ 1 (list-ref defaults i))))))))
-                             named-fields '(0 1 2 3 4 5 6))
-                        (list (values-of (websocket-limits-with (make-websocket-limits 5 6 7 8 9 11 10)
+                             named-fields '(0 1 2 3 4 5 6 7))
+                        (list (values-of (websocket-limits-with (make-websocket-limits 5 6 7 8 9 11 10 12)
                                                                 '((max-queue . 2)))))))
     (test-equal "websocket-limits-with refuses a name that is not a field, an override that is not a pair, and a value make-websocket-limits refuses"
                 '((refused websocket-limits-with (cap . 5))
