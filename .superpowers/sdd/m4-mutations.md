@@ -1746,3 +1746,59 @@ Step 3's, and:
 
 Two preconditions are part of the checks' values and have no mutant of their own: S-DRAIN's
 receive seen to wait, and S-PARK's 400 waiting.
+
+## Before the server's v0.4.1 pin — S-PARK retired, S-LETGO at 16,000 bytes, the counter on fresh segments
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-09; and
+Linux aarch64 in Docker (Ubuntu 24.04, libuv 1.48.0) for the suites and S-LETGO.
+- **The code:**
+  - `tests/ws-testing.sls` (blob 3c00b9f): `least-counted` counts each call inside a
+    `call/1cc`;
+  - `tests/test-socket.sps` (7200d83): five checks, S-LETGO at 16,000 bytes;
+  - `src/websocket/private/binding.sls` (7b70704): `park!`'s comment only.
+- **The servers:** v0.4.0, the pinned checkout (388ec43); v0.4.1, the server's own checkout
+  (520f70e, and a ledger commit).
+
+**The runner** is step 3's review's (`wsmut4.py`) as `wsmut5.py`, with the server's path a
+variable, `SERVER`, so each row runs on both servers. Each red set was named and hashed
+before its run.
+
+**Stage 0**, main's suites on v0.4.1 (`make -o build -o check-pins test SERVER_DIR=…`).
+Predicted: the socket suite at status 3, S-PARK's provenance failure, and the other eleven
+green. The socket suite stopped at status 3, at −332 B. Not predicted, both through the
+server's full continuations (decision 0007):
+- S-LETGO red, at 2,832 to 2,864 B;
+- the binding suite red in R-DONE-ALLOC-BEHIND, at 64 B.
+
+**Stage 1**, the changed suites. Predicted twelve suites and 348 expected passes on each
+server, and the binding suite 6 of 6 on v0.4.1. All matched, and again once S-LETGO moved
+to 16,000 bytes. On Linux: twelve suites and 348, twice on each server.
+
+**Mutants:** 10 rows on each server, 9 mutants and the baseline.
+
+| Row | Mutant | Red, as named |
+|---|---|---|
+| BASE | none | green |
+| R-20 | a read's bytevector kept after its step | S-LETGO |
+| P-1CC | `park!`'s way back by `call/1cc` again | none: a named survivor (0005's amendment) |
+| R-25 | a read steps a fresh event | R-ALLOC |
+| R-26 | a step's actions performed by `for-each` over a closure | R-ALLOC, R-DONE-ALLOC, R-DONE-ALLOC-BEHIND |
+| B-WROTE-FRESH | a done's event made afresh | R-DONE-ALLOC, R-DONE-ALLOC-BEHIND |
+| BA-1 | arming the write deadline allocates a call | R-DONE-ALLOC-BEHIND |
+| P-REARM-FRESH | a re-arming done allocates its action | W-ALLOC, R-DONE-ALLOC-BEHIND |
+| PT-K | catching up conses its disarm, nothing waiting | W-TAIL-ALLOC |
+| PT-S | a send that falls behind copies its actions | W-TAIL-ALLOC |
+
+- **Before run 1, a slip in the specs:** B-WROTE-FRESH's edit kept the `set-car!`. It was
+  made step 2's again before any row ran (specs 261fec06).
+- **Run 1: 2 mismatches on each server.**
+  - R-20 stayed green, a fault in the check. S-LETGO then sent 40,000 bytes, a frame that
+    spans three reads of the server's 16,384-byte buffer, and a kept read holds only the
+    last. It moved to 16,000 bytes, one read.
+  - R-26 also reddened R-DONE-ALLOC and R-DONE-ALLOC-BEHIND, a prediction error. Its row
+    came from step 1's review, before those checks were written, and a done steps
+    through the same loop.
+- **Run 2** (specs 58b15f3c): 0 mismatches on each server.
+- **Every changed check has a killer by value.** R-20 holds S-LETGO at 16,088 to
+  18,968 B. Each allocation check is reddened by its rows. P-1CC survives, as 0005's
+  amendment says.

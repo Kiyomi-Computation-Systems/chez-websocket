@@ -187,3 +187,58 @@ over it.
 after the take-over, with 1 MiB sent first and with nothing, the ping's 20 s and the pong's
 20 s. A client that sent 17 messages, which the handler never took, and read nothing, was not
 failed in 100 s: with the queue full, reading and the ping clock stop, and nothing is armed.
+
+## Before the server's v0.4.1 pin (2026-10-09)
+
+The server's v0.4.1 (520f70e) parks its coroutines, and enters them, on full continuations
+(its decision 0025). The evidence for 0005's amendment of this date ("Retire S-PARK") and
+decision 0007 ("Fix both checks here").
+
+**Where.** Darwin 25.6.0 arm64, Chez 10.4.1, libuv 1.52.1; and Linux aarch64 in Docker,
+Ubuntu 24.04, libuv 1.48.0 (CI's), for the suites and S-LETGO's sizes. main at 43b18e7: v0.4.0
+is the pinned checkout (388ec43), and v0.4.1 the server's own (520f70e, and a ledger commit).
+
+**How.** Probes in the scratch `ws-spark/`, built from the socket suite's own helpers: a
+server and its clients on one loop. A server's half-change was a shadow copy of its
+`scheduler.sls` (and `waits.sls`) ahead of its `src/`; a binding mutant, a shadow copy of
+the binding.
+
+**S-PARK's setting:** 100 connections a path, each over 100 at a bare `await`, the heap back
+to back, per connection. Three runs on each server, and two more with `park!` by `call/1cc`.
+
+| | v0.4.0 | v0.4.1 |
+|---|---|---|
+| the reference, a wait by `call/1cc` around `await` | 2,792 to 4,048 B | −338 to 334 B |
+| a receive, `park!` by `call/cc` | 462 to 984 B | 303 to 340 B |
+| a receive, `park!` by `call/1cc` | 3,543 to 4,177 B | 453 to 490 B |
+| a one-shot continuation escaped 4 calls deep, in the handler | 2,711 to 3,848 B | 3,436 to 3,557 B |
+| the same, with no connection | 3,419 to 3,420 B | 3,419 to 3,420 B |
+| a connection at a bare `await`, its client in the same heap | 7,907 to 8,484 B | 5,253 to 5,292 B |
+
+**S-LETGO:** one connection, the heap after a big message less the heap after a 1-byte
+one, three times (Darwin). The first of the three read about −61 KB in two of the probes,
+a collection's; the rest:
+
+| message | v0.4.0 | v0.4.1 | v0.4.1, drain one-shot | v0.4.1, park one-shot |
+|---|---|---|---|---|
+| 4,000 bytes | 104 to 112 B | 2,832 to 2,952 B | −168 to 200 B | 2,696 to 2,704 B |
+| 16,000 bytes | 112 B | 2,872 to 2,952 B | | |
+| 40,000 bytes | 112 B | 2,880 to 2,888 B | 0 B | |
+| 400,000 bytes | 88 to 112 B | 2,872 to 2,880 B | 0 B | |
+
+- Ten connections, 4,000 bytes: 976 to 1,120 B on v0.4.0, 9,344 to 9,360 B on v0.4.1.
+- R-20 kept, at 16,000 bytes: 16,088 to 16,112 B on v0.4.0, 18,872 to 18,968 B on v0.4.1.
+  At 40,000 bytes R-20 stayed green: the frame spans three reads of the server's
+  16,384-byte buffer, and a kept read holds only the last.
+- Linux, 16,000 bytes: 112 B, and 16,112 kept, on v0.4.0; 2,920 to 2,928 B, and 18,912 to
+  18,920 kept, on v0.4.1.
+
+**The binding suite's done count** (R-DONE-ALLOC-BEHIND), on v0.4.1, Darwin:
+- the suite read 64 B in 4 of 7 runs, and 0 in 6 of 6 on v0.4.0, and 6 of 6 with the
+  server's drain, or its park, alone one-shot again;
+- per depth, the binding's and the taker's done counted 512 B at depth 0 and 576 B at
+  100 and 200, an empty thunk 160 B at each;
+- a copy of the suite with two print lines read 64 in 8 of 8 (the binding 416 B, the
+  taker 352 B); at eight depths, 50 frames apart, it read 0, and R-ALLOC read −384 B;
+- each count inside a `call/1cc`: 6 of 6 on both servers, on Darwin; the copy read 352 B
+  for both in 4 of 4; on Linux every allocation check passed, 6 of 6 on v0.4.1.
