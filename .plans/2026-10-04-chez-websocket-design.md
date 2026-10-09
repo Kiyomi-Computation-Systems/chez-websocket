@@ -245,8 +245,18 @@ are stepped through the core in place, and the actions run at once:
 | `read-stop`, `read-start` | the transport's verbs |
 | `arm-deadline`, `disarm-deadline` | `transport-deadline!`, the transport's one deadline, armed for the kind's time (`ping` the ping interval, `pong` the ping timeout, `close` the close timeout); when it passes, a `deadline-passed` |
 | `close-stream` | `transport-close!`, which closes once what is unsent has been written; where the client is not reading it, `transport-abort!`, which closes at once and drops it (0004; M4.3 names those places) |
-| `closed` | the WebSocket's end: every receive and send after it raises `&websocket-closed` |
+| `closed` | the WebSocket's end: every receive and send after it raises `&websocket-closed`; a receive or a send that waits is woken at once |
+| `log` | a line on the current output port, as the server logs: `websocket-` and the core's name, then each detail (M4.3) |
 
+- **The facade, as built in M4.3.** `(websocket-accept request proc [settings
+  [limits]])`. The settings default to no subprotocols and `same-host`, and the
+  limits to the environment's, `environment-websocket-limits`. The binding reads
+  them once, as a program that imports it starts: Chez runs a library's body before
+  the program's, so a malformed `CHEZ_WS_` value stops the program before its first
+  line (§7). The facade exports the binding's verbs, `make-handshake-settings`, and
+  the limits' constructors and accessors.
+- **The handshake reads every line of a field**, `request-header-values` joined with
+  ", " (RFC 9110 §5.3; 0004).
 - **`websocket-receive`** answers the oldest queued message and steps `(taken
   nbytes)`, or parks on `await` until one comes.
 - **A text message's string keeps a leading U+FEFF.** UTF-8 allows it, and the
@@ -260,20 +270,38 @@ are stepped through the core in place, and the actions run at once:
   - This follows the server's `&client-closed`, and the direct-style peers, whose
     read raises or returns an error once closed.
 - **`websocket-send!`** steps a `send` and writes its frame. While more than 256 KiB
-  is unsent, it parks until `written` brings that under 64 KiB. These are the server's
-  own stream water marks (`CHEZ_HTTP_WRITE_HIGH_WATER`, `_LOW_WATER`).
+  is unsent, it parks until `written` brings that to 64 KiB or less. These are the
+  server's own stream water marks (`CHEZ_HTTP_WRITE_HIGH_WATER`, `_LOW_WATER`), compared
+  as the server compares them.
+  - A send woken by the connection's end raises `&websocket-closed`.
+  - **While the server's close is under way**, a send sends nothing: it waits for the
+    connection's end, then raises `&websocket-closed`. This is websockets' way
+    (`send_context`). The design was silent here, and the core refuses a send then as
+    the caller's mistake, which a drain's close would make of a handler's next send
+    (M4.3).
 - **`websocket-close!`** steps a `close` (1000 by default) and returns; the handshake
   finishes on its own.
 - **The stream's close.** When the stream closes, whoever closed it, the wait the
   thunk is in raises `&client-closed` (0023). The binding turns that into the
   connection's end: 1006, unless the closing handshake had finished.
+  - A wait of the binding's, a receive's or a send's, steps it as the stream's end,
+    `(end closed)`, so the core reads what waits for the queue first.
+  - **The binding registers no close call** (`transport-on-close!`). Both of the
+    server's shells tell the wait before they run one (its `shell.sls`,
+    `handle-closed!`; its fake's `close-begun!`). So a close call that woke the wait
+    would come after the wait had ended, and the server would log `late-resume
+    await`. Tried in M4.3 and taken out.
+  - A send into a stream closed under it is told at the next wait.
 - **The server's drain.** On `transport-on-drain!`, the binding starts a closing
   handshake with 1001, "going away" (§7.4.1).
 - **The procedure's end.**
   - If it returns, the binding closes with 1000.
-  - If it lets `&websocket-closed` out, nothing more is done or logged.
-  - Any other raise closes with 1011, and is logged, as the server logs
-    `taker-failed`.
+  - If it lets `&websocket-closed` out, nothing more is done or logged. Nor if it lets
+    `&client-closed` out, from a wait of its own: that is the stream's close (M4.3).
+  - Any other raise closes with 1011, and is logged `websocket-handler-failed`, its
+    detail as the server logs one: a condition as `display-condition` shows it, on one
+    line, a record by its type's name, a string displayed, and anything else written.
+  - The thunk lets nothing out, so the server logs nothing for it.
 
 ## 7. Configuration
 
@@ -327,6 +355,16 @@ is refused.
     bytes that way. `fake-shell-deliver!` hands over one event whatever the read
     state, and places a read, or the client's end, between two turns (M4.2's
     review).
+  - **The binding suite** (`tests/test-binding.sps`, M4.3) also:
+    - drains the scheduler after the fake's timer fires
+      (`fake-shell-schedule!`), as the libuv shell drains it after every turn;
+    - closes the stream under the binding by wrapping the switch's take-over
+      (`(http-server switch)`), as the server does when its drain times out;
+    - reads a wait's end before the client has read the close, so the end's own
+      wake is seen, not the stream's later close.
+  - **What the fake cannot show.** It logs a late resume nowhere, so the binding
+    letting go of a resume it has called, or one whose wait raised, is held on the
+    real socket (M4.3's step 3).
 - **A real socket.** One suite runs a server on `127.0.0.1:0` with a client on the
   same loop, capped by iteration count.
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
