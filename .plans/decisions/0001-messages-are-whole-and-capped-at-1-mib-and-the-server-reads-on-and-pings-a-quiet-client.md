@@ -5,6 +5,7 @@ Status: accepted (user decision, 2026-10-04, by form: "1 MiB", "Read on, ping",
 "Whole messages", each the recommended). Amended 2026-10-05 by form (M3.1):
 "Also 16 messages", the recommended; and again (M3.2): "Deliver as before", the
 recommended. Amended 2026-10-06 by form (M3.3's review): "Any bytes", the
+recommended. Amended 2026-10-09 by form (M4.3 step 3): "From queueing, as now", the
 recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §5–§7
 
@@ -197,3 +198,47 @@ is full, reading and the ping clock stop and nothing is armed (item 2). A client
 filled the queue and vanished is found only by a take, the server's close, the
 stream's end or the server's drain, and a handler parked in a send to it takes
 nothing (the design's §9).
+
+## Amendment of 2026-10-09 (M4.3 step 3): the pong timed from the ping's queueing, measured
+
+**The question** (the design's §9, from M3.3's review). The core arms `pong` as it writes
+the ping, so the pong's 20 s start when the ping is queued. Whatever was sent before the
+ping waits ahead of it, so a slow reader that is live can be failed with 1011. websockets
+times the pong from the ping's drain. Step 2 measured it on the fake shell. Step 3
+measured it on a real socket.
+
+**Measured** (Linux, libuv 1.48.0, CI's; [the measures](../research/2026-10-09-real-socket-measures.md)).
+A burst of 4 MiB as 1 KiB messages, then a client reading at a set rate and answering
+each ping as it reads it, as a browser does:
+- **As built, from queueing:** live readers at 32, 48, 64, 80 and 96 KiB/s were failed
+  with 1011, at 128, 86, 64, 51 and 43 s. Each had read all 4 MiB, then the ping and the
+  close together. Readers at 112 and 128 KiB/s were never failed.
+- **The backlog ahead of the ping is in the kernel.** The ping clock runs only while no
+  more than the low water is unsent (0006), so the ping's write is done nearly at once.
+  Linux took 2,560 KiB from a client that never read. From one that read its 101 and
+  then stopped, it took 3.8 to 4.1 MB, bounded by where the binding fell behind. macOS
+  took 704 to 3,392 KiB.
+
+**The options:**
+- **"From queueing, as now"**: the numbers above. A client that reads nothing is failed at
+  the pong's timeout for every burst the kernel holds. Past the high water, the write
+  timeout fails it.
+- **"From the ping's done, as websockets"**: a prototype. The same rates were failed, within
+  0.3 s. And a client that read nothing, sent 4.2 or 4.3 MB, was never failed in 100 s: its
+  ping stayed unsent below the high water, with nothing armed.
+- **"Ping timeout 60 s"**: readers at 32, 48 and 64 KiB/s read all 4 MiB, and none was
+  failed in 200 s. A client gone would be failed 60 s after its ping, not 20 s.
+
+websockets pings every 20 s and fails at 20 s, timed from the drain. coder, gorilla,
+tungstenite and ws send no ping of their own (the [peer defaults](../research/2026-10-04-peer-defaults.md)).
+
+**Decided by form, the recommended: "From queueing, as now".** Nothing changes.
+- **A live client reading a backlog slower than about the backlog over the interval and the
+  timeout is failed with 1011**: at 96 KiB/s and below after a 4 MiB burst on Linux
+  loopback, where 112 KiB/s was kept.
+  The cause is what the kernel holds ahead of the ping, which no server sees. A handler
+  whose clients read slowly after large bursts can give a longer ping timeout,
+  `CHEZ_WS_PING_TIMEOUT` (`(websocket limits)`).
+- **A client that stops reading is still failed within the interval and the timeout**
+  while what is unsent stays under the high water.
+

@@ -124,6 +124,13 @@ Weighed:
   which step 3 measures with a throttled reader.
 - **On a real socket** the kernel takes some writes before any is unsent, so these
   bounds start later; step 3 measures by how much.
+  - **Measured in step 3** ([the measures](../research/2026-10-09-real-socket-measures.md)).
+    16 KiB sends to a client that never read returned 2,867,900 B on Linux before it was
+    behind, three runs alike. On macOS it was 770,236 to 2,294,320 B over six runs.
+  - **A close behind what the kernel took is graceful.** With every write done, the close
+    begins at once and the close timeout never arms. A client that read nothing for 3 s
+    then read every frame and the close, after 64 KiB and after 1 MiB, on both platforms.
+    The close timeout reaches only what the binding counts unsent.
 
 ## Amendment (2026-10-09): the close timed from queueing, a send waits before it writes, and a frame in pieces, by form, step 2's review
 
