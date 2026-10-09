@@ -789,3 +789,276 @@ the review's five added, with the baseline.
 | D-BEHIND | M-3, M-6, M-7, M-11, M-12, M-20, M-27, M-29 |
 | D-INSIDE | M-3, M-4, M-28, M-29 |
 | D-NAMES | N-1, N-2 |
+
+## M4.3, step 1 — the binding and the facade
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09.
+- **The code:** `src/websocket/private/binding.sls` (blob 6d10ab9) and the facade,
+  `src/websocket.sls` (3fac36f).
+- **The suites:** `tests/test-binding.sps`, 35 checks (82b5dfb), with the child program
+  it runs, `tests/start-with-environment.sps` (b3729af); and the import audit,
+  `tests/test-imports.sps`, now 10 (9a7964e).
+
+**The runner** is M4.1's, pointed at the binding. It applies each mutant alone, to a
+copy of the binding put first on the suites' path, and runs the binding suite, whose
+child program inherits that path. An audit row mutates a scratch copy of `src/` and
+`tests/`, or moves a file there, and runs the import audit in it. The repository is
+never edited. Before the run, a pre-flight checks that every cut matches its text once
+and keeps its paren balance.
+
+### The oracles
+
+- **RFC 6455, from its raw text:**
+  - §1.3's handshake and its accept value;
+  - §4.2.1's checks, and §4.4's `Sec-WebSocket-Version: 13`;
+  - §5.1, an unmasked frame failed with 1002;
+  - §5.5.1, a close echoing the code it received;
+  - §5.5.2, a ping of no payload;
+  - §5.7's frames, the suite's own checked against them before any check (a
+    provenance failure otherwise);
+  - §7.1.4 to §7.1.6, clean only once a close has gone each way, and 1006 with an
+    empty reason when none came;
+  - §7.4.1's 1001 and 1011.
+- **RFC 9110 §5.3** with decision 0004: a field's lines are one list. A split
+  `Connection` is taken; two keys are refused 400, as websockets, coder and ws refuse
+  them.
+- **Decision 0001:** the queue's cap, and 20 s and 20 s for the ping clock.
+- **Decision 0003:** `same-host` when a handler names no origins.
+- **The design's §6 and §7:**
+  - each action performed;
+  - the water marks, compared as the server compares its own (its
+    `configuration.org`: past the high water a stream waits until no more than the
+    low water is unsent);
+  - U+FEFF kept;
+  - the drain's 1001 "going away";
+  - the procedure's end;
+  - the environment read as the program starts.
+- **websockets 17.2's `send_context`:** a send while closing waits for the close, then
+  raises.
+- **Chez:** a library's body runs before the program's (measured: a library's display
+  printed before the program's first line). An uncaught raise exits 255, which `system`
+  answers (measured).
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **Stage 0** (`edd34c9`): the new suite stopped at load, `library (websocket) not
+  found`, exit 255. The other ten suites were green: 266 passes.
+- **Stage 1** (`f6dd4d9`): the binding, the facade and the audit's two exceptions.
+  - The prediction's text corrects itself mid-line, "ten suites... eleven suites", as
+    it was typed. Its count, 296, is the run's.
+  - The first run stopped the binding suite after 21 passes, exit 2: `incorrect number
+    of arguments 1 to #<procedure current-output-port>`. The suite was at fault, not
+    the binding. In Chez, `(rnrs)`'s `current-output-port` is not the parameter, so
+    `parameterize` refused it.
+  - With the suite importing Chez's parameter under a name of its own, eleven suites
+    were green: 296.
+- **Stage 1c** (`bc6429b`), 299 passes, as predicted:
+  - the binding's close call (`transport-on-close!`) taken out, since both shells tell
+    the wait first and a close call's wake would be a late resume;
+  - three checks added: the close timeout, the stream closed under the binding, and a
+    handler's own ping times;
+  - two widened: the queue's clock, and the procedure's own wait seeing the stream's
+    close.
+- **Stage 1d** (`cfb520c`): five checks added from the mutant draft, which found them
+  missing, and five checks changed. 304 passes, as predicted.
+  - The five added: a send woken by the end, a default Origin refused, accept's
+    refusals, each verb's refusals, and how a raise is logged.
+  - The five changed: C-SERVER and C-SENDCLOSING read the end before the client
+    reads; C-TIMEOUT and C-SENDCLOSING close with a code of their own; V-ENV's child
+    goes through both accept forms.
+
+### The mutants
+
+| key | check |
+|---|---|
+| H-ACCEPT | RFC 6455's example handshake is answered 101, `Upgrade: websocket`, with its accept value |
+| H-VERSION | a version other than 13 is refused 400 with `Sec-WebSocket-Version: 13`, and the procedure never runs |
+| H-CONN2 | `Connection` over two lines, keep-alive then Upgrade, is read whole: 101 |
+| H-PROTO2 | a subprotocol offered on the second of two lines is read, answered, and named by `websocket-subprotocol` |
+| H-KEY2 | two `Sec-WebSocket-Key` lines are refused 400 |
+| H-ORIGIN | a handler that names no origins refuses a browser's Origin of another host, 403 |
+| H-ARGS | `websocket-accept` refuses a procedure that is not one, and limits that are not limits, naming itself |
+| C-ARGS | receive, send and close refuse what is not a WebSocket, each naming itself |
+| M-RETAINED | a masked Hello sent with the handshake is received as "Hello", and its echo is §5.7's unmasked frame |
+| M-WAKE | a message that comes while receive waits wakes it, and the client reads its echo |
+| M-BINARY | a binary message is received as its bytevector, and echoed as §5.7's 256-byte frame |
+| M-BOM | U+FEFF kept at a text's start, and alone; an empty text; U+EEFF, U+FEBF and U+FEFE as themselves; each echoed as its bytes |
+| M-REFUSE | a send of neither a string nor a bytevector is refused, naming `websocket-send!` |
+| W-HIGH | a send that leaves the high water unsent goes on, one past it waits, and reading down to the low water lets it go on |
+| W-LOW | a send waiting with more than the low water unsent still waits, and goes on once the client has read down to it |
+| W-END | a send waiting when the connection ends is woken at once, before the client reads, and raises `&websocket-closed` |
+| R-QUEUE | a queue of one stops reading and the clock until it is received; then reading, the clock afresh, and the next |
+| C-SERVER | `websocket-close!` writes 1000; the client's close ends it cleanly, told at once, before the stream has closed |
+| C-CLIENT | a client's close is answered with its code echoed, and receive raises its code and reason, cleanly |
+| C-EOF | the stream's end with no close: 1006, an empty reason, not clean, nothing written |
+| C-TIMEOUT | a close of the handler's code and reason, not answered within 10 s, ends the connection anyway, 1006, not a millisecond before |
+| C-OUTSIDE | the stream closed under the binding while receive waits: the wait's `&client-closed` ends the connection, 1006 |
+| C-QUEUED | messages queued before the end are received first, then `&websocket-closed` |
+| C-AGAIN | after the end, every receive and every send raises `&websocket-closed` again |
+| C-SENDCLOSING | a send while the server's close (a code alone) is under way waits, writes nothing, and raises at once at the end |
+| D-DRAIN | the server's drain sends a close of 1001, "going away" |
+| E-RETURN | a procedure that returns closes with 1000 |
+| E-CLOSED | a procedure that lets `&websocket-closed` out: nothing more written or logged, no taker failure |
+| E-RAISE | a procedure that raises anything else closes with 1011, logged, no taker failure |
+| E-DETAILS | a raise's detail logged as the server logs one: a string, a record, a list, a two-line condition |
+| E-CLIENTCLOSED | the stream's end closes the stream, so a procedure's own wait raises `&client-closed`; let out, nothing more |
+| P-SILENT | a client silent after the 101 is pinged at 20 s and failed with 1011 20 s later, neither a millisecond early, logged |
+| P-OWN | a handler's own ping interval and timeout, 30 s and 5 s, are the times armed |
+| L-1002 | an unmasked frame fails the connection with 1002, logged with its code |
+| V-ENV | the limits read from the environment as the program starts, and taken by both accept forms; a malformed one stops it |
+| I-AMONG | the audit: the binding and the facade are among the sources |
+| I-binding, I-facade | the audit: each imports only the pure, and the one more its exception names |
+
+Specs hashed before each run, the names (`750524d`) and the runner (`e2a3035`) with them:
+- **Run 1** (`5052e3c`): 83 rows, 1 mismatch. K-16 also reddened C-TIMEOUT.
+  - My premise was wrong. `fake-shell-fire!` runs the deadline's call but does not
+    drain the scheduler, so the receive the close timeout woke ran only at the next
+    later turn. The stream's close made that turn, and K-16 takes the close away.
+  - The libuv shell drains its scheduler after every turn, so C-TIMEOUT now drains it
+    after each fire (`fake-shell-schedule!`). It is renamed to what it holds: "ends
+    the connection anyway".
+- **Run 2** (`5052e3c` again; only the suite changed): 83 rows, 1 mismatch. K-48 also
+  reddened C-TIMEOUT.
+  - That is the change's point: the check now reads the end's own wake. But I did not
+    predict again the rows the changed check reads.
+- **Run 3** (`aa0e798`, K-48's set widened): 83 rows, 0 mismatches.
+- **Run 4** (`e4be871`): 86 rows, 85 mutants and the baseline, 0 mismatches.
+  - M-BOM gained the three texts one byte off U+FEFF, U+EEFF, U+FEBF and U+FEFE.
+  - Their mutants, K-34c to K-34e, each take one of the byte-order mark's three byte
+    tests away.
+
+| # | mutation | red, as predicted |
+|---|----------|-----|
+| BASE | none | none: the binding suite 35, the audit 10 |
+| K-1 | a field's first line alone, not every line joined | H-CONN2, H-PROTO2, H-KEY2 |
+| K-3 | a refusal's fields dropped | H-VERSION |
+| K-4 | the 101's fields: `Upgrade` alone | H-ACCEPT, H-PROTO2 |
+| K-5 | the subprotocol chosen not handed to the WebSocket | H-PROTO2 |
+| K-58 | a handler that names no origins gets `any` | H-ORIGIN |
+| K-59a, K-59b | accept takes any procedure; any limits | H-ARGS |
+| K-60a, K-60b, K-60c | receive, send, close do not check their WebSocket | C-ARGS |
+| K-6 | the bytes read past the request not fed to the core | M-RETAINED, M-BINARY, M-BOM, C-CLIENT, E-CLOSED, L-1002 |
+| K-7 | the deadline `ws-deadline` names not armed as the take-over starts | P-SILENT, P-OWN, V-ENV |
+| K-12 | the take-over starts no reading | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE, C-SERVER, C-EOF, C-QUEUED, C-AGAIN, C-SENDCLOSING, E-CLIENTCLOSED |
+| K-35 | the drain closes with 1000 and no reason | D-DRAIN |
+| K-36 | no drain call registered | D-DRAIN |
+| K-71 | a read's end not stepped | W-END, C-EOF, C-QUEUED, C-AGAIN, E-CLIENTCLOSED |
+| K-72 | every read stepped as no bytes | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE, C-SERVER, C-QUEUED, C-SENDCLOSING |
+| K-73 | a deadline's passing not stepped | C-TIMEOUT, P-SILENT, P-OWN |
+| K-37 | a procedure's return closes nothing | E-RETURN |
+| K-38 | a procedure's raise not logged | E-RAISE, E-DETAILS |
+| K-39 | a procedure's raise closes with 1000 | E-RAISE |
+| K-40 | a `&websocket-closed` let out taken as a failure | E-CLOSED |
+| K-41 | a `&client-closed` let out taken as a failure | E-CLIENTCLOSED |
+| K-42 | either raised on to the server | E-CLOSED |
+| K-13 | `read-stop` not performed | R-QUEUE |
+| K-14 | `read-start` not performed | R-QUEUE |
+| K-15 | `disarm-deadline` not performed | R-QUEUE |
+| K-16 | `close-stream` not performed | E-CLIENTCLOSED |
+| K-17 | `closed` not performed | W-END, C-SERVER, C-CLIENT, C-EOF, C-TIMEOUT, C-OUTSIDE, C-QUEUED, C-AGAIN, C-SENDCLOSING |
+| K-47 | a delivery wakes no receive | M-WAKE, W-HIGH, W-LOW, W-END, R-QUEUE |
+| K-20 | a log line without its `websocket-` prefix | P-SILENT, L-1002 |
+| K-21 | a log line without its details | P-SILENT, L-1002 |
+| K-8 | ping armed for the ping timeout | P-OWN, V-ENV |
+| K-9 | pong armed for the ping interval | P-OWN |
+| K-10 | close armed for the ping interval | C-TIMEOUT |
+| K-18 | every end clean | W-END, C-EOF, C-TIMEOUT, C-OUTSIDE, C-QUEUED, C-AGAIN |
+| K-19 | an end's reason left empty | C-CLIENT |
+| K-48 | the end wakes no receive | C-SERVER, C-TIMEOUT |
+| K-49 | the end wakes no send | W-END, C-SENDCLOSING |
+| K-50, K-50b, K-45 | a woken receive's, a woken send's, or a raised wait's resume kept | none: survivors, as predicted |
+| K-43 | a wait's `&client-closed` not stepped as the stream's end | C-OUTSIDE |
+| K-44 | a wait's `&client-closed` let out | C-OUTSIDE |
+| K-30 | receive raises the end before the queued messages | C-QUEUED |
+| K-31 | a take not stepped | R-QUEUE |
+| K-32 | a text received as its bytes | M-RETAINED, M-WAKE, M-BOM, R-QUEUE, C-QUEUED |
+| K-66 | the queue's tail kept once it empties | R-QUEUE |
+| K-66b | each message enqueued in place of those before | M-BOM, C-QUEUED |
+| K-33 | a leading U+FEFF not put back | M-BOM |
+| K-34 | a text of U+FEFF alone not put back | M-BOM |
+| K-34c, K-34d, K-34e | one of the byte-order mark's three bytes not checked | M-BOM |
+| K-34b | no length guard before the byte-order mark's bytes | M-BOM, W-END, C-SERVER, C-EOF, C-TIMEOUT, C-OUTSIDE, C-QUEUED, C-AGAIN, C-SENDCLOSING, E-CLOSED, E-CLIENTCLOSED, P-SILENT, P-OWN, L-1002 |
+| K-55 | a send of anything else sent as binary | M-REFUSE |
+| K-22 | a write not counted unsent | W-HIGH, W-LOW, W-END |
+| K-23 | a write's done not counted | W-HIGH, W-LOW |
+| K-24 | a send goes on only below the low water | W-HIGH |
+| K-25 | a send goes on at any write's done | W-LOW |
+| K-26 | a send waits at the high water | W-HIGH, W-END |
+| K-27 | a send never waits | W-HIGH, W-LOW, W-END |
+| K-28 | a send woken by the end returns | W-END |
+| K-29 | a send while closing sent | C-SENDCLOSING |
+| K-53 | a close stepped is not remembered | C-SENDCLOSING |
+| K-62 | close's default code 1001 | C-SERVER |
+| K-63 | close of a code alone gives a reason | C-SENDCLOSING |
+| K-63b | close of a code and reason drops the reason | C-TIMEOUT |
+| K-69 | a log line without its newline | E-RAISE, E-DETAILS, P-SILENT |
+| K-70a to K-70e | a condition logged as a record; its line breaks kept; a record written; a string written; anything else displayed | E-DETAILS |
+| K-56 | the environment not read | V-ENV |
+| K-57, K-61 | the two- or three-argument accept takes the defaults | V-ENV |
+| A-1, A-2 | the facade imports `(http-server)`; `(chezscheme)` | I-facade |
+| A-3, A-4 | the binding imports `(rnrs eval)`; the facade | I-binding |
+| A-5, A-6 | a pure library imports `(chezscheme)`; `(http-server)` | I-limits; I-protocol |
+| A-7, A-8 | the facade moved; the binding moved | I-AMONG, and the moved file's check |
+
+**K-34b's wide set** is the fake's taker-call: a raise in a taker's call is recorded and
+aborts the stream. An empty reason, at every end but C-CLIENT's, raises there, and the
+writes before it are dropped.
+
+**Survivors, as predicted: K-45, K-50 and K-50b.** Each leaves a resume the binding has
+called, or one whose wait raised, to be called again: a late resume. The server logs it
+(`late-resume await`) and wakes nothing. The fake logs it nowhere. The real-socket
+suite, step 3, reads the server's log and holds them.
+
+**Not run, as equivalent:**
+- the bytes read past the request fed when there are none (`fx>=?`): an empty read
+  steps nothing;
+- the lines joined with "," for ", ": the handshake passes over the space;
+- the state not stored back: the core returns the state it was given;
+- `close-from!`'s two guards: the core answers a second close, or one after the end,
+  with nothing;
+- the log's flush: the suite's port is a string port.
+
+Every new or changed check has a killer by value; none is red only through a raise.
+
+| check | killers by value |
+|---|---|
+| H-ACCEPT | K-4 |
+| H-VERSION | K-3 |
+| H-CONN2, H-KEY2 | K-1 |
+| H-PROTO2 | K-1, K-4, K-5 |
+| H-ORIGIN | K-58 |
+| H-ARGS | K-59a, K-59b |
+| C-ARGS | K-60a, K-60b, K-60c |
+| M-RETAINED | K-6, K-32 |
+| M-WAKE | K-12, K-32, K-47, K-72 |
+| M-BINARY | K-6 |
+| M-BOM | K-6, K-32, K-33, K-34, K-34b to K-34e, K-66b |
+| M-REFUSE | K-55 |
+| W-HIGH | K-12, K-22 to K-24, K-26, K-27, K-47, K-72 |
+| W-LOW | K-12, K-22, K-23, K-25, K-27, K-47, K-72 |
+| W-END | K-12, K-17, K-18, K-22, K-26 to K-28, K-34b, K-47, K-49, K-71, K-72 |
+| R-QUEUE | K-12 to K-15, K-31, K-32, K-47, K-66, K-72 |
+| C-SERVER | K-12, K-17, K-34b, K-48, K-62, K-72 |
+| C-CLIENT | K-6, K-17, K-19 |
+| C-EOF | K-12, K-17, K-18, K-34b, K-71 |
+| C-TIMEOUT | K-10, K-17, K-18, K-34b, K-48, K-63b, K-73 |
+| C-OUTSIDE | K-17, K-18, K-34b, K-43, K-44 |
+| C-QUEUED | K-12, K-17, K-18, K-30, K-32, K-34b, K-66b, K-71, K-72 |
+| C-AGAIN | K-12, K-17, K-18, K-34b, K-71 |
+| C-SENDCLOSING | K-12, K-17, K-29, K-34b, K-49, K-53, K-63, K-72 |
+| D-DRAIN | K-35, K-36 |
+| E-RETURN | K-37 |
+| E-CLOSED | K-6, K-34b, K-40, K-42 |
+| E-RAISE | K-38, K-39, K-69 |
+| E-DETAILS | K-38, K-69, K-70a to K-70e |
+| E-CLIENTCLOSED | K-12, K-16, K-34b, K-41, K-71 |
+| P-SILENT | K-7, K-20, K-21, K-34b, K-69, K-73 |
+| P-OWN | K-7 to K-9, K-34b, K-73 |
+| L-1002 | K-6, K-20, K-21, K-34b |
+| V-ENV | K-7, K-8, K-56, K-57, K-61 |
+| I-AMONG | A-7, A-8 |
+| I-binding | A-3, A-4 |
+| I-facade | A-1, A-2 |
+| I-limits, I-protocol | A-5; A-6 |
