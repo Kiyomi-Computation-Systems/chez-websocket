@@ -533,3 +533,136 @@ their killers are M0's (`m0-mutations.md`).
 | H-FRESH | C-2, C-7, C-9, C-12, C-13, D-3, F-1, F-2, F-3, F-5, F-6, F-7, F-8, L-6, L-17, O-15, X-14, X-15, X-16 |
 | P-KEEP | C-2, C-7, D-3, L-6, L-17, O-15, X-10, X-11, X-12, X-13 |
 | D-SERVER | C-3, F-7 |
+
+## M4.2 — the binding's test driver
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-09.
+- **The suites:** `tests/test-driver.sps`, 12 checks (blob a43ec74), and the door suite,
+  `tests/test-door.sps`, now 6 (blob bfda47d).
+- **The code they hold** is the pinned server's, at v0.4.0 (388ec43):
+  - its fake shell, `tests/fake-shell.sls` (blob c355517);
+  - `src/http-server/transport.sls` (f9d77d2);
+  - `src/http-server/view.sls` (aa98353).
+
+**The runner** is the server's for its decision 0024, pointed at this tree, with this
+project's library path. It applies each mutant alone, to a copy of one of the pinned
+server's libraries put first on the library path, so neither the pin nor the tree is
+edited. It runs both suites and compares the checks that went red with the set named
+before the run. Before the run, a pre-flight checks that every cut matches its text once
+and keeps its paren balance.
+
+### The oracles
+
+- **RFC 6455's examples:** §1.2's opening handshake, and §5.7's masked "Hello" from a
+  client, 11 bytes.
+- **The server's documented door**, at v0.4.0:
+  - its decisions 0016 (the hand-off, the bytes handed over, the server's 101), 0023 (a
+    take-over's `awaiting`, its waits told when the stream closes) and 0024 (the abort,
+    and every line of a field);
+  - its fake shell's header: a write is the client's on its turn, a close waits for the
+    writes before it, the deadline is armed at the clock's now plus its time, the drain
+    call runs once, a raise in a taker's call is its failure and aborts the stream.
+- **RFC 9110 §5.3:** a field's lines in order.
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **Stage 0, the new checks on the v0.3.0 pin** (`550cfc1`; an earlier hash, `7411470`,
+  said "seven" over a list of eight suites and was replaced before the run):
+  - both new suites stopped at load, exit 255: `attempt to reference unbound identifier
+    transport-abort!`;
+  - the other eight suites green, 246 passes.
+- **Stage 1, on the v0.4.0 pin** (`560f2b6`): every suite green.
+  - The prediction said 11 checks in the driver suite, as stage 0's did. There are 12, a
+    miscount of my own: ten suites, 264 passes.
+- **The gap run** (`1c8b920`): the driver suite on the v0.4.0 pin, with v0.3.0's fake
+  shell (blob cd30588) first on the library path. Exactly the four predicted went red,
+  each for its reason; the other 8 passed, exit 1.
+  - D-ARMED: `#f`, nothing armed once the close was asked for.
+  - D-ABORT: no deadline, so no abort; the client read the write, told `#f`.
+  - D-RAISE-DL: the raise escaped `fake-shell-fire!`, nothing recorded, the stream left
+    open.
+  - D-RAISE-THUNK: the close waited behind the write, and the client read it.
+
+### The mutants
+
+| key | check |
+|---|---|
+| DR-ABORT | door: an abort is handed to the transport's eighth procedure |
+| D-RETAINED | a frame sent with the handshake is handed to the take-over, and the client reads its echo after the 101 |
+| D-WAKE | a read's bytes resume the thunk parked on `await`, and the client reads its echo |
+| D-STOP | a stopped read takes no delivery, and a read started again takes the next |
+| D-CLOCK | the taker's deadline is armed at the fake clock's now plus its time, and passes then and not a millisecond before |
+| D-DRAIN | the server's drain runs the taker's drain call, once |
+| D-BEHIND | a close asked for behind a write the client has not read waits: the client reads the write, then the stream closes |
+| D-ARMED | a deadline asked for while that close waits is armed |
+| D-ABORT | an abort at that deadline ends the stream: the write is told `ECANCELED`, the client reads none of it, and the close call comes |
+| D-OUTSIDE | the stream closed while the thunk waits: its wait raises `&client-closed`, which is no taker failure |
+| D-RAISE-DL | a raise in the deadline's call is the taker's failure: recorded, and the stream closed, with nothing escaping to the test |
+| D-RAISE-THUNK | a waiting thunk's raise is the taker's failure, and ends the stream at once: its write told `ECANCELED`, and never read |
+| D-VALUES | `request-header-values` reads every line of a field, in order, through the server's parse, and `request-header` the first |
+
+Specs hashed before the run (`7b25053`, names `2f36490`). The run: 28 rows, 27 mutants and
+the baseline, 0 mismatches. M-2 was drafted and withdrawn before the run: a copy of the
+bytes handed over, one byte short, would raise when nothing was handed over, so its red
+set could not be named.
+
+| # | mutation | red, as predicted |
+|---|----------|-----|
+| B-0 | none | none: 18 passes |
+| M-1 | the bytes read past the request are not handed over | D-RETAINED |
+| M-3 | a delivery to a taker leaves the scheduler undrained | D-WAKE, D-STOP, D-BEHIND, D-ARMED, D-ABORT |
+| M-4 | read-stop stops nothing | D-STOP |
+| M-5 | read-start starts nothing | D-STOP |
+| M-6 | the deadline armed a millisecond late | D-CLOCK, D-ARMED, D-ABORT, D-RAISE-DL |
+| M-7 | the deadline armed a millisecond early | D-CLOCK, D-ARMED |
+| M-8 | the timer fires a millisecond behind the clock | D-CLOCK, D-ABORT, D-RAISE-DL |
+| M-9 | the drain does not call the taker | D-DRAIN |
+| M-10 | the drain's two guards both gone (the shell's draining flag and the taker's) | D-DRAIN |
+| M-10a | the shell's guard gone, the taker's left | none: the call still once |
+| M-10b | the taker's guard gone, the shell's left | none: the call still once |
+| M-11 | the last write's turn never begins a close asked for | D-BEHIND |
+| M-12 | the close begins at once, whatever is outstanding | D-ARMED, D-ABORT |
+| M-13 | no deadline armed once the taker's close is asked for (v0.3.0's gate) | D-ARMED, D-ABORT |
+| M-14 | the abort only asks for the close | D-ABORT, D-RAISE-THUNK |
+| M-15 | the abort marks nothing aborted | D-ABORT, D-RAISE-THUNK |
+| M-16 | an aborted write's bytes are the client's | D-ABORT, D-RAISE-THUNK |
+| M-17 | `transport-abort!` calls the transport's close | DR-ABORT, D-ABORT |
+| M-18 | the close tells no wait | D-OUTSIDE, D-RAISE-DL |
+| M-19 | the close's `&client-closed` counted a failure | D-OUTSIDE, D-RAISE-DL |
+| M-20 | the taker's close call is not made | D-BEHIND, D-ABORT, D-OUTSIDE, D-RAISE-DL, D-RAISE-THUNK |
+| M-21 | the deadline's call unguarded | D-RAISE-DL |
+| M-22 | a waiting thunk's raise only asks for the close | D-RAISE-THUNK |
+| M-23 | a waiting thunk's raise not recorded | D-RAISE-THUNK |
+| M-24 | `request-header-values` reads the first line only | D-VALUES |
+| M-25 | `request-header-values` reads the lines last first | D-VALUES |
+| M-26 | `request-header` reads the last line | D-VALUES |
+
+M-12 leaves D-BEHIND green. A close begun at once queues its turn behind the write's, and
+the fake tells a write that was not aborted `#f` on its turn, so the client still reads
+it and the order is the same. D-ARMED sees M-12: nothing is armed once the close has
+begun.
+
+**The drain's "once" is held twice**: by the shell's draining flag, and by the taker's
+drained flag. M-10a and M-10b, each taking one away, pass, as predicted. M-10, taking
+both, reddens D-DRAIN.
+
+| check | killers by value |
+|---|---|
+| DR-ABORT | M-17 |
+| D-RETAINED | M-1 |
+| D-WAKE | M-3 |
+| D-STOP | M-3, M-4, M-5 |
+| D-CLOCK | M-6, M-7, M-8 |
+| D-DRAIN | M-9, M-10 |
+| D-BEHIND | M-3, M-11, M-20 |
+| D-ARMED | M-3, M-6, M-7, M-12, M-13 |
+| D-ABORT | M-3, M-6, M-8, M-12, M-13, M-14, M-15, M-16, M-17, M-20 |
+| D-OUTSIDE | M-18, M-19, M-20 |
+| D-RAISE-DL | M-6, M-8, M-18, M-19, M-20, M-21 |
+| D-RAISE-THUNK | M-14, M-15, M-16, M-20, M-22, M-23 |
+| D-VALUES | M-24, M-25, M-26 |
+
+The door suite's other five checks did not change; their mutants are M0's (M0-7 to
+M0-11) and M4.1's review's (D-SERVER).
