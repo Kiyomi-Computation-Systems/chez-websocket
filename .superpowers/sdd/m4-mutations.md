@@ -1676,3 +1676,73 @@ order is not observable on a real socket either.
 
 **Step 1's review's survivors are all killed now:** R-6, R-7, R-6b and K-50b by the server's
 `late-resume`, and R-20 by the heap.
+
+## M4.3 step 3's review
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-09; Linux
+6.12.76-linuxkit aarch64 in Docker (libuv 1.48.0) for the socket suite's rows. `/code-review` at
+xhigh over #50 to #52, 13 findings; the owner's "fix all".
+- **The code:** no library changes. The binding is step 3's (5d3f741).
+- **The suites:**
+  - `tests/test-socket.sps`, 6 checks, rewritten;
+  - `tests/test-driver.sps`, 15, with D-SHELL;
+  - `tests/test-binding.sps`, 55, on `tests/ws-play.sls`, its helpers moved verbatim.
+
+**The runner** is step 3's as `wsmut4.py`, with two more targets:
+- a binding mutant run on the socket suite alone;
+- a shadow of the server's `(shell-testing)` run on the driver suite.
+
+### The oracles
+
+Step 3's, and:
+- **S-SILENT's windows:** the server's deadlines are met at the first tick at or after them,
+  never before. The interval is 100 ms and the timeout 300 ms, so either taken for the other
+  falls outside its window.
+- **S-PARK's reference:** a wait by `call/1cc` around `await`, the old `park!`'s shape,
+  measured in the same run.
+- **The cap:** over ten times the most a wait took.
+
+### The test-first runs
+
+- **A harness fault, before stage 0:** S-LETGO's first run counted 4 messages for 10. `let`
+  read the count before the measure. It was made `let*`.
+- **Stage 0**, hashed: twelve suites, 349, as predicted. No library code changed, so every new
+  check is watched to fail by its mutants below.
+
+### The mutants
+
+| id | mutant | red, predicted and seen |
+|---|---|---|
+| BASE | the unmutated tree | none |
+| R-6, R-7, R-6b | step 3's late resumes | S-DRAIN |
+| K-50b | woken senders kept | S-SENDERS |
+| R-20 | a read's bytevector kept | S-LETGO |
+| P-1CC | `park!` by `call/1cc` again | S-PARK: in its value, a receive by `call/1cc` over half the reference |
+| K-1 | the take-over arms no first deadline | P-SILENT, P-OWN, V-ENV, S-SILENT |
+| K-32 | a text received as its bytes | step 3's set, and S-ECHO |
+| B-LINGER-AFTER | the close's deadline armed after the close is asked for | none: the survivor |
+| K-47 | a delivery wakes no receive | M-WAKE, W-HIGH, W-LOW, W-END, B-CATCHUP, R-QUEUE, R-QUEUE-BYTES, X-FOREIGN, CC-RECEIVE, R-DEADLINE, S-ECHO, S-LETGO; the socket suite in 11 s (Darwin), 19 s (Linux) |
+| KS-1 | ping armed for the ping timeout | P-OWN, V-ENV, S-SILENT (pinged at 304 ms) |
+| KS-2 | pong armed for the close timeout | P-SILENT, P-OWN, S-SILENT (no close within the cap) |
+| KS-3 | pong armed for the ping interval | P-OWN, S-SILENT (the close 101 ms after the ping) |
+| KS-4 | ping armed for half the interval; the socket suite alone | S-SILENT (pinged at 50 ms) |
+| KW-1 | no wait after a write that puts the client behind; the socket suite alone | S-SENDERS (`sent-at-once`) |
+| D-1 | the driver's borrowed list without chez-libuv's `tests/` | D-NAMES |
+| DS-1 | `(shell-testing)`'s run-until-drained never satisfied | D-SHELL |
+| DS-2 | `(shell-testing)`'s open-client sends no request | D-SHELL |
+| MK-1 | `TEST_ONLY_DIRS` without chez-libuv's `tests/` | LOAD:test-driver, LOAD:test-socket |
+
+- **Run 1: 20 rows, 1 mismatch.** MK-1 also stopped the driver suite at load, since D-SHELL
+  imports `(shell-testing)`: a prediction error.
+- **Run 2: 0 mismatches.**
+- **On Linux** each binding mutant reddened the same socket check, by value. In S-PARK,
+  P-1CC's receive measured 3,356 B against a reference of 2,703 B.
+
+**Every new or changed check has a killer by value.** So does each of S-SILENT's four bounds:
+- the ping's lower bound, KS-4;
+- the ping's upper bound, KS-1;
+- the pong's lower bound, KS-3;
+- the pong's upper bound, KS-2.
+
+Two preconditions are part of the checks' values and have no mutant of their own: S-DRAIN's
+receive seen to wait, and S-PARK's 400 waiting.
