@@ -87,7 +87,10 @@ and the door suite.
   Step 2's form (0006): reading stops past the high water, with a write timeout of its
   own, `CHEZ_WS_WRITE_TIMEOUT`, 60 s. Its review's forms (0006's amendment): the close
   timed from queueing, as peers time it, and at least 1 s; a send that waits before
-  it writes too; a frame written in pieces of 64 KiB.
+  it writes too; a frame written in pieces of 64 KiB. Step 3's forms: a receive's
+  wait escapes by `call/cc`, about 3 KB a connection less (0005's amendment); and the
+  pong stays timed from the ping's queueing, measured with a throttled reader (0001's
+  amendment).
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;

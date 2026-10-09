@@ -424,14 +424,23 @@ is refused.
       delivery, so it plays a client that reads (step 2);
     - plays a client that reads at a rate, each write the client's once it has read
       its last byte (`reading-at!`, step 2's review).
-  - **What the fake cannot show.** It logs a late resume nowhere. So these are held on
-    the real socket (M4.3's step 3):
+  - **What the fake cannot show.** It logs a late resume nowhere, and its coroutines do
+    not show what a waiting procedure's stack holds. So these are held on the real
+    socket (M4.3's step 3):
     - the binding letting go of a resume it has called;
-    - its close call marking its procedure's wait ended.
-    - Whether a read's bytevector is let go after its step is held by step 3's
-      footprint.
-- **A real socket.** One suite runs a server on `127.0.0.1:0` with a client on the
-  same loop, capped by iteration count.
+    - its close call marking its procedure's wait ended;
+    - a read's bytevector let go after its step, by the heap;
+    - what a procedure waiting in a receive holds (0005's amendment).
+- **A real socket** (`tests/test-socket.sps`, M4.3 step 3). The server's libuv shell
+  listens on `127.0.0.1:0`, with its clients on the same loop. Every wait is capped by an
+  iteration count, as the server's own socket lane does it (its `(shell-testing)`, on
+  chez-libuv's `(uv-testing)`, both borrowed onto the suites' path). Each check has a
+  server of its own, closed with its clients before the next. The suite:
+  - reads the server's log for `late-resume`, through the drain's close under a waiting
+    receive and a send that waited;
+  - fails a silent client on the shell's own timer;
+  - measures the heap back to back, for a read's bytevector and for a receive's wait;
+  - and its numbers are both platforms' (the [measures](research/2026-10-09-real-socket-measures.md)).
 - **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
   server built from this library, 301 cases, the image pinned by digest. A ratchet
   holds each case's result (0022).
@@ -464,6 +473,13 @@ is refused.
   CHANGELOG's `[0.1.0]`) and 3,637 to 3,644 B for a parked `await` (its design §5.2).
   Both are from its v0.1.0, before the guards its v0.4.0 hoisted and chez-libuv v0.7.4
   (M4.2's review).
+  - **Measured in M4.3 step 3** (Darwin; the server's own method; the
+    [measures](research/2026-10-09-real-socket-measures.md)). An idle WebSocket in a
+    receive held 11,096 to 11,414 B of heap. At v0.4.0 the server held 1,793 to 2,073 B
+    for an idle connection and 3,634 B for a parked `await`, as at v0.1.0. A raw taker
+    parked at `await` held 6,390 B.
+  - **The receive's wait escaped by a one-shot continuation**, which held a stack segment
+    while it waited. By `call/cc` it holds about 3 KB less (0005's amendment, by form).
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`
@@ -522,6 +538,14 @@ is refused.
   - Since 0006 the core sees each write's done, so it could time the pong from the
     ping's, as websockets does. Then the write timeout would still bound a ping stuck
     past the high water. A ping stuck below it would have nothing armed.
+  - **Measured in step 3 on a real socket** (Linux; 0001's amendment of 2026-10-09).
+    After a 4 MiB burst, live readers at 96 KiB/s and below were failed with 1011, and
+    readers at 112 and 128 KiB/s were kept. The backlog ahead of the ping was in the
+    kernel, so timing from the ping's done failed the same rates, within 0.3 s. It also
+    left a client reading nothing, sent 4.2 or 4.3 MB, with nothing armed.
+  - **Decided by form, "From queueing, as now"**: no change. A longer
+    `CHEZ_WS_PING_TIMEOUT` keeps slow readers; at 60 s, readers at 32 to 64 KiB/s were
+    kept.
 - **A late resume after a handler's own deadline** (M4.3's review; 0005).
   - **The gap.** A handler's `with-deadline` can end a waiting receive. A message
     delivered in that turn, before the coroutine runs, wakes a wait that has ended, and
@@ -536,3 +560,5 @@ is refused.
   would cost nothing a read, but a quiet client would be pinged up to 40 s after its
   last byte, and a dead one found within 60 s, against 0001's 20 s and 40 s. M4.3
   measures it beside a connection's cost.
+  - **Measured in step 3, and kept.** An echo round trip on a real socket took 100.5 to
+    102.2 µs with the re-arm and 100.9 to 102.2 µs without it. No difference shows.

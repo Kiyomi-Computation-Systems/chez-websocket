@@ -2,7 +2,8 @@
 
 Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, in M4.3 step 1's review: "Many
-senders, one receive", the recommended).
+senders, one receive", the recommended). Amended 2026-10-09 by form (M4.3 step 3):
+"call/cc", the recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §6
 
 ## Context
@@ -64,3 +65,41 @@ Weighed:
   and the server logs `late-resume await`. The message stays queued. The server's waits
   give no way to ask whether a wait still stands, so this needs a door change (design
   §9).
+
+## Amendment of 2026-10-09 (M4.3 step 3): a wait's way back is a full continuation
+
+**The gap.** A receive or a send that waits needs a way back out of the server's `await`,
+for the `&client-closed` its own stream's close raises there. `await` raises it with
+`raise`, so a handler cannot return from it. The way back was `call/1cc`, a one-shot
+continuation. The binding's comment said a `guard` "costs a waiting coroutine kilobytes".
+Measured on a real socket, as the server measures its own connections, the one-shot
+continuation held a stack segment of its own while the procedure waited:
+- an idle WebSocket in `websocket-receive` held 11,096 to 11,414 B of heap after the 101,
+  and 10,289 to 10,334 B after 10 echoes;
+- the server's own idle connection held 1,793 to 2,073 B, and a raw taker parked at
+  `await` 6,390 B.
+
+The fake shell does not show it ([the measures](../research/2026-10-09-real-socket-measures.md)).
+
+**The options, measured** (Darwin, 400 connections held by a python child):
+- **"call/cc"**: 7,898 to 8,367 B after the 101, and 6,885 to 7,166 B after echoes. An echo
+  round trip allocates the same within 0.5%.
+- **"guard"**: 8,384 B and 6,723 B. The same allocation, and more lines change. It also
+  disproves the binding's comment.
+- **"Keep call/1cc"**: no change.
+
+The binding suite passed 55 of 55 with each. websockets 17.1 documents 14 KiB a
+connection with compression off; coder, gorilla, tungstenite and ws document none.
+
+**Decided by form, the recommended: "call/cc".** `park!`'s way back is a full
+continuation, and the comment says what was measured.
+
+**Consequences:**
+- **An idle WebSocket costs about 3 KB less**, about 8 KB in all. Most of it is the server's
+  switched connection and its parked coroutine.
+- **The socket suite holds it**: a procedure waiting in a receive holds less than 2 KiB a
+  connection more than one at a bare `await`.
+  - Measured in that suite's setting: 2,778 to 4,277 B more by `call/1cc`, and at most 980 B
+    by `call/cc`, on Darwin and Linux.
+  - Its mutant, `call/1cc` again, reddens that check alone.
+
