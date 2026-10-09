@@ -81,7 +81,9 @@ and the door suite.
   door change too, `transport-abort!` and `request-header-values` (the server's
   v0.4.0, pinned here). `tests/test-driver.sps` holds what the binding needs of the
   fake, through the pin.
-- **M4.3 the binding** `(websocket private binding)` and the facade:
+- **M4.3 the binding** `(websocket private binding)` and the facade, in three steps
+  (2026-10-09): 1, the binding and the facade on the fake shell; 2, a client that does
+  not read, with the send side's bound by form; 3, the real socket and the measures.
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;
