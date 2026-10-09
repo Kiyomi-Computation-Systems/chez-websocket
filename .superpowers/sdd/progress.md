@@ -1325,3 +1325,54 @@ MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritu
 `make test` green on main: ten suites, 266 expected passes, every pin ok.
 
 NEXT: M4.3, the binding (`(websocket private binding)` and the facade), when the owner asks.
+
+---
+
+M4.3, STEP 1 — THE BINDING AND THE FACADE. Branches `docs/m4.3-1-design`, `feat/m4.3-1-binding` and `docs/m4.3-1-ledger`, stacked from main at 9135b59 (by form, "Three stacked PRs": about 1,480 lines, over the ~400 mark). 2026-10-09.
+
+**Where it began.** On the owner's "Start m4.3". M4.3 is built in three steps, as the plan now says:
+1. the binding and the facade, on the fake shell;
+2. a client that does not read, with the send side's bound by form;
+3. the real socket and the measures.
+
+**Delivered:**
+- **`(websocket private binding)`**, the shell of the design's §6. `websocket-accept` checks the handshake and answers a refusal or the switch.
+  - It reads every line of a field, joined with ", " (0004).
+  - The take-over makes the core's state, arms the deadline `ws-deadline` names, starts reading, feeds the core the bytes the server read past the request, registers the drain's close of 1001 "going away", and answers `(awaiting thunk)`.
+  - Every action is performed at once, as the design's table has it. A `log` is a line on the current output port, as the server logs, prefixed `websocket-`.
+- **The verbs.**
+  - `websocket-receive` waits on `await`, answers queued messages before the end, and keeps a text's leading U+FEFF.
+  - `websocket-send!` waits past the high water until the low water, as the server's streams do.
+  - `websocket-close!` takes a code and a reason, or neither.
+  - Once the connection has ended, `&websocket-closed` carries its code, reason and whether it closed cleanly.
+- **The procedure's end.** Its return closes with 1000. A `&websocket-closed` or `&client-closed` it lets out does nothing more. Any other raise closes with 1011 and is logged `websocket-handler-failed`.
+- **`(websocket)`, the facade**: the verbs, `make-handshake-settings`, the limits' constructors and accessors, and `environment-websocket-limits`, read as the program starts.
+- **The import audit names its two exceptions**: the binding may import `(chezscheme)` and `(http-server)`, and the facade the binding. It checks that both are among the sources.
+- **`tests/test-binding.sps`, 35 checks** on the server's fake shell, and a child program, `tests/start-with-environment.sps`, for the environment.
+
+**Where it departs from the design, recorded in its §6 and §8:**
+- **A send while the server's close is under way** sends nothing, waits for the end, and raises. The design was silent here; this is websockets' way.
+- **No close call.** The binding registers none. Both shells tell the wait first, so a close call's wake would come after the wait had ended: a late resume. It was tried and taken out.
+- **The log.** The design's table had no `log` row.
+- **A `&client-closed` let out**, from a wait of the procedure's own, does nothing more.
+
+**Tests first**, each red set named and hashed before its run (`m4-mutations.md`):
+- **Stage 0:** the suite stopped at load, `(websocket)` not found, exit 255. The other ten suites were green: 266.
+- **Stage 1:** a fault in the suite, not the binding. In Chez, `(rnrs)`'s `current-output-port` cannot be given to `parameterize`, and the suite stopped after 21 passes. Fixed, it gave 296, as predicted.
+- **Stages 1c and 1d:** 299 and 304, as predicted. The mutant draft found eight checks missing, and they were added before the run.
+
+**Mutants** (`m4-mutations.md`): the binding's, on a copy first on the suites' path, and the audit's, on a scratch tree.
+- **Run 1: 83 rows, 1 mismatch**, K-16. My premise was wrong: the fake's timer does not drain the scheduler, so C-TIMEOUT had been seeing the stream's close. It now drains after each fire, as the libuv shell drains after every turn.
+- **Run 2: 1 mismatch**, K-48. The changed check now saw it, and I had not predicted again the rows it reads.
+- **Run 4: 86 rows, 85 mutants and the baseline, 0 mismatches**, with M-BOM gaining three texts one byte off U+FEFF.
+- **Every new or changed check has a killer by value.**
+- **Three survivors, as predicted** (K-45, K-50, K-50b): each a late resume, which the fake logs nowhere. Step 3's real socket holds them.
+
+**CI's first run found the suite naming Chez `chez`.** Run 37921568542 failed V-ENV, (127 127): CI names Chez `scheme`, in `CHEZ`.
+- The child now runs `"${CHEZ:-chez}"`. Shown red first on a PATH holding Chez only as `scheme`, then green: 35 there, and 304 under `make test`.
+- Run 5 of the mutants, on the fixed suite: 86 rows, 0 mismatches.
+- The fix is its own commit on the binding's branch. The ledger was rebased onto it.
+
+`make test` green before the commit (Darwin arm64): eleven suites, 304 expected passes, every pin ok.
+
+NEXT: step 2, a client that does not read: the abort where the binding closes such a client, and the send side's bound by form, measured on this binding first.
