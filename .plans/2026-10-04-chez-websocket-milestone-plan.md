@@ -94,7 +94,8 @@ and the door suite.
   coroutine less, in a server slice after step 3, then its release pinned here. Before
   that pin (2026-10-09), by form: the socket suite's park check retired, since no change
   to the binding reddens it on v0.4.1 (0005's amendment); a read let go measured at
-  16,000 bytes, and an allocation counted on a stack segment of its own (0007).
+  16,000 bytes, and an allocation counted as the middle of three counts (0007, amended
+  by #57's review).
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;

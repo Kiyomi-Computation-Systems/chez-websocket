@@ -1802,3 +1802,36 @@ to 16,000 bytes. On Linux: twelve suites and 348, twice on each server.
 - **Every changed check has a killer by value.** R-20 holds S-LETGO at 16,088 to
   18,968 B. Each allocation check is reddened by its rows. P-1CC survives, as 0005's
   amendment says.
+
+## #57's review — S-LETGO's whole reads checked, and the counter the middle of three
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-09; and
+Linux aarch64 in Docker (Ubuntu 24.04, libuv 1.48.0) for the suites.
+- **The code:**
+  - `tests/ws-testing.sls` (blob 1a782d9): `middle-counted`, the middle of three counts made
+    100 frames apart;
+  - `tests/test-socket.sps` (blob 260c623): `reading`, and S-LETGO's whole-read check; its comments touched after run 4.
+- **The runner** is `wsmut5.py` as `wsmut6.py`, with a `socket-suite` target: a mutated
+  copy of the socket suite, whose status 3 is `PROV:socket`.
+
+**The rows:** run 2's ten, and two for the whole-read check.
+
+| Row | Mutant | Red, as named |
+|---|---|---|
+| PV-40K | S-LETGO at 40,000 bytes again: its frames in pieces | PROV:socket |
+| PV-NONOTE | `reading` tells no read | PROV:socket |
+
+- **Run 3** (specs c6f86270), with the counter as first written here, the least of three
+  counts 100 frames apart, each inside a `call/1cc`: 0 mismatches on each server. But the
+  stage before it, predicted green, failed: on v0.4.1 the done check read 64 B in 5 of 6
+  runs. The shadow it had been measured as passed 6 of 6; the tree's added a helper
+  procedure. A prediction error, of a layout the count depends on (0007's amendment).
+- **The counter changed** to the middle of three, with no `call/1cc`. Stage 1 again, as
+  predicted: twelve suites and 348 on v0.4.0, and on v0.4.1 in three runs; the binding
+  suite 6 of 6 on each server.
+- **Run 4** (specs 03d082dd), run 3's twelve rows: 0 mismatches on each server.
+- **Every changed check has a killer by value.** The whole-read check stops at status 3
+  under PV-40K and PV-NONOTE. Each allocation check is reddened by its rows, counted the
+  new way. P-1CC survives, as before.
+- **The counter's own flake is no row.** It shows in some runs and not others, so the
+  measures stand in for it (0007's amendment).
