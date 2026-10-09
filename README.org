@@ -36,7 +36,7 @@ later. The one dependency, chez-http-server, is a submodule pinned at a release
 tag, and it brings its own pinned dependencies. All but chez-srfi are private.
 
 #+begin_src sh
-make submodules   # clone chez-http-server v0.3.0 and the pins it carries
+make submodules   # clone chez-http-server v0.4.0 and the pins it carries
 make test         # build chez-libuv's shim, check every pin, run the suites
 make help         # every target
 #+end_src
