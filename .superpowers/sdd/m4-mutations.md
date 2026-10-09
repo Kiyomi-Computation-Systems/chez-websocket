@@ -1577,3 +1577,102 @@ guard; W-CLOSING under PW-1 and PW-3, a deadline passing with none armed.
 **The survivor, as predicted:** B-LINGER-AFTER, as in step 2.
 
 **Every new or changed check has a killer by value.**
+
+## M4.3 step 3 — the real socket
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), 2026-10-09; and
+Linux 6.12.76-linuxkit aarch64 in Docker (Ubuntu 24.04.5, libuv 1.48.0) for the socket suite's
+rows.
+- **The code:**
+  - `src/websocket/private/binding.sls` (blob 5d3f741): `park!`'s way back by `call/cc`;
+  - `src/websocket/limits.sls` (6cc0d84): the header's ping-timeout caveat, a comment;
+  - `Makefile` (322fc46): chez-libuv's `tests/` among `TEST_ONLY_DIRS`.
+- **The suites:**
+  - `tests/test-socket.sps`, 6 checks (248d64d);
+  - `tests/test-driver.sps`, 14 (459edd6), its names check widened;
+  - `tests/test-binding.sps`, 55 (7989bc3), unchanged.
+
+**The runner** is step 2's review's (`wsmut2.py`) as `wsmut3.py`:
+- a binding mutant runs the binding suite and the socket suite, on a path with chez-libuv's
+  `tests/`;
+- a driver-suite target runs a mutated copy of that suite;
+- a Makefile target runs `make -f <mutated> test`, a suite that stops at load named
+  `LOAD:<suite>`.
+
+On Linux the binding's mutants ran against the socket suite alone, from shadow copies made on
+Darwin.
+
+### The oracles
+
+- **The server's waits** (its `waits.sls`, R4): a resume called once its wait has ended is
+  logged `late-resume`, naming the verb, and wakes nothing. Its drain logs `draining`, then
+  `drain-timeout` and `stopped`.
+- **RFC 6455** §5.7's masked "Hello"; §5.5.1, a close echoing its code; §7.4.1's 1001 and
+  1011; §7.1.5's 1006.
+- **0005's amendment, by form** ("call/cc"), and its bound: a receive's wait within 2 KiB of a
+  bare `await`'s.
+  - Measured in the suite's setting: 2,778 to 4,277 B more by `call/1cc`, and at most 980 B by
+    `call/cc`, on Darwin and Linux.
+  - The fake shows only about 170 B by `call/1cc`, and −20 B by `call/cc`.
+- **A read's bytevector:** a client's 4,000-byte binary is one frame of 4,008 bytes, read at
+  once on loopback. The bound is half of it. Measured unmutated: 8 to 144 B.
+- **0001:** a silent client pinged at the interval and failed with 1011 a timeout later.
+
+### The test-first runs
+
+Each red set was named and hashed before its run.
+- **Stage 0:** the suite, the path and the driver's widened check, on main's binding. As
+  predicted:
+  - the socket suite red only in S-PARK, at 4,047 B;
+  - the driver suite green;
+  - twelve suites, 347 passes and one failure.
+- **Stage 1:** `call/cc`.
+  - **A void run.** The edit was refused, since the file had not been read in the session, so
+    the first run was stage 0's tree, S-PARK red at 4,006 B. It is kept, named void.
+  - **Rerun on the fixed tree:** green, 348, as predicted.
+
+### The mutants
+
+Each red set was named and hashed before its run. Run 1 was on blobs whose comments run 3's
+changed.
+
+| id | mutant | red, predicted and seen |
+|---|---|---|
+| BASE | the unmutated tree | none |
+| R-6 | the close call marks no wait ended | S-DRAIN |
+| R-7 | a dead waiter woken | S-DRAIN |
+| R-6b | a procedure's wait not recorded as parked | S-DRAIN |
+| K-50b | woken senders kept | S-SENDERS |
+| R-20 | a read's bytevector kept after its step | S-LETGO |
+| P-1CC | `park!`'s way back by `call/1cc` again | S-PARK |
+| K-1 | the take-over arms no first deadline | P-SILENT, P-OWN, V-ENV, S-SILENT |
+| K-32 | a text received as its bytes | M-RETAINED, M-WAKE, M-BOM, B-CATCHUP, R-QUEUE, R-QUEUE-BYTES, C-QUEUED, X-FOREIGN, CC-RECEIVE, R-DEADLINE, S-ECHO |
+| B-LINGER-AFTER | the close's deadline armed after the close is asked for | none: the survivor, as in step 2 |
+| D-1 | the driver suite's borrowed list without chez-libuv's `tests/` | D-NAMES |
+| MK-1 | `TEST_ONLY_DIRS` without chez-libuv's `tests/` | LOAD:test-socket |
+
+- **Run 1: 12 rows, 1 mismatch.** K-32 also reddened B-CATCHUP. Its set was step 1's review's,
+  and B-CATCHUP, step 2's, receives a text after the catch-up: a prediction error. Its actual
+  was `(sent #vu8(72 101 108 108 111))`, by value.
+- **Run 2,** K-32's set with B-CATCHUP: **0 mismatches.**
+- **Run 3,** on the blobs above: **0 mismatches.**
+- **On Linux** each binding mutant reddened the same socket check, by value. P-1CC measured
+  2,796 B and R-20 4,112 to 4,136 B.
+
+**Every new or changed check has a killer by value:**
+- S-ECHO, K-32 (`(binary 5)` for `(text "Hello")`);
+- S-SILENT, K-1 (no frame);
+- S-DRAIN, R-6, R-7 and R-6b (`late-resume` logged);
+- S-SENDERS, K-50b (three);
+- S-LETGO, R-20;
+- S-PARK, P-1CC;
+- D-NAMES, D-1.
+
+The path's change has MK-1.
+
+**The survivor, as predicted:** B-LINGER-AFTER. The libuv shell arms a taker's deadline while
+its close waits for writes, and none once the close has begun (`taker-deadline!`), so the
+order is not observable on a real socket either.
+
+**Step 1's review's survivors are all killed now:** R-6, R-7, R-6b and K-50b by the server's
+`late-resume`, and R-20 by the heap.
