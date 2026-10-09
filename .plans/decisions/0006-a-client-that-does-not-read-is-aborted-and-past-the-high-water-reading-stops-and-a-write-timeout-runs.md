@@ -3,7 +3,9 @@
 Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, M4.3 step 2: "Reading stops past
 the high water" and "60 s, its own variable", each the recommended). Where the binding
-aborts is the design's to name (0004), and was not asked.
+aborts is the design's to name (0004), and was not asked. Amended 2026-10-09 by form
+(step 2's review): "From queueing, as peers do", not the recommended; "Wait before
+writing too" and "In 64 KiB writes", the recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §5–§7 and §9
 
 ## Context
@@ -122,3 +124,77 @@ Weighed:
   which step 3 measures with a throttled reader.
 - **On a real socket** the kernel takes some writes before any is unsent, so these
   bounds start later; step 3 measures by how much.
+
+## Amendment (2026-10-09): the close timed from queueing, a send waits before it writes, and a frame in pieces, by form, step 2's review
+
+**The gaps** (the review's findings 1 to 5):
+- **The close.** The close timeout runs from the close's queueing, and now aborts. A
+  client reading slower than what is unsent over the close timeout loses the end of
+  it and the close, which `transport-close!` used to deliver, however late.
+- **Many senders.** A send wrote its frame, then waited. Under 0005 every procedure
+  that sends added a frame, so the bound in Consequences held for one sender alone.
+- **A large message** is one frame and one write, so the write timeout saw no progress
+  inside it. A client reading it steadily was aborted unless it read it whole within
+  60 s.
+- **A close timeout of 0** aborted every close the binding asks for at the next tick.
+- **A done that tells a failure** was only counted, so a client gone was found only by a
+  read, and reading may be stopped.
+
+**Measured on the fake shell** (Darwin arm64, Chez 10.4.1; b9c9d77 and four
+prototypes), the last two columns with 64 KiB writes:
+
+| case | as built | the write timeout, then the close timeout | the close timeout, re-armed by each done |
+|---|---|---|---|
+| 200 KiB sent, then a close, read at 15 KiB/s | aborted at 15 s, none of it read | clean at 18 s | clean at 18 s |
+| the same, read at 5 KiB/s | aborted at 15 s | clean at 45 s | aborted at 15 s |
+| the server's close, nothing read | aborted 10 s after it | aborted 60 s after it | aborted 10 s after it |
+| a close timeout of 0 | aborted at the next tick | clean | aborted at the next tick |
+
+- **One 10 MiB message** read at 100 KiB/s: aborted at 65 s as one write, the fake's
+  client given none of it; read whole in 64 KiB writes. 16 writes for a 1 MiB send
+  cost 14,294 B more on the fake, most of it the fake's own; a small send costs the
+  same, 1,381.2 B.
+- **20 procedures** each sending 64 KiB to a client that reads nothing: 1,310,920 B
+  held; 262,184 B with a send that waits before it writes.
+
+**Peers**, read at their tags:
+- **Each times its close from queueing.** websockets 17.2 sets `close_deadline` as the
+  close is sent (`asyncio/connection.py:910-911`); ws 8.22.0 gives 30 s from
+  `close()` (`websocket.js:1323-1327`); coder v1.8.15 gives the close's write 5 s
+  (`close.go:185`).
+- **None measures progress inside a message.** websockets writes a frame at once and
+  drains with no time (`connection.py:962-969`, `:1062-1078`); its keepalive's ping
+  waits in the same drain (`:822`, `:912-914`), so a slow reader of a large message is
+  not cut. ws writes the header and the payload corked (`sender.js:563-571`), with no
+  time at all. coder and gorilla v1.5.3 bound the whole write by the caller's absolute
+  deadline (coder `conn.go:171-182`; gorilla `conn.go:390`). The server's own write
+  timeout covers each write: a bytevector body is one, a streamed body's pieces are
+  many. nginx's `send_timeout` runs "between two successive write operations, not for
+  the transmission of the whole response" (its docs).
+
+**Decided, by form:**
+1. **"From queueing, as peers do."** The close timeout runs from the close's queueing,
+   as before: at a close, a client reads what was unsent, and the close, within it,
+   which at the default high water is 25.6 KiB/s. The docs say so. It is at least
+   1 s.
+   Weighed:
+   - **"Write timeout, then close timeout"** (the recommended). Each done re-arms the
+     write timeout while anything is unsent, and the close timeout times only the
+     client's answer. A client reading nothing would be held 60 s after a close, not
+     10 s.
+   - **"Close timeout, re-armed by each done."** A client reading under 6.4 KiB/s,
+     64 KiB a close timeout, would still be aborted at a close.
+2. **"Wait before writing too"** (the recommended). A send waits while the client is
+   behind before it writes, as well as after a write that puts it behind. So what one
+   client makes the server hold is the high water and the one frame that passed it,
+   however many procedures send, and Consequences' bound holds. Weighed: **"Write, then
+   wait"**, websockets' order, with the bound reworded.
+3. **"In 64 KiB writes"** (the recommended, asked again with the peers in view). The
+   binding writes a frame in writes of 64 KiB at most, each done stepped as its own,
+   so a client needs to read 64 KiB a minute, whatever a message's size. Weighed:
+   **"One write; document the rate"**: a message read whole within the write timeout,
+   10 MiB at 175 KiB/s.
+
+**The design's, not asked:** a done that tells a failure is stepped as the stream's
+end, `(end why)`, after its `written`, so a client gone is found by its writes when
+nothing reads. After the end it answers nothing, as for a write cancelled at the close.
