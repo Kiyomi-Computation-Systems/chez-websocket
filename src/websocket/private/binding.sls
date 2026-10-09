@@ -29,21 +29,31 @@
 ;;;   log              a line on the current output port, as the server
 ;;;                    logs: its name prefixed websocket-, then each detail
 ;;;
-;;; The stream's close, whoever closed it, raises &client-closed in the wait
-;;; the procedure is in, or else its next (decision 0023).  A wait of the
-;;; binding's, a receive's or a send's, steps it as the stream's end
-;;; (`(end closed)`), so the core reads what waits for the queue and ends
-;;; the connection, 1006, unless it has ended.  The binding registers no
-;;; close call of its own: both of the server's shells tell the wait before
-;;; they run one, so a call that woke the wait would come after the wait had
-;;; ended, a late resume.  A send into a stream closed under it is told at
-;;; its next wait.  The server's drain closes with 1001, "going away".
+;;; The waits (decision 0005).  A receive or a send waits on `await`, its
+;;; waiter kept on the WebSocket, with the WebSocket whose procedure runs on
+;;; the coroutine that waits, if any (`current-websocket`, set around each
+;;; procedure).  Any number of coroutines may wait to send, and all go on
+;;; together; one receive may wait, and a second while it does is refused,
+;;; as websockets refuses it.  Waking lets the waiter go.
 ;;;
-;;; The procedure's end: its return closes with 1000; a &websocket-closed it
-;;; lets out does nothing more, nor a &client-closed, which is the stream's
-;;; close; any other raise closes with 1011 and is logged
-;;; `websocket-handler-failed`.  The thunk lets nothing out, so the server
-;;; logs nothing for it.
+;;; The stream's close, whoever closed it (decision 0023).  The server tells
+;;; the wait the procedure is in, or else its next, raising &client-closed
+;;; there, and then runs the transport's close call: both of its shells, in
+;;; that order.  The close call marks the wait the WebSocket's procedure is
+;;; in, wherever it waits, as ended, so nothing wakes it, which would be a
+;;; late resume; then steps the stream's end, `(end closed)`, so the core
+;;; reads what waits for the queue and ends the connection, 1006, unless it
+;;; has ended, waking whatever else waits.  A wait's &client-closed is its
+;;; own coroutine's stream's: on its own WebSocket it ends the wait, and the
+;;; receive or send sees the end; on another's it goes on out, to the
+;;; procedure whose stream closed.  The server's drain closes with 1001,
+;;; "going away".
+;;;
+;;; The procedure's end: its return closes with 1000; its own WebSocket's
+;;; &websocket-closed let out does nothing more, nor a &client-closed, which
+;;; is its stream's close; any other raise, another WebSocket's end among
+;;; them, closes with 1011 and is logged `websocket-handler-failed`.  The
+;;; thunk lets nothing out, so the server logs nothing for it.
 ;;;
 ;;; The limits are read from the environment once, as a program that
 ;;; imports the binding starts, so a malformed value stops it there (design
@@ -79,19 +89,35 @@
 
   ;; A WebSocket.  `state` is the core's; `head` and `tail` the messages
   ;; delivered and not yet received, each (kind . payload), `tail` the last
-  ;; pair or #f; `receiver` and `sender` the resume of a receive or a send
-  ;; that waits, or #f; `unsent` the bytes written whose done has not come;
-  ;; `closing?` whether a close has been stepped; `ended` the
+  ;; pair or #f; `receiver` the waiter of the receive that waits, or #f;
+  ;; `senders` the waiters of the sends that wait; `parked` the waiter its
+  ;; own procedure last waited in, on this WebSocket or another, or #f;
+  ;; `unsent`
+  ;; the bytes written whose done has not come; `ended` the
   ;; &websocket-closed once the connection has ended, or #f.  The core's
-  ;; callbacks are made once, here, so a read allocates no closure.
+  ;; callbacks are made once, here, and its read and take events too, each
+  ;; filled in before it is stepped, so neither allocates (the core keeps no
+  ;; event).
   ;;   websocket? : Any -> Boolean
   ;;   websocket-subprotocol : WebSocket -> (U String #f)
   (define-record-type (websocket new-websocket websocket?)
     (fields (immutable transport) (mutable state) (immutable limits)
             (immutable subprotocol)
-            (mutable head) (mutable tail) (mutable receiver) (mutable sender)
-            (mutable unsent) (mutable closing?) (mutable ended)
-            (mutable on-bytes) (mutable on-end) (mutable passed)))
+            (mutable head) (mutable tail) (mutable receiver) (mutable senders)
+            (mutable parked) (mutable unsent) (mutable ended)
+            (mutable on-bytes) (mutable on-end) (mutable passed)
+            (immutable read-event) (immutable taken-event)))
+
+  ;; A wait: its resume, the WebSocket whose procedure waits in it, or #f,
+  ;; and whether the stream's close has ended it.
+  (define-record-type waiter
+    (fields (mutable resume) (immutable owner) (mutable dead?)))
+
+  ;; current-websocket : (Parameter (U WebSocket #f))
+  ;; The WebSocket whose procedure runs on this coroutine.  The server's
+  ;; scheduler runs a parameterize's winders as a coroutine parks and
+  ;; resumes, so each coroutine sees its own.
+  (define current-websocket (make-parameter #f))
 
   ;; default-settings : HandshakeSettings — no subprotocols, the request's
   ;; own host as the one origin (decision 0003).
@@ -110,6 +136,8 @@
       ((request proc settings limits)
        (unless (procedure? proc)
          (assertion-violation 'websocket-accept "not a procedure" proc))
+       (unless (handshake-settings? settings)
+         (assertion-violation 'websocket-accept "not handshake settings" settings))
        (unless (websocket-limits? limits)
          (assertion-violation 'websocket-accept "not limits" limits))
        (let ((answer (handshake-answer (request-method request)
@@ -134,8 +162,16 @@
   (define (take-over transport retained proc limits subprotocol)
     (let* ((state (make-ws-state limits))
            (ws (new-websocket transport state limits subprotocol
-                              '() #f #f #f 0 #f #f #f #f #f)))
-      (websocket-on-bytes-set! ws (lambda (bv start end) (step! ws (list 'bytes bv start end))))
+                              '() #f #f '() #f 0 #f #f #f #f
+                              (list 'bytes #f 0 0) (list 'taken 0))))
+      (websocket-on-bytes-set! ws
+        (lambda (bv start end)
+          (let ((event (websocket-read-event ws)))
+            (set-car! (cdr event) bv)
+            (set-car! (cddr event) start)
+            (set-car! (cdddr event) end)
+            (step! ws event)
+            (set-car! (cdr event) #f))))
       (websocket-on-end-set! ws (lambda (why) (step! ws (list 'end why))))
       (websocket-passed-set! ws (lambda () (step! ws '(deadline-passed))))
       (let ((kind (ws-deadline state)))
@@ -143,24 +179,37 @@
       (start-reading! ws)
       (let ((n (bytevector-length retained)))
         (when (fx>? n 0) (step! ws (list 'bytes retained 0 n))))
+      (transport-on-close! transport
+        (lambda ()
+          (let ((w (websocket-parked ws)))
+            (when w (waiter-dead?-set! w #t)))
+          (step! ws '(end closed))))
       (transport-on-drain! transport (lambda () (close-from! ws 1001 "going away")))
       (awaiting (lambda () (run ws proc)))))
 
   ;; run : WebSocket (WebSocket -> Any) -> Void
   ;; The procedure, and its end.
   (define (run ws proc)
-    (guard (e ((or (websocket-closed? e) (client-closed? e)) (if #f #f))
+    (guard (e ((or (client-closed? e) (own-end? ws e)) (if #f #f))
               (else (log-line "websocket-handler-failed" (list e))
                     (close-from! ws 1011 "")))
-      (proc ws)
+      (parameterize ((current-websocket ws)) (proc ws))
       (close-from! ws 1000 "")))
+
+  ;; own-end? : WebSocket Any -> Boolean — the WebSocket's own end, raised.
+  (define (own-end? ws e)
+    (let ((end (websocket-ended ws)))
+      (and end (eq? e end))))
 
   ;; step! : WebSocket Event -> Void
   ;; The event stepped, and the actions performed, in order.
   (define (step! ws event)
     (let-values (((state actions) (ws-step (websocket-state ws) event)))
       (websocket-state-set! ws state)
-      (for-each (lambda (action) (perform! ws action)) actions)))
+      (let loop ((actions actions))
+        (unless (null? actions)
+          (perform! ws (car actions))
+          (loop (cdr actions))))))
 
   ;; perform! : WebSocket Action -> Void
   (define (perform! ws action)
@@ -188,7 +237,7 @@
                           (websocket-unsent-set! ws (fx- (websocket-unsent ws) n))
                           (when (fx<=? (websocket-unsent ws)
                                        (websocket-limits-write-low-water (websocket-limits ws)))
-                            (wake-sender! ws))))))
+                            (wake-senders! ws))))))
 
   ;; arm! : WebSocket Symbol -> Void — the deadline, for its kind's time.
   (define (arm! ws kind)
@@ -209,7 +258,7 @@
   (define (ended! ws code reason clean?)
     (websocket-ended-set! ws (make-websocket-closed code (decode reason) clean?))
     (wake-receiver! ws)
-    (wake-sender! ws))
+    (wake-senders! ws))
 
   ;; The queue of messages delivered, oldest first.
   (define (enqueue! ws m)
@@ -225,31 +274,51 @@
       (when (null? (cdr cell)) (websocket-tail-set! ws #f))
       (car cell)))
 
-  ;; The waits: a receive's and a send's, each woken once.
+  ;; The waits, each woken once, and let go as it is.
+
+  ;; resume! : Waiter -> Void
+  ;; The waiter woken, unless the stream's close has ended its wait.  Its
+  ;; owner's `parked` may go on naming it: woken, or raised, a waiter is out
+  ;; of every list, and the close call marking it ended changes nothing.
+  (define (resume! w)
+    (unless (waiter-dead? w)
+      ((waiter-resume w) #t)))
+
   (define (wake-receiver! ws)
-    (let ((r (websocket-receiver ws)))
-      (when r (websocket-receiver-set! ws #f) (r #t))))
+    (let ((w (websocket-receiver ws)))
+      (when w (websocket-receiver-set! ws #f) (resume! w))))
 
-  (define (wake-sender! ws)
-    (let ((r (websocket-sender ws)))
-      (when r (websocket-sender-set! ws #f) (r #t))))
+  (define (wake-senders! ws)
+    (let ((waiting (websocket-senders ws)))
+      (unless (null? waiting)
+        (websocket-senders-set! ws '())
+        (for-each resume! (reverse waiting)))))
 
-  ;; park! : WebSocket (WebSocket (U Resume #f) -> Void) -> Void
-  ;; Waits, its resume kept with `keep!`, until it is woken.  A wait that
-  ;; raises lets go of its resume first: &client-closed, the stream's close,
-  ;; is stepped as its end; anything else, a deadline the handler set, say,
-  ;; goes on out.  No guard, which costs a waiting coroutine kilobytes.
-  (define (park! ws keep!)
-    (when (call/1cc
-           (lambda (k)
-             (with-exception-handler
-              (lambda (e)
-                (keep! ws #f)
-                (if (client-closed? e) (k #t) (raise e)))
-              (lambda ()
-                (await (lambda (resume) (keep! ws resume)))
-                #f))))
-      (step! ws '(end closed))))
+  ;; park! : WebSocket Boolean -> Void
+  ;; Waits, to send or to receive, until it is woken.  A wait that raises
+  ;; lets go of its waiter first: a &client-closed on the procedure's own
+  ;; WebSocket is its stream's close, which the close call has stepped, so
+  ;; the wait ends; anything else goes on out, another stream's close, or a
+  ;; deadline the handler set.  No guard, which costs a waiting coroutine
+  ;; kilobytes.
+  (define (park! ws send?)
+    (let* ((owner (current-websocket))
+           (w (make-waiter #f owner #f)))
+      (call/1cc
+       (lambda (k)
+         (with-exception-handler
+          (lambda (e)
+            (if (eq? (websocket-receiver ws) w)
+                (websocket-receiver-set! ws #f)
+                (websocket-senders-set! ws (remq w (websocket-senders ws))))
+            (if (and (client-closed? e) (eq? owner ws)) (k #f) (raise e)))
+          (lambda ()
+            (await (lambda (resume)
+                     (waiter-resume-set! w resume)
+                     (when owner (websocket-parked-set! owner w))
+                     (if send?
+                         (websocket-senders-set! ws (cons w (websocket-senders ws)))
+                         (websocket-receiver-set! ws w))))))))))
 
   ;; check : Any Symbol -> Void
   (define (check ws who)
@@ -257,57 +326,66 @@
 
   ;; websocket-receive : WebSocket -> (U String Bytevector)
   ;; The oldest message delivered and not yet received: a text's string, or
-  ;; a binary's bytevector.  It waits until one comes.  Once the connection
-  ;; has ended, the messages still queued are received first; then it raises
-  ;; &websocket-closed, and again at every later call.
+  ;; a binary's bytevector.  It waits until one comes; a receive while
+  ;; another waits on the WebSocket is refused (decision 0005).  Once the
+  ;; connection has ended, the messages still queued are received first;
+  ;; then it raises &websocket-closed, and again at every later call.
   (define (websocket-receive ws)
     (check ws 'websocket-receive)
     (let loop ()
       (cond ((pair? (websocket-head ws))
-             (let* ((m (dequeue! ws)) (payload (cdr m)))
-               (step! ws (list 'taken (bytevector-length payload)))
+             (let* ((m (dequeue! ws)) (payload (cdr m)) (event (websocket-taken-event ws)))
+               (set-car! (cdr event) (bytevector-length payload))
+               (step! ws event)
                (if (eq? (car m) 'text) (decode payload) payload)))
             ((websocket-ended ws) => raise)
-            (else (park! ws websocket-receiver-set!) (loop)))))
+            ((websocket-receiver ws)
+             (assertion-violation 'websocket-receive "another receive waits on this WebSocket" ws))
+            (else (park! ws #f) (loop)))))
 
   ;; websocket-send! : WebSocket (U String Bytevector) -> Void
   ;; Sends a text of the string, or a binary of the bytevector, as one
   ;; frame.  While more than the high water is unsent, it waits until no
-  ;; more than the low water is.  Once the connection has ended it raises
-  ;; &websocket-closed; while the server's close is under way it sends
-  ;; nothing, waits for the end, and then raises it, as websockets does.
+  ;; more than the low water is, beside any other send that waits (decision
+  ;; 0005).  Once the connection has ended it raises &websocket-closed;
+  ;; while the server's close is under way it sends nothing, waits for the
+  ;; end, and then raises it, as websockets does.
   (define (websocket-send! ws payload)
     (check ws 'websocket-send!)
     (let ((kind (cond ((string? payload) 'text)
                       ((bytevector? payload) 'binary)
                       (else (assertion-violation 'websocket-send! "not a string or a bytevector" payload)))))
       (cond ((websocket-ended ws) => raise)
-            ((websocket-closing? ws)
-             (let loop () (unless (websocket-ended ws) (park! ws websocket-sender-set!) (loop)))
+            ((not (ws-open? (websocket-state ws)))
+             (let loop () (unless (websocket-ended ws) (park! ws #t) (loop)))
              (raise (websocket-ended ws)))
             (else
              (step! ws (list 'send kind payload))
              (when (fx>? (websocket-unsent ws) (websocket-limits-write-high-water (websocket-limits ws)))
-               (park! ws websocket-sender-set!)
+               (park! ws #t)
                (cond ((websocket-ended ws) => raise)))))))
 
   ;; websocket-close! : WebSocket [Nat [String]] -> Void
   ;; Starts the closing handshake with the code, 1000 unless given, and the
   ;; reason, "" unless given, and returns; the handshake finishes on its own.
-  ;; Once a close was sent, or the connection has ended, it does nothing.
+  ;; A code an endpoint may not send, or a reason past 123 bytes, is refused
+  ;; (ws-sendable-close?).  Once a close was sent, or the connection has
+  ;; ended, it does nothing.
   (define websocket-close!
     (case-lambda
       ((ws) (websocket-close! ws 1000 ""))
       ((ws code) (websocket-close! ws code ""))
       ((ws code reason)
        (check ws 'websocket-close!)
+       (unless (ws-sendable-close? code reason)
+         (assertion-violation 'websocket-close! "not a close the server may send" code reason))
        (close-from! ws code reason))))
 
-  ;; close-from! : WebSocket Nat String -> Void — the server's close, once.
+  ;; close-from! : WebSocket Nat String -> Void
+  ;; The server's close, while the connection is open: the core's phase says.
   (define (close-from! ws code reason)
-    (unless (or (websocket-closing? ws) (websocket-ended ws))
-      (step! ws (list 'close code reason))
-      (websocket-closing?-set! ws #t)))
+    (when (ws-open? (websocket-state ws))
+      (step! ws (list 'close code reason))))
 
   ;; decode : Bytevector -> String
   ;; Checked UTF-8 as its string, a leading U+FEFF kept: Chez 10.4.1's

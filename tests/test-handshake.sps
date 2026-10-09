@@ -284,10 +284,12 @@
              "http://127.0.0.1:187411" "http://elsewhere.example/http://127.0.0.1:18741" "")))
 
     ;; Caddy writes the scheme its client used in X-Forwarded-Proto, replacing
-    ;; any a client sent, and a browser cannot set it on a handshake.
-    (test-equal "same-host holds the Origin's scheme to X-Forwarded-Proto when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it (0003's amendment)"
-      '(accept (403 origin) (403 origin) accept (403 origin) accept accept accept accept accept accept
-        accept)
+    ;; any a client sent, and a browser cannot set it on a handshake.  A list
+    ;; is read by its leftmost element, the client-facing hop's, by RFC 7239
+    ;; §4's order (0003's amendment of 2026-10-09, by form).
+    (test-equal "same-host holds the Origin's scheme to X-Forwarded-Proto's leftmost element when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it (0003's amendments)"
+      '(accept (403 origin) (403 origin) accept (403 origin) accept accept accept (403 origin) accept accept
+        accept accept (403 origin) accept accept)
       (list (scheme-answer "https://app.example.com" "https" '(same-host))
             (scheme-answer "http://app.example.com" "https" '(same-host))
             (scheme-answer "https://app.example.com" "http" '(same-host))
@@ -299,7 +301,11 @@
             (scheme-answer "http://app.example.com" "https, http" '(same-host))
             (scheme-answer "http://app.example.com" "" '(same-host))
             (scheme-answer "http://app.example.com" "https" '("http://app.example.com"))
-            (scheme-answer "http://app.example.com" "https" 'any)))
+            (scheme-answer "http://app.example.com" "https" 'any)
+            (scheme-answer "http://app.example.com" "http, https" '(same-host))
+            (scheme-answer "http://app.example.com" " https ,http" '(same-host))
+            (scheme-answer "http://app.example.com" ", https" '(same-host))
+            (scheme-answer "https://app.example.com" "https,http" '(same-host))))
 
     (test-equal "same-host compares the host the request names, letters without regard to case, an empty one too, as coder and gorilla do, and refuses RFC 6455's own example, whose Origin names another host; a list may hold same-host beside origins"
       '(accept accept accept (403 origin) (403 origin) accept accept (403 origin))

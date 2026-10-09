@@ -102,7 +102,7 @@
 ;;;   the queue under both reads what waits, a message at a time as the
 ;;;   queue makes room, and then answers read-start.
 (library (websocket protocol)
-  (export make-ws-state ws-step ws-deadline)
+  (export make-ws-state ws-step ws-deadline ws-open? ws-sendable-close?)
   (import (rnrs) (websocket frame) (websocket utf8) (websocket limits))
 
   ;; A connection.  `phase` is open, closing once the server's close is
@@ -149,6 +149,14 @@
     (unless (ws-state? s)
       (assertion-violation 'ws-deadline "not a connection" s))
     (ws-state-deadline s))
+
+  ;; ws-open? : WsState -> Boolean
+  ;; Whether the connection is open: no close sent by the server, and not
+  ;; ended.  A send is the caller's mistake once it is not.
+  (define (ws-open? s)
+    (unless (ws-state? s)
+      (assertion-violation 'ws-open? "not a connection" s))
+    (eq? (ws-state-phase s) 'open))
 
   ;; The deadline, one at a time, as the transport has one.  The record and
   ;; what the binding is told change together, here.
@@ -458,13 +466,19 @@
                  (loop (fx+ i 1)
                        (fx+ n (cond ((fx<? c #x80) 1) ((fx<? c #x800) 2) ((fx<? c #x10000) 3) (else 4))))))))))
 
+  ;; ws-sendable-close? : Any Any -> Boolean
+  ;; Whether the server may send a close of the code and reason: a code an
+  ;; endpoint may send (§7.4.1, §7.4.2), and a string whose UTF-8 fits a
+  ;; close, 123 bytes past its code (§5.5).
+  (define (ws-sendable-close? code reason)
+    (and (fixnum? code) (sendable? code) (string? reason) (fits-close? reason)))
+
   ;; close! : WsState Any Any -> (Listof Action)
-  ;; The server's close (§7.1.2): its code one an endpoint may send, and its
-  ;; reason a string that fits a close.  Sent while open, it arms the close
-  ;; deadline; once a close was sent, or the connection has ended, it
-  ;; answers nothing.
+  ;; The server's close (§7.1.2): one ws-sendable-close? allows.  Sent while
+  ;; open, it arms the close deadline; once a close was sent, or the
+  ;; connection has ended, it answers nothing.
   (define (close! s code reason)
-    (unless (and (fixnum? code) (sendable? code) (string? reason) (fits-close? reason))
+    (unless (ws-sendable-close? code reason)
       (assertion-violation 'ws-step "not a close the server may send" code reason))
     (if (eq? (ws-state-phase s) 'open)
         (begin

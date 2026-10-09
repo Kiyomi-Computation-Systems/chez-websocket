@@ -59,7 +59,9 @@
 ;;;              request's X-Forwarded-Proto names http or https, the scheme
 ;;;              its client used, as Caddy writes it and no browser can, the
 ;;;              Origin's scheme must be that one too; otherwise the scheme
-;;;              is not compared.
+;;;              is not compared.  A list is read by its leftmost element,
+;;;              the client-facing hop's (RFC 7239 §4's order; 0003's
+;;;              amendment of 2026-10-09).
 ;;; An empty Origin is no origin (RFC 6454 §7.1): it names no host, so
 ;;; same-host refuses it, as gorilla does.
 (library (websocket handshake)
@@ -132,7 +134,7 @@
              (let ((key (value "Sec-WebSocket-Key")))
                (cond ((not (key? key)) (refusal 400 '() 'key))
                      ((not (origin-accepted? (value "Origin") host (settings-origins settings)
-                                             (value "X-Forwarded-Proto")))
+                                             (leftmost (value "X-Forwarded-Proto"))))
                       (refusal 403 '() 'origin))
                      (else
                       (let ((protocol (choose (settings-subprotocols settings)
@@ -225,6 +227,16 @@
                     (to (back-ows s from comma)))
                (or (range=? s from to token same?)
                    (loop (fx+ comma 1))))))))
+
+  ;; leftmost : (U String #f) -> (U String #f)
+  ;; The first element of a field's comma-separated list, the OWS around it
+  ;; passed over: of X-Forwarded-Proto, the client-facing hop's, by RFC 7239
+  ;; §4's order (0003's amendment of 2026-10-09).  #f for a field absent.
+  (define (leftmost s)
+    (and s
+         (let* ((comma (find-comma s 0 (string-length s)))
+                (from (skip-ows s 0 comma)))
+           (substring s from (back-ows s from comma)))))
 
   ;; find-comma : String Nat Nat -> Nat — the first comma in [i, end), or end.
   (define (find-comma s i end)

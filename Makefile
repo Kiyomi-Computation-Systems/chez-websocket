@@ -54,6 +54,13 @@ TEST_LIBDIRS := $(LIBDIRS):$(subst $(SPACE),:,$(strip $(TEST_ONLY_DIRS)))
 # Each tests/test-*.sps is its own process with its own (exit ...) status.
 TESTS := $(wildcard tests/test-*.sps)
 
+# The suites run with none of the binding's variables set: it reads them as a
+# program starts, and the suites' numbers are the defaults' (design §7).  The
+# binding suite refuses to run if one is set, so a variable added to (websocket
+# limits) and not here stops it.
+WS_ENV_VARS := CHEZ_WS_MAX_MESSAGE_BYTES CHEZ_WS_MAX_QUEUE CHEZ_WS_PING_INTERVAL \
+  CHEZ_WS_PING_TIMEOUT CHEZ_WS_CLOSE_TIMEOUT CHEZ_WS_WRITE_HIGH_WATER CHEZ_WS_WRITE_LOW_WATER
+
 # timeout(1) is GNU coreutils; macOS installs it as gtimeout. Absent both, a
 # hung suite is not capped but the run is otherwise identical.
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
@@ -141,7 +148,7 @@ test: build check-pins ## Run every tests/test-*.sps (status 0/1/2/3, keep-going
 	@fail=0; \
 	for t in $(TESTS); do \
 	  echo "=== $$t ==="; \
-	  CHEZSCHEMELIBDIRS=$(TEST_LIBDIRS) $(TIMEOUT_BIN) $(if $(TIMEOUT_BIN),$(SUITE_TIMEOUT),) $(CHEZ) --program $$t; \
+	  env $(foreach v,$(WS_ENV_VARS),-u $(v)) CHEZSCHEMELIBDIRS=$(TEST_LIBDIRS) $(TIMEOUT_BIN) $(if $(TIMEOUT_BIN),$(SUITE_TIMEOUT),) $(CHEZ) --program $$t; \
 	  rc=$$?; \
 	  if [ $$rc -eq 124 ] && [ -n "$(TIMEOUT_BIN)" ]; then \
 	    echo "HUNG: $$t exceeded $(SUITE_TIMEOUT)s and was killed" >&2; fail=1; \
