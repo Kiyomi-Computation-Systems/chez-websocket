@@ -1376,3 +1376,53 @@ M4.3, STEP 1 — THE BINDING AND THE FACADE. Branches `docs/m4.3-1-design`, `fea
 `make test` green before the commit (Darwin arm64): eleven suites, 304 expected passes, every pin ok.
 
 NEXT: step 2, a client that does not read: the abort where the binding closes such a client, and the send side's bound by form, measured on this binding first.
+
+---
+
+M4.3 STEP 1'S REVIEW. Branches `docs/m4.3-1-review-decisions`, `fix/m4.3-1-review` and `docs/m4.3-1-review-ledger`, stacked on `docs/m4.3-1-ledger` (#39) (by form, "Three stacked PRs": about 900 lines). 2026-10-09.
+
+`/code-review` at extra-high effort over #37 to #39 reported twelve findings. The owner said "Fix all". Two needed a choice, made by form after the peers' and the proxies' sources were read (a Sonnet agent, its citations checked by hand):
+- **"Many senders, one receive"**: decision 0005.
+- **"Leftmost element"**: decision 0003's amendment of 2026-10-09.
+
+**Fixed:**
+1. **A wait's `&client-closed` is its own coroutine's stream's.** A procedure waiting on another connection's WebSocket, whose own client left, used to end that other connection. Now:
+   - each waiter carries the WebSocket whose procedure waits in it, from a parameter set around the procedure;
+   - the close on another's WebSocket goes on out, to the procedure whose stream closed.
+2. **Many senders, one receive** (0005).
+   - Senders waiting on one WebSocket all go on together at the low water. A second sender used to overwrite the first's resume.
+   - A second receive while one waits is refused, naming `websocket-receive`.
+3. **Another WebSocket's `&websocket-closed`, let out of a procedure,** is any other raise: 1011, logged. It used to leave the procedure's own connection open with nobody reading.
+4. **The close call is back** (`transport-on-close!`). It marks the wait the WebSocket's procedure is in as ended, wherever it waits, then steps the stream's end. So a procedure that spent its `&client-closed` in a wait of its own no longer waits forever at its next receive.
+5. **X-Forwarded-Proto is read by its leftmost element** (0003's amendment). A list used to skip the Origin's scheme check.
+6. **The suites run with no `CHEZ_WS_` variable set.** The Makefile unsets them, and the binding suite refuses to run otherwise.
+7. **The verbs refuse their own mistakes, naming themselves.** `websocket-close!` refuses a bad code or reason, by the core's new `ws-sendable-close?`, and `websocket-accept` refuses bad settings.
+9. **A read costs the binding nothing beyond the transport's own work.** It allocated 80 B (measured against a taker that only re-arms its deadline). It now fills in a read event and a take event made once, and performs a step's actions by a loop.
+10. **The binding asks the core whether it is open,** `ws-open?`, and keeps no closing flag of its own.
+11. **The log lines are checked against the server's own `log-line`.**
+12. **C-OUTSIDE closes the stream with the abort,** as the server's own close is at once.
+
+**Skipped, as it needs a door change: finding 8.**
+- **The gap.** A message delivered in the turn a handler's own deadline ends its receive wakes a wait that has ended. The server logs `late-resume await`, and the message stays queued.
+- **Why.** The server's waits give no way to ask whether a wait still stands.
+- **Where it is held.** It is in the design's §9, and R-DEADLINE holds that such a receive lets go of its wait.
+
+**Records:**
+- decision 0005;
+- 0003's amendment;
+- the design's §3, §6 and §9, and §8: two connections at once, what a read costs, the suites' environment, and what the fake cannot show.
+
+**Tests first** (`m4-mutations.md`):
+- **R0:** the protocol suite stopped at load; the binding suite red in exactly its five new checks; with a variable set, exit 2.
+- **R0':** the forms' checks red, as predicted: eight in the binding suite, and the scheme check in the handshake suite.
+- **Two runs were not hashed before they ran**, and each is recorded as such: R1's first run of the fixed tree, and the green run after three checks were widened.
+
+**Mutants:** every earlier one re-cut against the rewritten binding and predicted again.
+- **Run 1: 106 rows, 1 mismatch**, K-34b. X-FOREIGN-CLOSED passed on an assertion of the same text as the test's own, so it now also holds that what was raised is a `&websocket-closed`.
+- **Run 2: 106 rows, 0 mismatches.**
+- **Run 3:** the two mutants that undo the allocation fix, both red.
+- **Five survivors, as predicted:** four late resumes the fake logs nowhere, and a read's bytevector kept. Step 3's real socket and footprint hold them.
+
+`make test` green before the commit (Darwin arm64): eleven suites, 316 expected passes, every pin ok. `make prod` green.
+
+NEXT: the PRs by form; then review and the closing ritual for #37 to #39 and this, when the owner asks; then step 2.
