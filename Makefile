@@ -44,11 +44,13 @@ LIBDIRS := $(subst $(SPACE),:,$(strip $(LIBDIR_LIST)))
 # The suites run on LIBDIRS and then the test code they borrow, last, so the
 # directories before it win any name it shares with them (the driver suite
 # checks that none does): the server's tests/, whose (fake-shell) is the
-# binding's test driver (decision 0004), and chez-httparse's test harness, on
-# which the server's (response-reader) reads a response as a client would.
-# Test code stays off LIBDIRS, the path `make run` and `make dev` use, and
-# `make test` refuses to run if it is there.
-TEST_ONLY_DIRS := $(SERVER_DIR)/tests $(HTTPARSE_DIR)/test/support/harness
+# binding's test driver (decision 0004) and whose (shell-testing) runs clients
+# on the libuv shell's loop for the socket suite; chez-httparse's test
+# harness, on which the server's (response-reader) reads a response as a
+# client would; and chez-libuv's tests/, whose (uv-testing) (shell-testing)
+# is built on.  Test code stays off LIBDIRS, the path `make run` and `make
+# dev` use, and `make test` refuses to run if it is there.
+TEST_ONLY_DIRS := $(SERVER_DIR)/tests $(HTTPARSE_DIR)/test/support/harness $(LIBUV_DIR)/tests
 TEST_LIBDIRS := $(LIBDIRS):$(subst $(SPACE),:,$(strip $(TEST_ONLY_DIRS)))
 
 # Each tests/test-*.sps is its own process with its own (exit ...) status.

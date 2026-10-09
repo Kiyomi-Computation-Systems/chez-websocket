@@ -95,7 +95,8 @@
 ;; The test code the suites borrow, last on their path (the Makefile's
 ;; TEST_ONLY_DIRS), and this project's own libraries.
 (define borrowed
-  '("vendor/chez-http-server/tests" "vendor/chez-http-server/vendor/chez-httparse/test/support/harness"))
+  '("vendor/chez-http-server/tests" "vendor/chez-http-server/vendor/chez-httparse/test/support/harness"
+    "vendor/chez-http-server/vendor/chez-libuv/tests"))
 (define ours '("src" "tests"))
 
 ;; A taker shaped as the binding will be (design §6).  Its take-over keeps
@@ -347,9 +348,11 @@
     ;; whatever imports it.
     (let* ((theirs (apply append (map library-names borrowed)))
            (mine (apply append (map library-names ours))))
-      (test-equal "no library of the test code borrowed onto the suites' path has the name of one of this project's, the fake shell and the response reader among them"
-        '(ours fake-shell response-reader ())
+      (test-equal "no library of the test code borrowed onto the suites' path has the name of one of this project's, the fake shell, the response reader, the shell's clients and chez-libuv's test loop among them"
+        '(ours fake-shell response-reader shell-testing uv-testing ())
         (list (if (member '(websocket handshake) mine) 'ours 'none-of-ours)
               (if (member '(fake-shell) theirs) 'fake-shell 'no-fake-shell)
               (if (member '(response-reader) theirs) 'response-reader 'no-response-reader)
+              (if (member '(shell-testing) theirs) 'shell-testing 'no-shell-testing)
+              (if (member '(uv-testing) theirs) 'uv-testing 'no-uv-testing)
               (filter (lambda (name) (member name mine)) theirs))))))

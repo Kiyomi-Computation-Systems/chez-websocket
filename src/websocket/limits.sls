@@ -14,7 +14,12 @@
 ;;;                      stops once the queue holds a cap's worth of bytes or
 ;;;                      this many messages, websockets' max_queue
 ;;;   ping-interval-ms   20 s of quiet before a ping; 0 turns pinging off (0001)
-;;;   ping-timeout-ms    20 s for its pong; past it, 1011 (0001)
+;;;   ping-timeout-ms    20 s for its pong; past it, 1011 (0001).  Timed from
+;;;                      the ping's queueing (0001's amendment of 2026-10-09):
+;;;                      what was sent before it waits in the kernel's
+;;;                      buffers, so a live client reading a large backlog
+;;;                      slowly is failed, 96 KiB/s after 4 MiB on Linux
+;;;                      loopback; a longer timeout keeps it
 ;;;   close-timeout-ms   10 s for the client's close, after the server's
 ;;;                      (websockets' close_timeout), and for a client to read
 ;;;                      what was unsent when a close was asked for; past it,
