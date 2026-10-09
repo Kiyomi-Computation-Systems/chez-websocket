@@ -1555,3 +1555,37 @@ M4.3 STEP 2'S REVIEW. `/code-review` at xhigh over #43 to #45: 12 findings, the 
 `make test` green before each commit (Darwin arm64): eleven suites, 342 expected passes, every pin ok. `make prod` green.
 
 NEXT: the PRs by form; review and the closing ritual when the owner asks; then step 3: the real socket and the measures, step 1's review's survivors, and the pong's timing with a throttled reader.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritual": **M4.3 step 2, and its review** (the two entries above), from the stacked #43 to #49, as aa8ceea, 9044e73, 4af7472, 677a62f, eb280f7, 1d3bc06 and 3254abf, bottom-up.
+- **The squashes.** Each has the tree of the head CI tested:
+  - aa8ceea has be263d1's, on 1d8ed80;
+  - 9044e73 has 0a67069's, on aa8ceea;
+  - 4af7472 has 7477a32's, on 9044e73;
+  - 677a62f has f06479f's, on 4af7472;
+  - eb280f7 has a7132d3's, on 677a62f;
+  - 1d3bc06 has c313cf8's, on eb280f7;
+  - 3254abf has 5ea34cb's, on 1d3bc06.
+
+  #44 was rebased onto #43's squash from be263d1, #45 onto #44's from b9c9d77, #46 onto #45's from 01ed4a6, #47 onto #46's from bbfaf36, #48 onto #47's from 523454c, and #49 onto #48's from 2b1d206: one commit each. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #43 at be263d1 (run 37937961012): eleven suites, 316;
+  - #44, rebased, at 0a67069 (run 37953647263): 337;
+  - #45 at 7477a32 (run 37953946207): 337;
+  - #46 at f06479f (run 37954239751): 337;
+  - #47 at a7132d3 (run 37954522168): 339;
+  - #48 at c313cf8 (run 37954815790): 342;
+  - #49 at 5ea34cb (run 37955099877): 342.
+
+  Main's runs on aa8ceea (37953616777), 9044e73 (37953923211), 4af7472 (37954218990), 677a62f (37954505701), eb280f7 (37954794823) and 1d3bc06 (37955079852) each finished green before the next merge. This reflect was pushed after main's run on 3254abf, 37955370840, green.
+- **Branches.** `docs/m4.3-2-design`, `feat/m4.3-2-bound`, `docs/m4.3-2-ledger`, `docs/m4.3-2-review-decision`, `fix/m4.3-2-review-core`, `fix/m4.3-2-review-binding` and `docs/m4.3-2-review-ledger` were deleted, local and remote. No PR is open.
+
+**M4.3 step 2 is complete on main:**
+- decision 0006 and its amendment: a client that does not read is aborted; past the high water reading stops and the write timeout runs, `CHEZ_WS_WRITE_TIMEOUT`, 60 s;
+- the close timed from queueing, as peers time it, at least 1 s;
+- a send that waits before it writes while the client is behind; a frame written in pieces of 64 KiB; a failed done as the stream's end.
+
+`make test` green on main: eleven suites, 342 expected passes, every pin ok.
+
+NEXT: M4.3 step 3, when asked: the real socket on 127.0.0.1:0 and the measures (a connection's cost beside the server's, the pong's timing with a throttled reader, what the kernel holds at a close), and step 1's review's survivors (four late resumes the fake logs nowhere, a read's bytevector kept).
