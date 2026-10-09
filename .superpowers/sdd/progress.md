@@ -1703,3 +1703,39 @@ M4.3 STEP 3'S REVIEW. `/code-review` at xhigh over #50 to #52: 13 findings, the 
 `make test` green before each commit (Darwin arm64): twelve suites, 349 expected passes, every pin ok. On Linux every suite passed, and the socket suite 10 of 10.
 
 NEXT: the PRs; review and the closing ritual when the owner asks (#50 to #52, then these four, bottom-up); then the server's park slice, by form, and its pin.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritual": **M4.3 step 3, and its review** (the two entries above), from the stacked #50 to #56, as af6ba8a, fe3252d, ea56b45, 05a2823, e93585f, 9c23608 and ffdde55, bottom-up.
+- **The squashes.** Each has the tree of the head CI tested:
+  - af6ba8a has 5ff8a35's, on bb9c226;
+  - fe3252d has 53f235b's, on af6ba8a;
+  - ea56b45 has b148cf9's, on fe3252d;
+  - 05a2823 has 0987cb0's, on ea56b45;
+  - e93585f has 4f645a6's, on 05a2823;
+  - 9c23608 has f483b54's, on e93585f;
+  - ffdde55 has ccb767a's, on 9c23608.
+
+  #51 was rebased onto #50's squash from d3c5184, #52 onto #51's from 38f2737, #53 onto #52's from 6a3c46b, #54 onto #53's from 6541729, #55 onto #54's from 7e99fdc, and #56 onto #55's from 1dd911c: one commit each. No tree changed.
+- **CI.** Each PR merged on `linux` SUCCESS, its log tallied against the local count:
+  - #50 at 5ff8a35 (run 37969816485): eleven suites, 342;
+  - #51, rebased, at 53f235b (run 37975670117): twelve suites, 348;
+  - #52 at b148cf9 (run 37975943856): 348;
+  - #53 at 0987cb0 (run 37976222249): 348;
+  - #54 at 4f645a6 (run 37976633269): 348;
+  - #55 at f483b54 (run 37976968999): 349;
+  - #56 at ccb767a (run 37977313885): 349.
+
+  Main's runs on af6ba8a (37975651183), fe3252d (37975925939), ea56b45 (37976204741), 05a2823 (37976614283), e93585f (37976951312) and 9c23608 (37977293806) each finished green before the next merge. Main's run on ea56b45 was still running when #53's run had finished, so the merge waited for it. This reflect was pushed after main's run on ffdde55, 37977631025, passed.
+- **Branches.** `docs/m4.3-3-decisions`, `feat/m4.3-3-socket`, `docs/m4.3-3-ledger`, `docs/m4.3-3-review-records`, `fix/m4.3-3-review-helpers`, `fix/m4.3-3-review-socket` and `docs/m4.3-3-review-ledger` were deleted, local and remote. No PR is open.
+
+**M4.3 is complete on main, and with it M4:**
+- the binding and the facade, held on the server's fake shell and on a real socket;
+- a client that does not read aborted (0006);
+- a receive's wait by `call/cc` (0005's amendment);
+- the pong timed from the ping's queueing, measured (0001's amendment);
+- every one of step 1's review's survivors killed.
+
+`make test` green on main: twelve suites, 349 expected passes, every pin ok.
+
+NEXT, by form ("A server slice next"): the server's `suspend!` by `call/cc` in chez-http-server, with a check that a coroutine's continuation is never invoked twice, released as v0.4.1, then pinned here in a PR of its own. Then M5, the Autobahn lane: pulling its image needs the owner's word.
