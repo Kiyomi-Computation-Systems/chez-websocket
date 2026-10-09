@@ -10,8 +10,7 @@
 ;;;
 ;;; What the fake shell cannot show is held here (the design's §8): the
 ;;; server logs a resume called once its wait has ended, `late-resume`, where
-;;; the fake logs nothing; and a procedure that waits holds its coroutine's
-;;; stack on the heap, which the fake's coroutines do not show.
+;;; the fake logs nothing.
 ;;;
 ;;; The checks:
 ;;;   - the handshake answered 101, a masked text echoed, and the client's
@@ -26,10 +25,7 @@
 ;;;   - a send seen to wait on a client reading nothing, then going on once it
 ;;;     reads, and the client's close after: no late resume, since the woken
 ;;;     senders are let go;
-;;;   - a read's bytevector let go after its step, held by the heap;
-;;;   - a procedure waiting in a receive holding less than half of what a
-;;;     one-shot continuation's wait holds over a bare `await`'s, both measured
-;;;     in the same run (decision 0005's amendment).
+;;;   - a read's bytevector let go after its step, held by the heap.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.7's masked "Hello"; §5.5.1, a
@@ -46,22 +42,18 @@
 ;;;   failed with 1011 when no pong comes within the ping timeout.  Here the
 ;;;   interval is 100 ms and the timeout 300 ms, so either taken for the other
 ;;;   falls outside its window.
-;;; - Decision 0005's amendment, by form ("call/cc (Recommended)"): a wait
-;;;   that escaped by call/1cc held a stack segment of its own.  The reference
-;;;   is the old shape itself, a wait by call/1cc around `await`, measured in
-;;;   the same run: in this setting it held 2,724 to 4,225 B a connection more
-;;;   than a bare `await` (Darwin and Linux), a receive by call/1cc 2,756 to
-;;;   3,420, and one by call/cc 12 to 1,027.  Should the reference fall under
-;;;   1 KiB, the oracle has gone, and the suite says so (status 3).
-;;; - A read's bytevector: a client's 4,000-byte binary is one frame of
-;;;   4,008 bytes, read at once on loopback; kept, it would hold at least
-;;;   that.  Let go, the heap after it and after a 1-byte message measured 8
-;;;   to 144 B apart.  The bound is half the frame.
+;;; - A read's bytevector: a client's 16,000-byte binary is one frame of
+;;;   16,008 bytes, read at once on loopback into the server's 16,384-byte
+;;;   read buffer; kept, it held 16,088 to 18,968 B.  Let go, the heap after
+;;;   it and after a 1-byte message measured 112 B apart on the server's
+;;;   v0.4.0, and 2,872 to 2,952 B on its v0.4.1, about as after a 4,000-,
+;;;   40,000- or 400,000-byte message (decision 0007).  The bound is half the
+;;;   frame.
 ;;; - The cap, 4,000 turns: over ten times the most a wait here took, 366
 ;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
 ;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.
 (import (rnrs) (srfi :64) (ws-testing) (ws-play)
-        (only (chezscheme) call/1cc collect collect-maximum-generation bytes-allocated
+        (only (chezscheme) collect collect-maximum-generation bytes-allocated
               current-time time-second time-nanosecond)
         (libuv) (uv-testing) (shell-testing) (response-reader)
         (http-server)
@@ -315,7 +307,7 @@
            (s (serving (accepting (lambda (ws) (let take () (websocket-receive ws) (set! taken (+ taken 1)) (take)))
                                   no-subprotocols default-websocket-limits)))
            (cl (connect! s "/" #t))
-           (big (client-frame #x82 (make-bytevector 4000 9)))
+           (big (client-frame #x82 (make-bytevector 16000 9)))
            (small (client-frame #x82 (make-bytevector 1 9))))
       (define (sent! frame)
         (let ((want (+ taken 1)))
@@ -332,49 +324,7 @@
       (apart)
       (let* ((measured (list (apart) (apart) (apart))) (all-taken taken))
         (finish! s (list cl))
-        (test-equal "a read's bytevector is let go after its step: the heap after a 4,000-byte message, then after a 1-byte one, three times, differs by less than half its 4,008-byte frame, each message received"
+        (test-equal "a read's bytevector is let go after its step: the heap after a 16,000-byte message, then after a 1-byte one, three times, differs by less than half its 16,008-byte frame, each message received"
           '(let-go 10)
-          (list (if (for-all (lambda (d) (< d 2004)) measured) 'let-go measured) all-taken))))
+          (list (if (for-all (lambda (d) (< d 8004)) measured) 'let-go measured) all-taken))))))
 
-    (let* ((waiting 0) (n 100)
-           (s (serving (lambda (request)
-                         (websocket-accept
-                          request
-                          (let ((path (request-path request)))
-                            (cond ((string=? path "/await")
-                                   (lambda (ws) (set! waiting (+ waiting 1)) (await (lambda (resume) #f))))
-                                  ((string=? path "/one-shot")
-                                   ;; The old park!'s way back, the reference.
-                                   (lambda (ws)
-                                     (set! waiting (+ waiting 1))
-                                     (call/1cc
-                                      (lambda (k)
-                                        (with-exception-handler
-                                         (lambda (e) (k #f))
-                                         (lambda () (await (lambda (resume) #f))))))))
-                                  (else (lambda (ws) (set! waiting (+ waiting 1)) (websocket-receive ws)))))
-                          no-subprotocols
-                          default-websocket-limits))))
-           (clients '()))
-      (define (opened! path)
-        (let ((want (+ waiting n)))
-          (do ((i 0 (+ i 1))) ((= i n)) (set! clients (cons (connect! s path #t) clients)))
-          (run! s (lambda () (= waiting want)))
-          (settle! s 20)))
-      (opened! "/await")
-      (let* ((none (footprint))
-             (awaiting (begin (opened! "/await") (footprint)))
-             (one-shot (begin (opened! "/one-shot") (footprint)))
-             (receiving (begin (opened! "/receive") (footprint)))
-             (base (- awaiting none))
-             (by-one-shot (div (- (- one-shot awaiting) base) n))
-             (by-receive (div (- (- receiving one-shot) base) n))
-             (all-waiting waiting))
-        (finish! s clients)
-        (unless (>= by-one-shot 1024)
-          (provenance-failure
-           (string-append "a wait by call/1cc no longer holds a stack segment here: "
-                          (number->string by-one-shot) " B a connection over a bare await")))
-        (test-equal "a procedure waiting in websocket-receive holds, over one at a bare await, less than half of what a wait by call/1cc holds, all 400 waiting, footprints back to back"
-          '(under-half 400)
-          (list (if (< by-receive (div by-one-shot 2)) 'under-half (list by-receive by-one-shot)) all-waiting))))))

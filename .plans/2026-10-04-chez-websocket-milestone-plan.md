@@ -91,7 +91,10 @@ and the door suite.
   wait escapes by `call/cc`, about 3 KB a connection less (0005's amendment); and the
   pong stays timed from the ping's queueing, measured with a throttled reader (0001's
   amendment). Its review's form: the server's own park by `call/cc`, about 3 KB a waiting
-  coroutine less, in a server slice after step 3, then its release pinned here.
+  coroutine less, in a server slice after step 3, then its release pinned here. Before
+  that pin (2026-10-09), by form: the socket suite's park check retired, since no change
+  to the binding reddens it on v0.4.1 (0005's amendment); a read let go measured at
+  16,000 bytes, and an allocation counted on a stack segment of its own (0007).
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;

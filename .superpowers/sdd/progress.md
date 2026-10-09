@@ -1739,3 +1739,28 @@ MERGED to main on 2026-10-09, on the owner's "all green lets do the closing ritu
 `make test` green on main: twelve suites, 349 expected passes, every pin ok.
 
 NEXT, by form ("A server slice next"): the server's `suspend!` by `call/cc` in chez-http-server, with a check that a coroutine's continuation is never invoked twice, released as v0.4.1, then pinned here in a PR of its own. Then M5, the Autobahn lane: pulling its image needs the owner's word.
+
+---
+
+**Before the server's v0.4.1 pin: S-PARK retired, S-LETGO at 16,000 bytes, and an allocation counted on a stack segment of its own (2026-10-09),** on the owner's "lets start the S-PARK reference PR", after the server's v0.4.1 (its #159 and #160, tagged on 520f70e). Branch `test/fit-server-v0.4.1`, cut from 43b18e7; one PR.
+- **Measured first** (Darwin arm64, and Linux in Docker; the research record's last section, and probes in the scratch `ws-spark/`):
+  - **S-PARK's reference**, a wait by `call/1cc` around `await`, held −338 to 334 B on v0.4.1, where 2,792 to 4,048 on v0.4.0: the server's full park makes it full too. A receive with `park!` by `call/1cc` held 453 to 490 B there, so no change to the binding reddens the check.
+  - **Two more checks went red** when main's suites ran on v0.4.1: S-LETGO, at 2,832 to 2,952 B against 2,004, and the binding suite's R-DONE-ALLOC-BEHIND, at 64 B in 4 of 7 runs. Each passed with the server's drain one-shot again, and the done check with its park one-shot again too.
+  - **S-LETGO's excess is not the message:** about 2.9 KB from 4,000 to 400,000 bytes, and 9.35 KB with ten connections. **The done check's 64 B is the counter's:** the same done counted 512 B at one depth and 576 B at the others, the binding's and the taker's alike.
+- **DECIDED by form:**
+  - **"Retire S-PARK (Recommended)"**, 0005's amendment. Weighed: replacing the reference only, with one held outside the scheduler, which no change to the binding reddens from v0.4.1.
+  - **"Fix both checks here (Recommended)"**, decision 0007. Weighed: the server's drain one-shot again in a v0.4.2, which allocates about 3 KB more a waiting request; and finding the server's mechanism first.
+- **Built:**
+  - `tests/test-socket.sps`: S-PARK and its reference gone, five checks; S-LETGO at 16,000 bytes, one read of the server's 16,384-byte buffer, bound 8,004 B; `call/1cc` off its imports.
+  - `tests/ws-testing.sls`: `least-counted` counts each call inside a `call/1cc`, on a stack segment of its own, not at three depths.
+  - `park!`'s comment gives both servers' numbers; the code is unchanged.
+- **Records:** 0005's amendment, 0007, the design's §8 and §9, the plan's M4.3 note, the research record's last section.
+- **Tests first** (`m4-mutations.md`):
+  - **Stage 0**, main's suites on v0.4.1: the socket suite at status 3, as predicted. Not predicted: S-LETGO and R-DONE-ALLOC-BEHIND red, which the second form decided.
+  - **Stage 1**: twelve suites and 348 on each server, as predicted, and again once S-LETGO moved to 16,000 bytes. On Linux, twice on each.
+- **Mutants:** 10 rows on each server.
+  - **Run 1: 2 mismatches on each.** R-20 stayed green with S-LETGO at 40,000 bytes, a frame of three reads; S-LETGO moved to 16,000. R-26 reddened two more allocation checks, a prediction error.
+  - **Run 2: 0 mismatches.** Every changed check has a killer by value. P-1CC survives, as 0005's amendment says.
+- `make test` green before the commit (Darwin arm64): twelve suites, 348 expected passes, every pin ok. On v0.4.1, twelve suites and 348, on Darwin and on Linux.
+
+NEXT: the PR; review and the closing ritual when the owner asks; then the pin to the server's v0.4.1 (520f70e) alone; then M5, the Autobahn lane, whose image needs the owner's word to pull.

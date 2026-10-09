@@ -3,7 +3,8 @@
 Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, in M4.3 step 1's review: "Many
 senders, one receive", the recommended). Amended 2026-10-09 by form (M4.3 step 3):
-"call/cc", the recommended.
+"call/cc", the recommended; and again that day, before the server's v0.4.1 pin: "Retire
+S-PARK", the recommended.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §6
 
 ## Context
@@ -102,4 +103,43 @@ continuation, and the comment says what was measured.
   - Measured in that suite's setting: 2,778 to 4,277 B more by `call/1cc`, and at most 980 B
     by `call/cc`, on Darwin and Linux.
   - Its mutant, `call/1cc` again, reddens that check alone.
+  - (Retired the same day, before the server's v0.4.1 pin: the amendment below.)
 
+
+## Amendment of 2026-10-09 (before the server's v0.4.1 pin): the socket suite's check is retired
+
+**What changed underneath.** The server's v0.4.1 parks its coroutines, and enters them, on
+full continuations (its decision 0025). A full capture makes every one-shot continuation
+below it on the stack a full one, and a full one keeps no stack segment of its own.
+`park!`'s way back sits below the server's park, so from v0.4.1 a `call/1cc` there costs
+about what `call/cc` does.
+
+**Measured** (Darwin arm64, in the socket suite's setting: 100 connections a path, each over
+one at a bare `await`, the heap back to back; three runs on each server, and two more with
+`park!` by `call/1cc`):
+
+| | v0.4.0 | v0.4.1 |
+|---|---|---|
+| the check's reference, a wait by `call/1cc` around `await` | 2,792 to 4,048 B | −338 to 334 B |
+| a receive, `park!` by `call/cc` | 462 to 984 B | 303 to 340 B |
+| a receive, `park!` by `call/1cc` | 3,543 to 4,177 B | 453 to 490 B |
+| a one-shot continuation escaped 4 calls deep, with no connection | 3,419 to 3,420 B | 3,419 to 3,420 B |
+| a connection at a bare `await`, its client in the same heap | 7,907 to 8,484 B | 5,253 to 5,292 B |
+
+So on v0.4.1 the check stops as a provenance failure, its reference under 1 KiB. With a
+reference held outside the scheduler instead, it would pass whether `park!` is `call/cc` or
+`call/1cc`. A server whose park went back to `call/1cc` would not redden it either, since
+the bare `await` it is measured over would pay the same.
+
+**Decided by form, the recommended: "Retire S-PARK".** Weighed, not taken: "Replace the
+reference only", 100 one-shot continuations escaped 4 calls deep with no connection. On
+v0.4.0 `park!` by `call/1cc` still reddens it; from v0.4.1 no change to the binding does.
+
+**Consequences:**
+- **The socket suite has five checks.** `park!` by `call/1cc` reddens none, on either
+  server (P-1CC, a named survivor).
+- **What a waiting coroutine keeps is the server's to hold.** Its scheduler suite holds a
+  coroutine parked 4 calls deep under half of a one-shot continuation's 3,420 B: 802 B, on
+  Darwin, Linux aarch64 and x86_64 (its decision 0025).
+- **`park!` stays `call/cc`**, and its comment gives both servers' numbers.
+- **The same pin turns two more checks red**, through nothing the binding does: decision 0007.

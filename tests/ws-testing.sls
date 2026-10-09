@@ -29,7 +29,7 @@
 ;;; test libraries can share the library path with it.
 (library (ws-testing)
   (export run-suite provenance-failure provenance-error? allocated keep!)
-  (import (rnrs) (srfi :64) (only (chezscheme) collect statistics sstats-bytes))
+  (import (rnrs) (srfi :64) (only (chezscheme) collect statistics sstats-bytes call/1cc))
 
   ;; provenance-error : a raised marker mapping a suite to status 3.
   (define-record-type provenance-error
@@ -54,26 +54,19 @@
       (thunk)
       (- (sstats-bytes (statistics)) before)))
 
-  ;; deeper : Nat (-> Any) -> Any
-  ;; The thunk's answer, from a call made n frames deeper than this one.
-  (define (deeper n thunk)
-    (if (= n 0)
-        (thunk)
-        (let ((answer (deeper (- n 1) thunk)))
-          (keep! answer)
-          answer)))
-
   ;; least-counted : (-> Any) -> Nat
-  ;; The least of three calls' counts, each called from its own depth of the
-  ;; stack, 100 frames apart.  A call whose stack reaches past the end of the
-  ;; Scheme stack's segment also pays for a new segment, about 64 KiB, and
-  ;; does at every call from that depth; calls 100 frames apart cannot all be
-  ;; that near an end, unless the thunk's own stack runs deep, as it does
-  ;; when it should be counted.
+  ;; The least of three calls' counts, each made inside a call/1cc, whose
+  ;; receiver Chez runs on a stack segment of its own.  The calls were made
+  ;; 100 frames apart, so that one at least stood clear of a segment's end,
+  ;; until the server's v0.4.1, whose coroutines park and are entered on
+  ;; full continuations: there a write's done counted 64 B more at depths
+  ;; 100 and 200 than at 0, and at all three in 3 of 6 runs of the binding
+  ;; suite.  Each on a segment of its own, it counted alike in every run, on
+  ;; v0.4.0 and v0.4.1 (decision 0007).
   (define (least-counted thunk)
-    (min (deeper 0 (lambda () (counted thunk)))
-         (deeper 100 (lambda () (counted thunk)))
-         (deeper 200 (lambda () (counted thunk)))))
+    (min (call/1cc (lambda (k) (counted thunk)))
+         (call/1cc (lambda (k) (counted thunk)))
+         (call/1cc (lambda (k) (counted thunk)))))
 
   ;; Whether the counter has been checked, which the first measurement does.
   (define counter-checked? #f)
