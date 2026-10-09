@@ -624,9 +624,13 @@
 
     ;; --- the environment, read once, as the program starts (design §7) ---
 
+    ;; The child runs on the Chez that runs the suites: CHEZ names it, as the
+    ;; Makefile's CHEZ does, and make hands its recipes a CHEZ set in the
+    ;; environment or on its command line (CI's is `scheme`); unset, it is
+    ;; `chez`, the Makefile's default.
     (test-equal "the limits are read from the environment as a program that imports the facade starts, and websocket-accept takes them in both its forms: a ping interval of 4 s armed twice, and a malformed one stopping the program before its first line"
       '(8 255)
       (map (lambda (value)
              (system (string-append "CHEZ_WS_PING_INTERVAL=" value
-                                    " chez --program tests/start-with-environment.sps >/dev/null 2>&1")))
+                                    " \"${CHEZ:-chez}\" --program tests/start-with-environment.sps >/dev/null 2>&1")))
            '("4" "x")))))
