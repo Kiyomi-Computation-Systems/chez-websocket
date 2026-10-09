@@ -84,6 +84,8 @@ and the door suite.
 - **M4.3 the binding** `(websocket private binding)` and the facade, in three steps
   (2026-10-09): 1, the binding and the facade on the fake shell; 2, a client that does
   not read, with the send side's bound by form; 3, the real socket and the measures.
+  Step 2's form (0006): reading stops past the high water, with a write timeout of its
+  own, `CHEZ_WS_WRITE_TIMEOUT`, 60 s.
   - receive, send, close and backpressure;
   - a text message that begins with U+FEFF delivered with it, since Chez's decoders
     drop it;
@@ -97,7 +99,7 @@ and the door suite.
     (M3.3's review);
   - when the pong's time starts, measured with a throttled reader (design §9);
   - the send side's bound for a client that sends and does not read, by form
-    (design §9);
+    (design §9): decided in step 2 (0006);
   - a field split over lines: the facade reads every line, `request-header-values`
     joined with commas (0004; design §9; M4.1).
 
