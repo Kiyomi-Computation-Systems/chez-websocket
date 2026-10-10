@@ -72,11 +72,17 @@ SUITE_TIMEOUT ?= 120
 # --- the Autobahn lane (M5, decision 0008) -----------------------------------
 # Autobahn|Testsuite's fuzzing client, from its image pinned by digest (built
 # for linux/amd64 alone, so Docker emulates it elsewhere), against
-# tests/autobahn/echo.sps on this host, gated on tests/autobahn/verdicts.txt.
+# tests/autobahn/echo.sps, gated on tests/autobahn/verdicts.txt.  The echo
+# server runs on this host on Linux, and on Docker Desktop (macOS, Windows),
+# which has no host network, in the image `make echo-image` builds;
+# AUTOBAHN_ECHO=host or AUTOBAHN_ECHO=container says otherwise.  The image's
+# Chez is CI's floor, read from the workflow so it is written once.
 AUTOBAHN_IMAGE := crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074
-AUTOBAHN_PORT ?= 9001
+AUTOBAHN_ECHO ?= $(if $(filter Linux,$(shell uname -s)),host,container)
+AUTOBAHN_ECHO_IMAGE := chez-websocket-autobahn-echo:local
+CHEZ_FLOOR_VERSION := $(shell sed -n 's/^  CHEZ_FLOOR_VERSION: "\(.*\)"$$/\1/p' .github/workflows/ci.yml)
 
-.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn clean
+.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn echo-image docker-smoke clean
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -181,9 +187,17 @@ prod: submodules ## Rebuild chez-libuv's shim optimized, run the suite on it, an
 	$(MAKE) test FLAVOR=prod
 	$(MAKE) -C $(LIBUV_DIR) check-prod
 
-autobahn: build ## Run Autobahn's fuzzing client in Docker against tests/autobahn/echo.sps, gated on its verdicts
-	@CHEZ=$(CHEZ) LIBDIRS=$(LIBDIRS) IMAGE=$(AUTOBAHN_IMAGE) PORT=$(AUTOBAHN_PORT) OUT=$(BUILD_DIR)/autobahn \
-	  sh tests/autobahn/run.sh
+autobahn: build check-pins $(if $(filter container,$(AUTOBAHN_ECHO)),echo-image) ## Run Autobahn's fuzzing client in Docker against tests/autobahn/echo.sps, gated on its verdicts
+	@CHEZ=$(CHEZ) LIBDIRS=$(LIBDIRS) IMAGE=$(AUTOBAHN_IMAGE) OUT=$(BUILD_DIR)/autobahn \
+	  ECHO_AT=$(AUTOBAHN_ECHO) ECHO_IMAGE=$(AUTOBAHN_ECHO_IMAGE) sh tests/autobahn/run.sh
+
+echo-image: submodules ## Build the Autobahn lane's echo server image, tests/autobahn/echo.Dockerfile
+	@test -n "$(CHEZ_FLOOR_VERSION)" || { echo "echo-image: no CHEZ_FLOOR_VERSION in .github/workflows/ci.yml" >&2; exit 2; }
+	docker build -q -f tests/autobahn/echo.Dockerfile --build-arg CHEZ_VERSION=$(CHEZ_FLOOR_VERSION) \
+	  --build-arg LIBDIRS=$(LIBDIRS) -t $(AUTOBAHN_ECHO_IMAGE) .
+
+docker-smoke: echo-image ## Start the echo image, wait until its HEALTHCHECK says ready, and check it stops cleanly
+	@ECHO_IMAGE=$(AUTOBAHN_ECHO_IMAGE) sh tests/autobahn/docker-smoke.sh
 
 clean: ## Remove our build artifacts and the vendored shim
 	rm -rf $(BUILD_DIR)

@@ -48,9 +48,10 @@ make help         # every target
 #+end_src
 
 =make autobahn= needs Docker. Autobahn's image is built for amd64, so Docker
-emulates it on other machines. On macOS the cases reach the echo server
-through Docker Desktop, and a run there sometimes stops short. The gate says
-so: run it again.
+emulates it on other machines. On Linux the echo server runs on your machine.
+On macOS and Windows, whose Docker Desktop has no host network, it runs in a
+Linux container beside Autobahn: =make echo-image= builds it, the first time
+in about four minutes, and =make docker-smoke= checks it starts and stops.
 
 ** License
 

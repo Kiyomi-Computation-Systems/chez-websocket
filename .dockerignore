@@ -1,0 +1,7 @@
+# The echo image's context is this repository (make echo-image): no history,
+# and no build outputs, which on the host are another platform's.
+.git
+**/.git
+.claude
+build
+**/build
