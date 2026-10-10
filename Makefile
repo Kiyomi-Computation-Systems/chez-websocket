@@ -14,7 +14,7 @@ CHEZ ?= chez
 
 # --- the pin -----------------------------------------------------------------
 SERVER_DIR := vendor/chez-http-server
-SERVER_PIN := 388ec43c629da319084ba46d8821ba6f78e84a77  # v0.4.0
+SERVER_PIN := 520f70e1b24af9b53f420f00f6537c740043df3e  # v0.4.1
 
 # --- the pins it carries ------------------------------------------------------
 LIBUV_DIR        := $(SERVER_DIR)/vendor/chez-libuv
@@ -84,7 +84,9 @@ check-help: ## Fail if any .PHONY target is undocumented in `make help`
 	exit $$missing
 
 # Targeted, so neither chez-libuv's own vendored libuv nor the server's test
-# clients (vtest2) are cloned: the system libuv is what the shim links.
+# clients (vtest2) are cloned here: the shim links the system libuv when it
+# meets chez-libuv's floor, and chez-libuv's build clones and builds its own
+# when it does not.
 submodules: ## Clone the pinned server and the pins it carries
 	git submodule update --init $(SERVER_DIR)
 	git -C $(SERVER_DIR) submodule update --init vendor/chez-libuv vendor/uriparse vendor/chez-srfi
