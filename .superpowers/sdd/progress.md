@@ -1854,3 +1854,19 @@ NEXT: M5, the Autobahn lane, when the owner asks; pulling its image needs the ow
   - The `linux` job: thirteen suites, 368 expected passes. All four PRs' runs green.
 
 NEXT: the closing ritual when the owner asks. Then the server slice: a taken stream's close lingers, its release, pinned here alone, and `none` measured again for 3.4, 4.1.5 and 4.2.5. Then M6, v0.1.0.
+
+---
+
+**S-SILENT's lower bounds by the loop's clock (2026-10-10),** on the owner's ask: CI's run 38051169931 (attempt 1, PR #63's docs-only tree) measured a ping met on time at 98 ms, where the check took 99 or later. Branch `test/s-silent-lower-bound`, cut from dc53b3b; one PR.
+- **Found by measurement** ([the research record](../../.plans/research/2026-10-10-s-silent-clock.md)): the suite timed by Chez's clock, `CLOCK_MONOTONIC`, and the server arms and fires by libuv's.
+  - On Linux libuv's is `CLOCK_MONOTONIC_COARSE` wherever that ticks every millisecond, as it does in the noble image. There `uv_now` ran 0.37 to 3.09 ms behind Chez's, and the lag varies.
+  - The ping came as early as 98.888 ms in 1,000 runs at the suite's numbers. At 20/30 ms, 143 runs of 10,000 broke the old bounds; in one, a ping met on time read 15 ms for 20.
+  - The wheel never fired early by its own clock, in 11,600 runs. On a fine loop clock, as on macOS, the old 99 was exact, so CI's 98 says its loop clock is coarse too (inferred).
+- **Landed:** S-SILENT times the take-over and each write by `uv_now`, read without bringing it up to date. Its lower bounds are the limits themselves, 100 and 300, which the server's deadlines and the binding's order guarantee to the millisecond; the upper bounds stay 250 and 450. `now-ms` is gone. The suite's header says why.
+- **Mutants** (`m4-mutations.md`, its last section): KS-1 to KS-4 again, each red by value; KS-4, a ping at 50 ms, reddens S-SILENT alone. Run 1's three mismatches were the new runner's name map; run 2, 0 mismatches on Darwin, and Linux the same.
+- **A scope statement, SC-1:** a shell that arms a taker's deadline by a stale reading of its clock is green here. It was green by the suite's clock before, and is green in every server suite that runs here, so the server holds no check of it.
+- **Seen in the server, not changed here:** its `tests/test-shell.sps` compares a hold on Chez's clock with the loop's and allows one millisecond. By the measures above, that is the same hazard.
+- **Linux** (Docker, libuv 1.48.0): every suite, thirteen and 368; the socket suite 100 times, four at once, all green.
+- `make test` green before the commit (Darwin arm64): thirteen suites, 368 expected passes, every pin ok.
+
+NEXT: the PR; the closing ritual when the owner asks. #64 and #65, M5's review, are open and add to this ledger too, so whichever merges second rebases. Then the server slice: a taken stream's close lingers.
