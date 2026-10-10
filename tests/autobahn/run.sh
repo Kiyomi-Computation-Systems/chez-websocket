@@ -57,7 +57,16 @@ case "$ECHO_AT" in
       "$CHEZ" --program tests/autobahn/echo.sps > "$out/server.log" 2>&1 &
     echo_pid=$!
     echo "$echo_pid" > "$out/echo.pid"
-    echo_alive() { [ -n "$echo_pid" ] && kill -0 "$echo_pid" 2>/dev/null; }
+    # Alive and not a zombie. A server that has exited stays one until this
+    # shell reaps it, which a subshell cannot do, such as wait_listening's
+    # command substitution, and dash's kill -0 answers for a zombie too.
+    echo_alive() {
+      [ -n "$echo_pid" ] || return 1
+      case "$(ps -o stat= -p "$echo_pid" 2>/dev/null | tr -d ' ')" in
+        '' | Z*) return 1 ;;
+        *) return 0 ;;
+      esac
+    }
     # SIGTERM drains the server (chez-http-server's docs/handlers.org): it
     # says `stopped` as it returns.  Once it has, its pid is forgotten, so
     # nothing signals a process that may have reused it.
