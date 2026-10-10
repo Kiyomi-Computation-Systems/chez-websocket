@@ -1867,6 +1867,9 @@ NEXT: the closing ritual when the owner asks. Then the server slice: a taken str
 - **A scope statement, SC-1:** a shell that arms a taker's deadline by a stale reading of its clock is green here. It was green by the suite's clock before, and is green in every server suite that runs here, so the server holds no check of it.
 - **Seen in the server, not changed here:** its `tests/test-shell.sps` compares a hold on Chez's clock with the loop's and allows one millisecond. By the measures above, that is the same hazard.
 - **Linux** (Docker, libuv 1.48.0): every suite, thirteen and 368; the socket suite 100 times, four at once, all green.
+- **CI did not run:** GitHub Actions refused the jobs for billing, through October by the owner's word. Run 38053941404 ended with 0 steps on attempts 1 and 2. Stood in for:
+  - **the `linux` job,** by an amd64 image as CI's: ubuntu 24.04, libuv1-dev 1.48.0, Chez 10.4.1 threaded (`ta6le`), dash, under emulation. Every suite passed, thirteen and 368, and the socket suite 100 times, four at once. There too libuv takes the coarse clock: `uv_now` ran 0.12 to 2.16 ms behind;
+  - **the `autobahn` job,** by main's run on this branch's base, dc53b3b: 38051601592 passed both jobs, and nothing that job reads has changed.
 - `make test` green before the commit (Darwin arm64): thirteen suites, 368 expected passes, every pin ok.
 
-NEXT: the PR; the closing ritual when the owner asks. #64 and #65, M5's review, are open and add to this ledger too, so whichever merges second rebases. Then the server slice: a taken stream's close lingers.
+NEXT: the PR; the closing ritual when the owner asks, past the billing block on the owner's word. #64 and #65, M5's review, are open and add to this ledger too, so whichever merges second rebases. Then the server slice: a taken stream's close lingers.
