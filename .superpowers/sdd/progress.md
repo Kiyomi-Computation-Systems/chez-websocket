@@ -1873,3 +1873,15 @@ NEXT: the closing ritual when the owner asks. Then the server slice: a taken str
 - `make test` green before the commit (Darwin arm64): thirteen suites, 368 expected passes, every pin ok.
 
 NEXT: the PR; the closing ritual when the owner asks, past the billing block on the owner's word. #64 and #65, M5's review, are open and add to this ledger too, so whichever merges second rebases. Then the server slice: a taken stream's close lingers.
+
+---
+
+MERGED to main on 2026-10-10, on the owner's "Do ritual": **S-SILENT's lower bounds by the loop's clock** (the entry above), #66.
+- **#66**, at a60dc63, was squashed as 7e5a75f (tree a60dc63's, parent dc53b3b).
+- **CI did not run** on its head (38053941404 on 39a6d91 and 38056687582 on a60dc63) or on main's squash (38057601100). Each job ended with 0 steps, the billing block, through October by the owner's word. It merged past that red check on the owner's word. The entry above records the stand-in: an amd64 image as CI's for the `linux` job, and main's run on dc53b3b for the `autobahn` job.
+- **Branch.** Deleted, local and remote; main fast-forwarded to 7e5a75f.
+- **Two server findings went to tasks of their own,** in chez-http-server: its held-shutdown check, timed on two clocks with 1 ms of slack; and a check that a taker's arm brings the clock up to date (SC-1).
+
+`make test` green on main: thirteen suites, 368 expected passes, every pin ok.
+
+NEXT: #64 and #65, M5's review, still open. #64's last run before the block, 38051609330, was red: "a run told to stop takes its echo server with it". Each rebases onto 7e5a75f, and their CI waits for November or a local stand-in. Then the server slice: a taken stream's close lingers.
