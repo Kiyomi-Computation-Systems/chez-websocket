@@ -1921,3 +1921,25 @@ NEXT: #64 and #65, M5's review, still open. #64's last run before the block, 380
 - `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok.
 
 NEXT: CI on #64 and #65 again; the closing ritual when the owner asks, bottom-up from #60. Then the server slice for the lost close; then M6.
+
+---
+
+MERGED to main on 2026-10-10, on the owner's "ci is green, do closing ritual": **M5, the Autobahn lane, and its review**, six stacked PRs merged bottom-up (#60-#65).
+- **#60** was squashed as b1d6943 (2da1190's tree, on 7cc1d4a). Its run was 38016697501; main's run on the squash, 38050710772, passed.
+- **#61** as 0ce9848, rebased 4d61088 -> 127c313. Its runs, 38016698903 and 38050728164, passed, and main's, 38050923658.
+- **#62** as 4642cfd, rebased 2070682 -> a717492. Its runs, 38016701245 and 38050934920, passed, and main's, 38051160948.
+- **#63** as dc53b3b, rebased df31c6b -> 098fad5. Run 38051169931's first attempt failed S-SILENT once, on the docs-only tree: a ping measured at 98 ms against a floor of 99. The re-run passed, and main's, 38051601592. S-SILENT was then fixed in a session of its own, #66 (7e5a75f, reflect 018ed48): it is now timed by the loop's clock, since the flake was libuv's CLOCK_MONOTONIC_COARSE on Linux.
+- **CI stopped: GitHub billing.** The probe run 38052164159 never started ("recent account payments have failed or your spending limit needs to be increased"). On the owner's word, the other session rebased #64 and #65 onto 018ed48. A range-diff showed their patches identical, and #65's added lines byte for byte the same.
+- **#64** as 85fbe2e (17db252's tree, on 018ed48), and **#65** as 61be5e7 (rebased 12a0e6f -> 30a26e5; its tree, on 85fbe2e). They merged on local evidence, by form ("Merge on local evidence"), with CI blocked:
+  - on 17db252, `make test`: fourteen suites, 381 expected passes, on macOS (this session) and amd64 Linux (the other);
+  - the `run.sh` suite 9 of 9 under dash, on arm64 and amd64.
+- **Open: R-TERM's one CI failure,** run 38051609330 on fd9f54d. It is unexplained: 0 of 80+ runs failed locally. The probe that would find its cause runs once CI is back; it is the branch `probe/r-term` (d58976d), kept.
+- **Branches.** The six were deleted, local and remote; `probe/r-term` is kept. This checkout is on main, fast-forwarded. No PR is open.
+
+`make test` green on main (61be5e7, Darwin arm64): fourteen suites, 381 expected passes, every pin ok. Main has had no CI run since dc53b3b: none can start while billing is blocked.
+
+NEXT, when CI is back:
+1. Main's run on 61be5e7.
+2. The R-TERM probe, then its fix.
+3. The chez-http-server slice for the lost close (design §9), its release pinned here alone, and `none` measured again for 3.4 and 4.2.5.
+4. M6, v0.1.0.
