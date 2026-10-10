@@ -326,3 +326,14 @@ named and hashed before (`db5768e3`). All four as named.
 - **CM-2, a dead container waited for:** status 2 after 60 s, "did not listen within 60 s".
   The real `run.sh` on the same image, `ubuntu:24.04`, says "ended before it listened".
 
+
+### On Linux's sh (after CI's first runs)
+
+CI's `linux` job reddened R-NOSTART, and no other check. Ubuntu's sh is dash: an echo server
+that exits at once stays a zombie until its shell reaps it, which wait_listening's command
+substitution cannot do, and kill -0 answers for a zombie. Reproduced in the Linux container
+on #64's first head (`5dcef89`), named and hashed before (`da330889`): R-NOSTART red after
+72 s, the 60 s wait, and the other 8 green. That old liveness check is the fix's mutant. With
+the server alive only when ps shows it and not as a zombie (`2160a781`): 9 of 9 under dash
+in 9 s, and under macOS's sh. `run.sh`'s 11 rows run again on the fix: as in run 1, RM-8 the
+one survivor.

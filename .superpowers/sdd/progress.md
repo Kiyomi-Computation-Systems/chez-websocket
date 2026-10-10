@@ -1912,4 +1912,12 @@ NEXT: #64 and #65, M5's review, still open. #64's last run before the block, 380
 - **make autobahn, macOS, container path:** 248 s from no image, gate passing; `make docker-smoke` 6 s.
 - `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. `make check-help` passes.
 
-NEXT: the PR; the dispatch run with a salt, which proves the miss path; the closing ritual when the owner asks, bottom-up from #60. Then the server slice for the lost close; then M6.
+- **Opened** as stacked #64 `fix/m5-review` and #65 `docs/m5-review-ledger` (form "Two stacked PRs").
+- **CI's first runs: the `linux` job red** on all three, the `autobahn` job green on all three.
+  - The red was `tests/test-autobahn-run.sps`'s "ends before it listens". On Ubuntu, sh is dash. An echo server that exits at once stays a zombie until its shell reaps it, and wait_listening, in a command substitution, is a subshell that cannot reap it. So kill -0 answered "alive", and the run waited out its 60 s.
+  - Reproduced in the Linux container, 72 s, the one red. Fixed on #64 (`9e27973`): alive only when ps shows the server and not as a zombie. 9 of 9 under dash (9 s) and under macOS's sh.
+  - `run.sh`'s mutants run again on the fix: as in run 1.
+- **The cache-miss path proven** by a dispatch run with `chez-cache-salt=-m5-review-probe` (38049305608). Both jobs missed, built Chez from source and met the floor. `linux` saved the key; `autobahn`'s save lost the race and only warned ("Unable to reserve cache … another job may be creating this cache"), the job green.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok.
+
+NEXT: CI on #64 and #65 again; the closing ritual when the owner asks, bottom-up from #60. Then the server slice for the lost close; then M6.
