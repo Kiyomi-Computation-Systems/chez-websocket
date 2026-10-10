@@ -1820,3 +1820,32 @@ MERGED to main on 2026-10-09, on the owner's "ci is green, do closing ritual": *
 `make test` green on main: twelve suites, 348 expected passes, every pin ok, the server at v0.4.1.
 
 NEXT: M5, the Autobahn lane, when the owner asks; pulling its image needs the owner's word.
+
+---
+
+**M5, the Autobahn lane (2026-10-09),** on the owner's "let's start M5 in chez-websocket". Branch `feat/m5-autobahn`, cut from 7cc1d4a. Decision 0008, by forms, each the recommended.
+- **The image, pulled on the owner's word** ("Here and in CI"): `crossbario/autobahn-testsuite:25.10.1`, still the digest 0022 recorded, linux/amd64 alone, 389 MB to download. A Sonnet agent sourced Autobahn and seven peers at tags; the [research record](../../.plans/research/2026-10-09-autobahn-lane.md) holds both and every measure.
+- **Measured before the forms:**
+  - On Linux (the echo server in a container), 16 full runs, each cap's alike. At 16 MiB, 13 runs: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL. At the default 1 MiB, 3 runs: 24 of the 291 FAILED, each closed 1009.
+  - On macOS the cases reach the echo server through Docker Desktop, and 3 of 11 full runs stopped short. wstest exits 0 even then, and when cases fail.
+  - Three cases vary, OK or NON-STRICT, with how the client's bytes fall into reads: 3.4, 4.1.5 and 4.2.5. Alone on Linux, NON-STRICT 12, 11 and 14 times in 30.
+- **Forms:**
+  - "16 MiB", the echo server's cap, the suite's largest message.
+  - "Every PR and push", a CI job of its own.
+  - "List what was measured": the three varying cases list both verdicts.
+  - "Server slice after the lane", for a finding.
+- **Found by the lane: a close lost to a reset** (design §9). A server that fails a client still sending closes its socket with the client's bytes unread, and the kernel resets the connection. On macOS a raw client never read the 1009, 100 of 100; on Linux it did, but 14 of 100 ended in a reset. The server's HTTP closes half-close and linger (its 0011); a taken stream's close does not. python-websockets and ws half-close and drop.
+- **Landed:**
+  - `(ws-autobahn)`: a JSON reader (RFC 8259), the ratchet's reader, and the gate, both ways. Its suite `tests/test-autobahn.sps` has 20 checks.
+  - `tests/autobahn/`: `echo.sps`, `gate.sps`, `run.sh`, `fuzzingclient.json`, and the ratchet `verdicts.txt`, 301 lines written from a Linux run's index by a script of their own.
+  - `make autobahn` runs the echo server in an environment of its own, the image by digest (`--network host` on Linux, `host.docker.internal` on macOS), and the gate.
+  - CI: the setup both jobs need moved into `.github/actions/setup`; the `autobahn` job beside `linux` keeps the run's reports when it fails.
+  - README: the status, and `make autobahn`.
+- **A hazard found by a safety check:** `run.sh` began with `rm -rf "$OUT/config" "$OUT/reports"`, which an empty `OUT` would have turned on `/config`. It now removes only a stale `index.json`, and each variable it needs is checked (`:?`).
+- **Mutants** (`m5-mutations.md`):
+  - The gate's: 66 rows, 0 mismatches on run 4. Run 1 was void (a harness quoting error). Run 2 had 3 mismatches: 2 prediction errors, and J-6, whose gap vector was wrong. J-28 and R-11 were added as value killers.
+  - The lane's: 6, each turning the gate red. L-1 and L-6 were prediction errors (7.5.1; 5.19 and 5.20); L-5's first try was void, stopped short on macOS.
+- **Linux:** `make autobahn`'s pieces ran by hand, the gate on 16 full runs. **macOS:** `make autobahn` passed, 301 cases (23 s).
+- `make test` green before the commit (Darwin arm64): thirteen suites, 368 expected passes, every pin ok.
+
+NEXT: the PRs; CI's first runs of the lane, measured; the closing ritual when the owner asks. Then the server slice: a taken stream's close lingers, its release, pinned here alone, and `none` measured again for 3.4, 4.1.5 and 4.2.5. Then M6, v0.1.0.
