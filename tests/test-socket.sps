@@ -17,7 +17,8 @@
 ;;;     close answered, then the stream's end, with nothing logged;
 ;;;   - a client silent after the 101 pinged once the ping interval has
 ;;;     passed and before it passes twice over, and failed with 1011 within
-;;;     the ping timeout's own window, both timed from what the server writes;
+;;;     the ping timeout's own window, both timed by the loop's clock from
+;;;     the take-over to what the server writes;
 ;;;   - the server's drain closing the stream under a receive that is seen to
 ;;;     wait, its client answering nothing: the receive raises 1006, not
 ;;;     clean, and no late resume is logged, since the close call marks the
@@ -44,7 +45,15 @@
 ;;;   has ended is logged `late-resume`, naming the verb, and wakes nothing.
 ;;;   Its drain (its M8.1): told to finish, it logs `draining`, then
 ;;;   `drain-timeout` and `stopped` once its time is up.  Its deadlines are met
-;;;   at the first time its timer fires at or after them, never before.
+;;;   at the first time its timer fires at or after them, never before, by the
+;;;   loop's clock, `uv_now`, brought up to date as one is armed (its
+;;;   shell.sls).  So timed by that clock from the take-over, read and not
+;;;   brought up to date, the ping comes at the interval or later, and the
+;;;   close at the timeout or later after the ping, to the millisecond.  The
+;;;   suite's own clock would not do: on Linux the loop's is
+;;;   CLOCK_MONOTONIC_COARSE wherever that ticks every millisecond, and its
+;;;   lag behind Chez's, CLOCK_MONOTONIC, varies, so a ping on time measured
+;;;   98 ms on CI (the research record of 2026-10-10).
 ;;; - Decision 0001: a client quiet for the ping interval is pinged, and
 ;;;   failed with 1011 when no pong comes within the ping timeout.  Here the
 ;;;   interval is 100 ms and the timeout 300 ms, so either taken for the other
@@ -62,8 +71,7 @@
 ;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
 ;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.
 (import (rnrs) (srfi :64) (ws-testing) (ws-play)
-        (only (chezscheme) collect collect-maximum-generation bytes-allocated
-              current-time time-second time-nanosecond)
+        (only (chezscheme) collect collect-maximum-generation bytes-allocated)
         (libuv) (uv-testing) (shell-testing) (response-reader)
         (http-server)
         (only (http-server limits) default-limits limits-with)
@@ -226,11 +234,6 @@
   (collect (collect-maximum-generation))
   (bytes-allocated))
 
-;; now-ms : -> Nat — the monotonic clock, in milliseconds.
-(define (now-ms)
-  (let ((t (current-time 'time-monotonic)))
-    (+ (* 1000 (time-second t)) (div (time-nanosecond t) 1000000))))
-
 (run-suite "socket"
   (lambda ()
     ;; The suite's masked frame is §5.7's.
@@ -255,26 +258,28 @@
 
     ;; --- the clock, on the shell's own timer ---
 
-    (let* ((taken-over #f) (writes '())
-           (s (serving (wrapping (accepting (lambda (ws) (websocket-receive ws))
-                                            no-subprotocols
-                                            (limits '((ping-interval-ms . 100) (ping-timeout-ms . 300))))
-                                 (lambda (t)
-                                   (set! taken-over (now-ms))
-                                   (timing t (lambda (first) (set! writes (cons (cons first (now-ms)) writes))))))))
-           (cl (connect! s "/" #t))
-           (run (logged (lambda ()
-                          (run! s (lambda () (not (eq? (client-end cl) 'open))))
-                          (frames (client-bytes cl)))))
-           (written (lambda (first)
-                      (let ((w (assv first writes))) (and w taken-over (- (cdr w) taken-over))))))
+    ;; Each time is the loop's, as the server last brought it up to date.
+    (letrec* ((taken-over #f) (writes '())
+              (now (lambda () (uv-now (ws-server-loop s))))
+              (s (serving (wrapping (accepting (lambda (ws) (websocket-receive ws))
+                                               no-subprotocols
+                                               (limits '((ping-interval-ms . 100) (ping-timeout-ms . 300))))
+                                    (lambda (t)
+                                      (set! taken-over (now))
+                                      (timing t (lambda (first) (set! writes (cons (cons first (now)) writes))))))))
+              (cl (connect! s "/" #t))
+              (run (logged (lambda ()
+                             (run! s (lambda () (not (eq? (client-end cl) 'open))))
+                             (frames (client-bytes cl)))))
+              (written (lambda (first)
+                         (let ((w (assv first writes))) (and w taken-over (- (cdr w) taken-over))))))
       (finish! s (list cl))
-      (test-equal "a client silent after the 101 is pinged once the ping interval, 100 ms, has passed and before 250 ms, and failed with 1011 from 300 ms, its timeout, to 450 ms after the ping, each timed from the take-over to what the server writes, its failure logged"
+      (test-equal "a client silent after the 101 is pinged once the ping interval, 100 ms, has passed and before 250 ms, and failed with 1011 from 300 ms, its timeout, to 450 ms after the ping, each timed by the loop's clock from the take-over to what the server writes, its failure logged"
         '(((ping "") (close 1011 "")) within-the-interval within-the-timeout "websocket-failed 1011 ping-timeout\n")
         (let ((ping (written #x89)) (close (written #x88)))
           (list (car run)
-                (if (and ping (<= 99 ping) (< ping 250)) 'within-the-interval ping)
-                (if (and ping close (<= 299 (- close ping)) (< (- close ping) 450))
+                (if (and ping (<= 100 ping) (< ping 250)) 'within-the-interval ping)
+                (if (and ping close (<= 300 (- close ping)) (< (- close ping) 450))
                     'within-the-timeout
                     (list ping close))
                 (cadr run)))))

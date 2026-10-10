@@ -1835,3 +1835,66 @@ Linux aarch64 in Docker (Ubuntu 24.04, libuv 1.48.0) for the suites.
   new way. P-1CC survives, as before.
 - **The counter's own flake is no row.** It shows in some runs and not others, so the
   measures stand in for it (0007's amendment).
+
+## S-SILENT's lower bounds by the loop's clock
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), libuv 1.52.1,
+2026-10-10; and Linux aarch64 in Docker (6.12.76-linuxkit, Ubuntu 24.04, libuv 1.48.0), the
+server pinned at v0.4.1 (520f70e).
+- **Why:** CI's run 38051169931 measured a ping met on time at 98 ms, where the check took 99
+  or later. The suite timed by Chez's clock and the server arms by libuv's, and on Linux
+  libuv's is `CLOCK_MONOTONIC_COARSE`, whose lag behind Chez's varies. The research record
+  of 2026-10-10 holds the measures.
+- **The code:** `tests/test-socket.sps` (blob 8792afd): S-SILENT times the take-over and each
+  write by `uv_now`, read without bringing it up to date. Its lower bounds are the limits
+  themselves, 100 and 300; they were 99 and 299. `now-ms` is gone, and with it the suite's
+  import of Chez's clock.
+- **The runner** is new, `smut.py` (sha256 55bb6c2a…): each mutant is a shadow copy of one
+  library placed first on the library path. On Linux the same shadows ran through a shell
+  script, since the image has no python.
+
+### The oracles
+
+- **The server's deadlines** are met at the first tick at or after them, by the loop's clock,
+  brought up to date as one is armed (its `shell.sls`, `taker-deadline!`; its `wheel.sls`,
+  `take-due!`).
+- **The cached time never steps back,** so the take-over's reading is at or before the arm's.
+- **The binding writes the ping before it arms the pong** (`protocol.sls`, `passed!`).
+- So the ping comes at the interval or later, and the close at the timeout or later after the
+  ping, to the millisecond. 0001's interval is 100 ms and its timeout 300, as before.
+
+### The test-first runs
+
+- **The old check, red by its clock:** in the probes at 20/30 ms, its bounds (19 and 29) broke
+  in 143 runs of 10,000 on Linux, while the loop's clock (20 and 30) broke in none. At the
+  suite's 100/300 neither broke, in 1,600 runs. A 98 needs the coarse clock's lag and the
+  stamps' cut together.
+- **Stage 0, the new check on the tree:** the socket suite, 5 of 5, on Darwin and on Linux.
+  On Linux, 100 runs of it, four at once, every one green.
+
+### The mutants
+
+| Row | Mutant | Red, as named |
+|---|---|---|
+| BASE | none; the socket and binding suites | green |
+| KS-1 | ping armed for the ping timeout | P-OWN, V-ENV, S-SILENT (pinged at 304 ms) |
+| KS-2 | pong armed for the close timeout | P-SILENT, P-OWN, S-SILENT (the close at 5,101 ms) |
+| KS-3 | pong armed for the ping interval | P-OWN, S-SILENT (the close 101 ms after the ping) |
+| KS-4 | ping armed for half the interval; the socket suite alone | S-SILENT (pinged at 50 ms) |
+| SC-1 | a taker's deadline armed by the loop's time not brought up to date (the server's `taker-deadline!`); the socket suite and the server's shell suite | none: a scope statement |
+| SC-1-OLD | SC-1, against main's S-SILENT, by the suite's clock | none, 6 runs of 6 |
+
+- **Run 1: 3 mismatches on Darwin,** each in the runner: its name map had no P-OWN and no V-ENV.
+  The red sets matched the predictions by name.
+- **Run 2, the map mended:** 7 rows, 0 mismatches on Darwin. Linux, the same six rows of
+  shadows (SC-1-OLD aside): each red set as on Darwin.
+- **Every bound of S-SILENT has a killer by value:**
+  - the ping's lower bound, KS-4;
+  - the ping's upper bound, KS-1;
+  - the pong's lower bound, KS-3;
+  - the pong's upper bound, KS-2.
+- **SC-1 survives by construction.** A check timed by the loop's clock cannot see a shell
+  that arms by a stale reading of that clock. The suite's clock did not see it either. Nor
+  does the server: its shell suite passed (204 on Darwin, 199 on Linux), and so did every
+  suite of its 51 that runs here, 1,951 passes on Darwin, as many as without the mutant.
+  `tests/test-clients.sps` stops at status 2 with or without it: its tools are not built here.
