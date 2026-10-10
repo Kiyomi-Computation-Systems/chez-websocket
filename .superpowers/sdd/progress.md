@@ -1797,3 +1797,16 @@ MERGED to main on 2026-10-09, on the owner's "all green, do closing ritual": **t
 `make test` green on main: twelve suites, 348 expected passes, every pin ok.
 
 NEXT: the pin to the server's v0.4.1 (520f70e) alone, its every suite measured green on v0.4.1 already (#57, #58); then M5, the Autobahn lane, whose image needs the owner's word to pull.
+
+---
+
+**The server's v0.4.1, pinned alone (2026-10-09),** on the owner's "lets do the v0.4.1 pin in chez-websocket". Branch `chore/pin-server-v0.4.1`, cut from 413516f; one PR, one commit.
+- **The pin:** chez-http-server moves from v0.4.0 (388ec43) to v0.4.1 (520f70e), whose park and drain are by `call/cc` (its decision 0025): a waiting coroutine holds about 3 KB less. Of the pins it carries, chez-libuv moves from v0.7.4 (27d84bb) to v0.8.0 (ad3bb47); chez-httparse 0b7058e, byte-machine c338a57, uriparse 5ecd88f and chez-srfi 7879b52 are unchanged.
+- **What reaches here is chez-libuv v0.8.0's libuv floor,** 1.48 where it was 1.44. Its build passes a system libuv below the floor over for its own, which needs CMake, and its `config.sls` refuses one below it at load. CI's ubuntu-24.04 libuv is 1.48.0, the floor exactly.
+  - The README says 1.48, and that chez-libuv builds its own below it, with CMake 3.10 or later; the Makefile's comment on `submodules` says the same.
+  - global-constraints says 1.48, and CMake 3.10, libuv's own floor. The 3.26 it said until now is the siblings' preset floor, which this build never runs, as the server's global constraints say since its v0.4.1.
+- **Fitted before the pin** (#57, #58): every suite passed on v0.4.1, on Darwin and on Linux, and design §9's measure at the pin was taken there.
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` answered the one predicted line, `PIN MISMATCH: vendor/chez-http-server at 520f70e…, expected 388ec43…`, with the five carried pins ok.
+- `make test` green before the commit (Darwin arm64), three runs: twelve suites, 348 expected passes, each suite's count as main's on v0.4.0, every pin ok. The binding suite passed 6 of 6, 55 each. `make prod` green, its shim checked a prod build.
+
+NEXT: the PR; the closing ritual when the owner asks; then M5, the Autobahn lane, whose image needs the owner's word to pull.
