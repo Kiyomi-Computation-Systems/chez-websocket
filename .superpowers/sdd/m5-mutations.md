@@ -166,3 +166,163 @@ Named and hashed before the run (`5f33e698`); the gate's status, and the cases i
 - **L-5's first try: void.** On macOS the run stopped short at 6.20.4, a connection to
   the echo server timing out, before 9.*; the gate was red for that, not the cap. Its
   second try ran whole.
+
+## M5's review (2026-10-10)
+
+The /code-review (xhigh) of #60-#63 reported fourteen findings; "fix all", with two forms
+(decision 0008's amendment). Platform as above; the gate is `tests/ws-autobahn.sls` (blob
+805737b), its suite `tests/test-autobahn.sps`, 24 checks (blob 447d325); `run.sh` (blob
+d51e3de) and its suite `tests/test-autobahn-run.sps`, 9 checks (blob adde458).
+
+### The test-first runs
+
+- **Before the fixes**, named and hashed (`fc3ed607`): the gate's suite stopped at load,
+  `attempt to reference unbound identifier text-lines`, exit 255.
+- **Stage 1** (`045a773f`): the old library, `text-lines` stubbed as the suite's old splitter
+  and `gate-main` raising. 24 checks: the 9 named green (7 JSON, 2 index), the other 15 red,
+  exactly.
+- **`run.sh`'s suite on the old `run.sh`** (`153213c8`): all 7 checks of that draft red, as
+  named, each on `PORT: parameter null or not set`.
+- **Re-gated with the whole-verdict ratchet** (`0a5e1b14`): all 180 flip-run verdicts listed;
+  the 13 Linux runs at 16 MiB and the 3 complete macOS ones passed; the 2 that stopped short
+  failed with the counted hint; the 1 MiB run failed on its 24.
+
+### Found by writing the mutants
+
+- **A redundant guard:** `(pair? (cdr more))` after a `|` changed no outcome, since the next
+  verdict's length check refuses the same lines with the same message. Taken out.
+- **Two gaps in `run.sh`'s suite:** a fixed port passes every check but two runs at once, and
+  the cleanup trap mattered only to a run that ends early with its server alive. R-TWO and
+  R-TERM were added for them. The second showed the trap carried on after a signal; it now
+  exits, and the exit stops the server.
+- **The tally rewritten twice:** first as a fold that was no plainer, then on `unique`.
+
+### The gate's mutants
+
+Run 1: 83 rows (82 mutants and the baseline), 0 mismatches (specs hashed `8b776301`). The JSON
+rows keep their cuts, re-predicted for the changed checks; the rest are cut anew.
+
+| id | mutation | red |
+|---|---|---|
+| BASE | no edit | none |
+| J-1 | whitespace without tab | J-LIT |
+| J-2 | whitespace without CR | J-LIT |
+| J-3 | expect takes any character | J-REF |
+| J-4 | an empty object not seen | J-LIT, I-AGENT, I-REF, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN, G-HARNESS, G-MAIN |
+| J-5 | members in reverse | J-OBJ, J-ARR, I-AGENT, G-ORDER |
+| J-6 | a member's name not checked for its quote | J-REF |
+| J-7 | elements in reverse | J-OBJ, J-ARR |
+| J-8 | control characters in a string | J-REF |
+| J-9 | no \/ escape | J-ESC |
+| J-10 | \b as tab | J-ESC |
+| J-11 | \n as CR | J-ESC |
+| J-12 | a pair without its #x10000 | J-ESC |
+| J-13 | a high surrogate's \u not checked | J-REF |
+| J-14 | a low surrogate's range not checked | J-REF |
+| J-15 | a lone low surrogate taken | J-REF |
+| J-16 | lowercase hex misread | J-ESC |
+| J-17 | uppercase hex misread | J-ESC, J-REF |
+| J-18 | a leading zero takes digits | J-REF |
+| J-19 | a fraction of no digits | J-REF |
+| J-20 | an exponent's + not read | J-NUM |
+| J-21 | E not an exponent | J-NUM |
+| J-22 | no minus | J-ARR, J-NUM |
+| J-23 | false read as true | J-OBJ, J-LIT |
+| J-24 | null read as nil | J-LIT, I-AGENT, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CLOSE, G-MISSING, G-MAIN |
+| J-25 | trailing text taken | J-REF |
+| J-26 | the end told as a character | G-HARNESS |
+| J-27 | the index told one late | J-WHERE, G-HARNESS, G-MAIN |
+| J-28 | numbers read exact | J-ARR, J-NUM |
+| R-1 | comment lines read | R-PARSE, R-CRLF, R-REF, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN, G-HARNESS, G-MAIN |
+| R-2 | blank lines read | R-PARSE, R-CRLF, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN, G-HARNESS, G-MAIN |
+| R-3 | a CR kept | T-LINES, R-CRLF |
+| R-4 | a line after the last LF | T-LINES, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN, G-HARNESS, G-MAIN |
+| R-5 | an empty case taken | R-REF |
+| R-6 | a verdict of two fields | R-REF |
+| R-7 | an empty field in a verdict | R-REF |
+| R-8 | a verdict's code unchecked | R-REF |
+| R-9 | any separator | R-REF |
+| R-10 | a verdict listed twice taken | R-REF |
+| R-11 | a case twice taken | R-REF |
+| R-12 | none not a code | R-PARSE, R-CRLF, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN, G-HARNESS, G-MAIN |
+| R-13 | a code of letters | R-REF |
+| R-14 | skipped lines not counted | R-REF |
+| R-15 | the ratchet in reverse | R-PARSE, R-CRLF, G-CHANGED, G-EMPTY, G-NOCONN |
+| R-16 | unique keeps last occurrences | G-PASS, G-ALT, G-MAIN |
+| S-1 | a spec of servers past one | G-HARNESS |
+| S-2 | a server with no agent | G-HARNESS |
+| I-0 | an empty index read as of agents | G-NOCONN |
+| I-1 | the agent not looked for | I-REF, G-HARNESS |
+| I-2 | other agents taken | I-REF |
+| I-3 | cases as an array | I-REF |
+| I-4 | a case that is a number | I-REF |
+| I-5 | no behavior taken | I-REF |
+| I-6 | a behaviorClose number taken | I-REF |
+| I-7 | null read as null | I-AGENT, G-PASS, G-ORDER, G-ALT, G-ALTFAIL, G-CLOSE, G-MISSING, G-MAIN |
+| I-8 | a code any number | I-REF |
+| G-1 | every verdict held | G-ALTFAIL, G-CHANGED, G-CLOSE |
+| G-2 | fields held apart | G-ALTFAIL |
+| G-3 | the first verdict alone held | G-ALT |
+| G-4 | a missing case not told | G-MISSING, G-EMPTY, G-NOCONN |
+| G-5 | a case only the run has not told | G-MISSING |
+| G-6 | the ratchet tallied | G-PASS, G-ORDER, G-ALT, G-MAIN |
+| G-7 | each behavior counted as the whole run | G-PASS, G-ORDER, G-ALT, G-MAIN |
+| G-8 | an empty ratchet gated | G-HARNESS |
+| G-9 | the hint never said | G-MISSING, G-EMPTY, G-NOCONN |
+| G-10 | the hint always said | G-ALTFAIL, G-CHANGED, G-CLOSE |
+| G-11 | the hint counts the ratchet | G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING |
+| G-12 | one cases | G-MISSING |
+| G-11b | one differences | G-ALTFAIL, G-CLOSE |
+| G-13 | a difference passes | G-ALTFAIL, G-CHANGED, G-CLOSE, G-MISSING, G-EMPTY, G-NOCONN |
+| G-14 | a harness error is 1 | G-HARNESS, G-MAIN |
+| G-15 | nothing caught while reading | G-HARNESS, G-MAIN |
+| G-16 | a pass is 1 | G-PASS, G-ORDER, G-ALT, G-MAIN |
+| G-17 | cases compared in order | G-ORDER, G-MISSING, G-EMPTY, G-NOCONN |
+| G-18 | verdicts joined by | | G-ALTFAIL, G-EMPTY, G-NOCONN |
+| M-1 | any count of paths | G-MAIN |
+| M-2 | an unreadable path read | G-MAIN |
+| M-3 | the spec and ratchet swapped | G-MAIN |
+| M-4 | only an &error caught | G-MAIN |
+| M-5 | the raise's message not said | G-MAIN |
+| M-6 | a raise is 1 | G-MAIN |
+| M-7 | a wrong count is 1 | G-MAIN |
+| M-8 | an unreadable path is 1 | G-MAIN |
+
+New checks and their killers by value: T-LINES by R-3, R-CRLF by R-3, R-PARSE by R-15,
+R-REF by R-5, G-ALT by G-3, G-ALTFAIL by G-2, G-NOCONN by I-0, G-MAIN by M-7.
+
+### `run.sh`'s mutants
+
+Run 1: 11 rows (10 mutants and the baseline), 1 mismatch (specs hashed `1f5a54a2`). Each on a
+scratch copy of `src/` and `tests/`, the suite run there.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RM-1 | the last run's index kept | R-STALE | as named |
+| RM-2 | the caller's environment inherited | R-ENV | as named |
+| RM-3 | no stopped check | R-KILL | as named |
+| RM-4 | a dead server waited for | R-NOSTART | as named |
+| RM-5 | docker's status not read | R-DOCKER | as named |
+| RM-6 | the URL at a fixed port | R-PASS, R-ENV, R-TWO | as named |
+| RM-7 | the server at a fixed port | R-TWO | as named |
+| RM-8 | the stop not waited for | R-PASS, R-PID, R-ENV, R-STALE, R-TWO, R-TERM, R-DOCKER | none, survived |
+| RM-9 | no traps on the host | R-TERM | as named |
+| RM-10 | no pid recorded | R-PID, R-KILL, R-TERM | as named |
+
+- **RM-8 survived:** with the stop's wait taken out, every check stayed green. The server
+  stops and says `stopped` before the shell reaches its next command, so no run of the
+  suite's can see the wait. It matters for a server slow to drain, such as one with a
+  connection open, which a lane run never leaves. Kept, since without it the `stopped`
+  check races the server.
+
+### The container path
+
+On macOS, with real Docker: copies of `run.sh` run from the tree with make's environment,
+named and hashed before (`db5768e3`). All four as named.
+- **The baseline:** status 0 in 17 s, nothing left.
+- **CM-1, no cleanup trap:** status 0, and one container and one network left.
+- **CM-3, the logs read before the stop:** status 2, "ended without stopping".
+- **CM-2, a dead container waited for:** status 2 after 60 s, "did not listen within 60 s".
+  The real `run.sh` on the same image, `ubuntu:24.04`, says "ended before it listened".
+

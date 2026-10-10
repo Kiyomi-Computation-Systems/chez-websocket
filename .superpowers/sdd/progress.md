@@ -1885,3 +1885,31 @@ MERGED to main on 2026-10-10, on the owner's "Do ritual": **S-SILENT's lower bou
 `make test` green on main: thirteen suites, 368 expected passes, every pin ok.
 
 NEXT: #64 and #65, M5's review, still open. #64's last run before the block, 38051609330, was red: "a run told to stop takes its echo server with it". Each rebases onto 7e5a75f, and their CI waits for November or a local stand-in. Then the server slice: a taken stream's close lingers.
+
+---
+
+**M5's review (2026-10-10),** on the owner's "fix all" after a /code-review (xhigh) over #60-#63 reported fourteen findings. Branch `fix/m5-review`, on #63. Decision 0008's amendment.
+- **Forms, each the recommended:**
+  - **"Container on Docker Desktop":** on macOS and Windows the echo server runs in a Linux container (`tests/autobahn/echo.Dockerfile`, `make echo-image`, `make docker-smoke`). Linux and CI keep the host network.
+    - Measured on macOS: a first build of 242 s (226 s compiling Chez), 7 s after a change, 138 MB, and a warm run of 17 s. None of 26 container runs stopped short, where 3 of 11 had through Docker Desktop's forwarding.
+  - **"Keep both building on a miss":** a `chez-cache-salt` dispatch input runs the setup action's miss path by hand.
+- **Fixed:**
+  - The ratchet lists whole verdicts, `" | "` between them, so a pairing never measured fails. 4.1.5 lists two; 3.4 and 4.2.5 three.
+  - An empty index, wstest's `{}` when no connection opened (measured), is a run of no case.
+  - The short-run hint counts the cases that did not run.
+  - `make autobahn` checks the pins.
+  - The host path takes any free port and reads it back.
+  - A CRLF ratchet reads alike, and `.gitattributes` keeps scripts and the ratchet LF.
+  - `gate-main` is gate.sps's body, every failure status 2.
+  - `tests/test-autobahn-run.sps` holds `run.sh` with a stand-in for docker. It showed a trap that carried on after a signal: a signal now exits, and the exit stops the server.
+  - The tally is plainer.
+- **Watched to fail** (`m5-mutations.md`):
+  - Test-first: the gate's suite stopped at load; stage 1 reddened exactly the 15 named; `run.sh`'s suite reddened all 7 on the old `run.sh`.
+  - The gate's mutants, re-cut: 83 rows, 0 mismatches on the first run.
+  - `run.sh`'s: 11 rows, 1 mismatch. RM-8 survived: the stop's wait cannot be seen, since the server stops before the shell's next command. Kept against the race.
+  - The container path's: four one-offs on real Docker, all as named.
+- **Re-gated:** every full run since M5 began, as predicted; all 180 flip-run verdicts listed.
+- **make autobahn, macOS, container path:** 248 s from no image, gate passing; `make docker-smoke` 6 s.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. `make check-help` passes.
+
+NEXT: the PR; the dispatch run with a salt, which proves the miss path; the closing ritual when the owner asks, bottom-up from #60. Then the server slice for the lost close; then M6.
