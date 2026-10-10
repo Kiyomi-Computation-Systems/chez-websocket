@@ -384,8 +384,8 @@ is refused.
   - RFC 3629 §4's grammar for UTF-8;
   - RFC 6455 §5.7's example frames.
 
-  Autobahn's cases become core tests where they need no socket, read as byte
-  scripts. Time is the `deadline-passed` events a test steps, so no test waits.
+  Autobahn's cases run on a socket, in their own lane (M5), not as core tests. Time is
+  the `deadline-passed` events a test steps, so no test waits.
 - **The handshake's answers meet the server's own rules** for what a handler answers,
   its `switch-fault` and `response-fault`. The door suite holds that, beside the
   door's verbs, so the pure suites need no server (M4.1's review).
@@ -451,11 +451,26 @@ is refused.
   - and its numbers are both platforms' (the [measures](research/2026-10-09-real-socket-measures.md)).
   The driver suite holds what it needs of the server's libuv shell and `(shell-testing)`,
   as it holds the fake's.
-- **Autobahn|Testsuite** runs in Linux CI (M5): its fuzzing client against an echo
-  server built from this library, 301 cases, the image pinned by digest. A ratchet
-  holds each case's result (0022).
+- **Autobahn|Testsuite** runs in Linux CI on every PR and push, and by `make autobahn`
+  (M5, 0008). Its fuzzing client, from its image pinned by digest, runs its 301 cases
+  without compression against `tests/autobahn/echo.sps`, whose cap is 16 MiB, the
+  largest message they send.
+  - wstest exits 0 whatever its cases show. So the gate, `(ws-autobahn)`, holds the run's
+    `index.json` against the ratchet, `tests/autobahn/verdicts.txt`, both ways: each case's
+    behavior, behaviorClose and the close code the server sent.
+  - A case measured to vary with how the client's bytes fall into reads lists each verdict
+    seen: 3.4, 4.1.5 and 4.2.5 (0008).
+  - `tests/test-autobahn.sps` holds the gate itself, with no Docker.
 
 ## 9. Open, and decided later
+
+- **A close lost to a reset** (M5; found by the Autobahn lane). When the server fails a
+  connection while the client is still sending, it closes its socket with the client's
+  bytes unread, and the kernel resets the connection. On macOS the client never read the
+  close, in 100 of 100 tries; on Linux 14 of 100 ended in a reset. The server's HTTP
+  closes half-close and linger for this (its decision 0011); a taken stream's close does
+  not. **Decided by form** (0008): a chez-http-server slice after the lane, its release
+  pinned here alone.
 
 - **`Origin`**: decided in M4.1, by form: the request's own host by default (0003,
   §3).

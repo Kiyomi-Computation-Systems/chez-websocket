@@ -116,11 +116,18 @@ and the door suite.
 ## M5 — the Autobahn lane
 
 Pulling `crossbario/autobahn-testsuite:25.10.1`, pinned by digest and linux/amd64
-only, needs the owner's word first.
-- Its fuzzing client runs in Linux CI against an echo server built from this library.
-- The gate parses `index.json`, and a ratchet holds every case's verdict.
-- 301 cases: all but 12.x and 13.x, which are compression's.
-- A local run on the arm64 development machine needs emulation.
+only, needed the owner's word first: "Here and in CI", by form (0008).
+- Its fuzzing client runs in Linux CI against an echo server built from this library,
+  on every PR and push, in a job of its own (by form, "Every PR and push").
+- The gate parses `index.json`, and a ratchet holds every case's verdict, both ways. A
+  case measured to vary lists each verdict seen (by form, "List what was measured").
+- 301 cases: all but 12.x and 13.x, which are compression's; there is no 11.x. The
+  echo server's cap is 16 MiB, the largest message they send (by form, "16 MiB").
+- A local run on the arm64 development machine needs emulation, and on macOS goes
+  through Docker Desktop.
+- Found by the lane: a close lost to a reset when the server fails a client still
+  sending (design §9). By form, "Server slice after the lane": a chez-http-server slice,
+  then its release pinned here alone.
 
 ## M6 — v0.1.0
 
