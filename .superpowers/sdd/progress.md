@@ -1810,3 +1810,13 @@ NEXT: the pin to the server's v0.4.1 (520f70e) alone, its every suite measured g
 - `make test` green before the commit (Darwin arm64), three runs: twelve suites, 348 expected passes, each suite's count as main's on v0.4.0, every pin ok. The binding suite passed 6 of 6, 55 each. `make prod` green, its shim checked a prod build.
 
 NEXT: the PR; the closing ritual when the owner asks; then M5, the Autobahn lane, whose image needs the owner's word to pull.
+
+---
+
+MERGED to main on 2026-10-09, on the owner's "ci is green, do closing ritual": **the server's v0.4.1 pin** (the entry above), #59.
+- **#59**, at b3cc009, was squashed as 04506ff (tree b3cc009's, parent 413516f). Its run, 38007212232, passed on Linux: twelve suites, 348 expected passes, every pin ok, the server at 520f70e. Main's run on the squash, 38007369096, passed with the same counts.
+- **Branch.** Deleted, local and remote; this checkout is on main, fast-forwarded. No PR is open.
+
+`make test` green on main: twelve suites, 348 expected passes, every pin ok, the server at v0.4.1.
+
+NEXT: M5, the Autobahn lane, when the owner asks; pulling its image needs the owner's word.
