@@ -1847,5 +1847,10 @@ NEXT: M5, the Autobahn lane, when the owner asks; pulling its image needs the ow
   - The lane's: 6, each turning the gate red. L-1 and L-6 were prediction errors (7.5.1; 5.19 and 5.20); L-5's first try was void, stopped short on macOS.
 - **Linux:** `make autobahn`'s pieces ran by hand, the gate on 16 full runs. **macOS:** `make autobahn` passed, 301 cases (23 s).
 - `make test` green before the commit (Darwin arm64): thirteen suites, 368 expected passes, every pin ok.
+- **Opened as stacked PRs** (form "Four stacked PRs"): #60 `docs/m5-1-decision`, #61 `test/m5-2-gate`, #62 `test/m5-3-lane`, #63 `docs/m5-4-ledger`. Each exact tree was proven in a detached scratch worktree: twelve suites and 348 for #60, thirteen and 368 for the rest, and `make autobahn` passing on #62's.
+- **CI's first native runs of the lane** (runs 38016701245, #62, and 38016703127, #63), on ubuntu-24.04 amd64:
+  - `make autobahn` took about 38 s: the pull, the 301 cases and the gate. The `autobahn` job took 62 and 64 s, its cached setup about 23 s.
+  - Its gate said, both times: 301 cases as the ratchet holds them, 291 OK, 7 NON-STRICT, 3 INFORMATIONAL. So 3.4, 4.1.5 and 4.2.5 came out OK.
+  - The `linux` job: thirteen suites, 368 expected passes. All four PRs' runs green.
 
-NEXT: the PRs; CI's first runs of the lane, measured; the closing ritual when the owner asks. Then the server slice: a taken stream's close lingers, its release, pinned here alone, and `none` measured again for 3.4, 4.1.5 and 4.2.5. Then M6, v0.1.0.
+NEXT: the closing ritual when the owner asks. Then the server slice: a taken stream's close lingers, its release, pinned here alone, and `none` measured again for 3.4, 4.1.5 and 4.2.5. Then M6, v0.1.0.
