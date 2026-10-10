@@ -3,7 +3,8 @@
 Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, each the recommended: "Here and in
 CI", then "16 MiB", "Server slice after the lane" and "Every PR and push", then "List what
-was measured")
+was measured"). Amended 2026-10-10, M5's review: "Container on Docker Desktop", "Keep both
+building on a miss".
 Plan: [the milestone plan](../2026-10-04-chez-websocket-milestone-plan.md) M5
 Design: [the design](../2026-10-04-chez-websocket-design.md) §8, §9
 
@@ -111,3 +112,50 @@ Taken without a form, by precedent:
 - CI time grows by the lane's job, beside the suite's.
 - Until the server slice's pin, a client still sending when the server fails it may not read
   the close: always on macOS, rarely on Linux.
+
+## Amendment of 2026-10-10 (M5's review)
+
+A /code-review (xhigh) over #60-#63 reported fourteen findings. The owner said "fix all".
+Two forms decided the choices among them, each the recommended.
+
+- **"Container on Docker Desktop".** On macOS and Windows the echo server runs in a Linux
+  container, beside the fuzzing client on a Docker network of its own. Linux and CI keep the
+  host network.
+  - Through Docker Desktop's forwarding, 3 of 11 macOS runs had stopped short. With the echo
+    server in a container, none of 26 did.
+  - Windows had taken the host network's path, which Docker Desktop lacks.
+  - The image is `tests/autobahn/echo.Dockerfile`: multi-stage, Chez from its release, the
+    tree under `/app`, run as a user of its own, with a HEALTHCHECK on `/health/ready`.
+    `make echo-image` builds it and `make docker-smoke` checks it starts, is ready, and
+    stops.
+  - Measured on macOS: the first build took 242 s, 226 s of it compiling Chez, then 7 s
+    after a change. The image is 138 MB, and a warm run took 17 s.
+  - On the host the echo server takes any free port and reads it back from its `listening`
+    line, no longer port 9001.
+- **"Keep both building on a miss".** On a Chez cache miss both jobs still build Chez, about
+  171 s each, since a job ahead of them would add about 8-10 s to every run. A run by hand
+  with `chez-cache-salt` misses the cache, so the setup action's build-and-save path is
+  proven now.
+
+**Fixed without a form:**
+- **The ratchet lists whole verdicts,** `" | "` between them. A pairing of fields never seen
+  no longer passes: 3.4 OK with no close code was admitted before. 4.1.5 lists the two
+  verdicts measured; 3.4 and 4.2.5 list three. All 180 of the flip runs' verdicts are listed.
+- **An empty index, `{}`,** is read as a run of no case. wstest writes it when no connection
+  opened, measured. The gate had called it a harness error.
+- **The short-run hint** says how many of the ratchet's cases did not run, and that the log
+  says whether a connection failed. It no longer names a cause.
+- **`make autobahn` checks the pins**, as `make test` does.
+- **A CRLF checkout reads alike.** The gate drops a CR before a LF; Chez's native transcoder
+  keeps it (eol style `none`, measured). `.gitattributes` keeps the scripts and the ratchet LF.
+- **`gate-main`, in `(ws-autobahn)`, is gate.sps's body.** A wrong count of paths, a path it
+  cannot read, or any raise at all is status 2.
+- **`tests/test-autobahn-run.sps` holds `run.sh` without Docker.** A stand-in for docker plays
+  the run.
+  - It holds the stale index, the caller's environment, a server that ends early or without
+    stopping, a failing docker, two runs at once, and a run told to stop.
+  - That last showed a trap that let the script carry on: a signal now exits, and the exit
+    stops the server.
+- **The tally and the suite's line reader** share `(ws-autobahn)`'s code.
+
+`make test`: fourteen suites, 381 expected passes. The mutants are in `m5-mutations.md`.

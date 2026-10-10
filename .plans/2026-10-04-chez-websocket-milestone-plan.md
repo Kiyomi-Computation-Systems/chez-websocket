@@ -128,6 +128,9 @@ only, needed the owner's word first: "Here and in CI", by form (0008).
 - Found by the lane: a close lost to a reset when the server fails a client still
   sending (design §9). By form, "Server slice after the lane": a chez-http-server slice,
   then its release pinned here alone.
+- Its review (2026-10-10, 0008's amendment): on Docker Desktop the echo server runs in a
+  container (by form, "Container on Docker Desktop"); whole verdicts in the ratchet; a
+  suite for `run.sh` without Docker.
 
 ## M6 — v0.1.0
 

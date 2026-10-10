@@ -455,12 +455,16 @@ is refused.
   (M5, 0008). Its fuzzing client, from its image pinned by digest, runs its 301 cases
   without compression against `tests/autobahn/echo.sps`, whose cap is 16 MiB, the
   largest message they send.
-  - wstest exits 0 whatever its cases show. So the gate, `(ws-autobahn)`, holds the run's
-    `index.json` against the ratchet, `tests/autobahn/verdicts.txt`, both ways: each case's
-    behavior, behaviorClose and the close code the server sent.
-  - A case measured to vary with how the client's bytes fall into reads lists each verdict
-    seen: 3.4, 4.1.5 and 4.2.5 (0008).
-  - `tests/test-autobahn.sps` holds the gate itself, with no Docker.
+  - **Where the echo server runs.** On Linux, on the host, on a free port it reads back.
+    On Docker Desktop (macOS, Windows), which has no host network, in a Linux container
+    beside the fuzzing client (0008's amendment).
+  - **The gate.** wstest exits 0 whatever its cases show. So the gate, `(ws-autobahn)`,
+    holds the run's `index.json` against the ratchet, `tests/autobahn/verdicts.txt`, both
+    ways: each case's behavior, behaviorClose and the close code the server sent.
+  - **Varying cases.** A case measured to vary with how the client's bytes fall into reads
+    lists each whole verdict seen: 3.4, 4.1.5 and 4.2.5 (0008).
+  - **Held without Docker.** `tests/test-autobahn.sps` holds the gate, and
+    `tests/test-autobahn-run.sps` holds `run.sh`, a stand-in for docker playing the run.
 
 ## 9. Open, and decided later
 

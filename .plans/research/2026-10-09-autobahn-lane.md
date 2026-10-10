@@ -106,3 +106,22 @@ stream (`protocol.sls` `fail!`); the server's `taker-close!` stops reading and c
 once its writes are done (`shell.sls`), with no half-close.
 
 **The lane's speed here:** the image pulled in 17 s; `make autobahn` took 23 s on macOS.
+
+## Measured at M5's review (2026-10-10)
+
+- **A run that never connects** (nothing listening at the URL): wstest prints `Connection to
+  ... failed`, exits 0, and writes `index.json` as `{}`.
+- **Chez's native transcoder keeps CRs:** `(native-eol-style)` is `none`, and a line
+  `1.1.1 OK OK 1000\r\n` reads back with its CR.
+- **The echo server in a container** (`tests/autobahn/echo.Dockerfile`, Docker Desktop on
+  macOS, aarch64):
+  - the first build took 242 s, 226 s of it compiling Chez 10.4.1, and 7 s after a change
+    to the tree;
+  - the image is 138 MB;
+  - a full run took 14 s, every case as the ratchet holds it;
+  - `make autobahn` took 248 s from no image, and a warm run 17 s;
+  - `make docker-smoke` took 6 s, its HEALTHCHECK ready and the server stopped.
+- **The varying cases, paired:** all 180 of the 60 flip runs' verdicts for 3.4, 4.1.5 and
+  4.2.5 are among the ratchet's whole verdicts.
+- **CI's job start:** a job started 3 to 4 s after its run was created, and its `Set up job`
+  took 1 s (runs 38016701245, 38016703127).

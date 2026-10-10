@@ -9,9 +9,10 @@
 ;;; holds its corpora (its decision 0008): a verdict that changes either way
 ;;; is a difference, and so is a case only one side has.  A case whose
 ;;; verdict was measured to vary with how the client's bytes fall into reads
-;;; lists each verdict seen, a | between them (decision 0008, by form: "List
-;;; what was measured"), and passes with any of them.  This suite holds the
-;;; gate on texts of its own, so it runs without Docker.
+;;; lists each whole verdict seen, " | " between them (decision 0008, by form:
+;;; "List what was measured"), and passes with any one of them, not with a
+;;; pairing of their fields never seen.  This suite holds the gate on texts of
+;;; its own, so it runs without Docker.
 ;;;
 ;;; The oracles are RFC 8259's grammar and its examples (§7, §13), and the
 ;;; index as Autobahn 25.10.1 writes it: an object holding the agent the spec
@@ -21,14 +22,18 @@
 ;;;
 ;;; - JSON: RFC 8259's examples, every escape of §7, the G clef's surrogate
 ;;;   pair, the number grammar at its edges, and texts it refuses.
-;;; - The ratchet's lines: comments, blanks, four fields, a field's
-;;;   alternatives; malformed lines and a case named twice refused, naming the
+;;; - Lines: a CR before a LF is dropped, so a CRLF checkout reads alike.
+;;; - The ratchet's lines: comments, blanks, a case and its verdicts; malformed
+;;;   lines, a verdict listed twice and a case named twice refused, naming the
 ;;;   line.
 ;;; - The index: the one agent the spec names, its verdicts in the run's order.
 ;;; - The gate: a run as the ratchet holds passes, in any order, with any of a
-;;;   field's alternatives; each kind of difference fails naming its case; a
-;;;   short run says why runs end short;
-;;;   anything it cannot read is a harness error, status 2.
+;;;   case's verdicts; each kind of difference fails naming its case; a run that
+;;;   lacks cases, an empty index among them (wstest's when no connection
+;;;   opened), says how many and why runs end short; anything it cannot read
+;;;   is a harness error, status 2.
+;;; - gate-main, gate.sps's body: its three paths in order; a wrong count, an
+;;;   unreadable path, or any raise at all, status 2.
 (import (rnrs) (srfi :64) (ws-testing) (ws-autobahn))
 
 ;; raised : (-> Any) -> (U (List 'refused String) (List 'returned Any))
@@ -50,16 +55,14 @@
 (define (gate-run spec ratchet index)
   (let-values (((port extract) (open-string-output-port)))
     (let ((status (autobahn-gate spec ratchet index port)))
-      (list status (lines (extract))))))
+      (list status (text-lines (extract))))))
 
-;; lines : String -> (Listof String)
-(define (lines s)
-  (let loop ((i 0) (start 0) (acc '()))
-    (cond ((= i (string-length s))
-           (reverse (if (< start i) (cons (substring s start i) acc) acc)))
-          ((char=? (string-ref s i) #\newline)
-           (loop (+ i 1) (+ i 1) (cons (substring s start i) acc)))
-          (else (loop (+ i 1) start acc)))))
+;; main-run : (Listof String) (String -> (U String #f)) -> (List Status (Listof String))
+;; gate-main's status and the lines it wrote.
+(define (main-run paths read)
+  (let-values (((port extract) (open-string-output-port)))
+    (let ((status (gate-main paths read port)))
+      (list status (text-lines (extract))))))
 
 (define spec
   "{\n  \"outdir\": \"/reports\",\n  \"servers\": [{\"agent\": \"chez-websocket\", \"url\": \"ws://127.0.0.1:9001\"}],\n  \"cases\": [\"*\"],\n  \"exclude-cases\": [\"12.*\", \"13.*\"],\n  \"exclude-agent-cases\": {}\n}\n")
@@ -92,7 +95,30 @@
 (define run (index-text "chez-websocket" (list ok-111 ns-32 ok-34 ok-731)))
 
 (define ratchet
-  "# A comment, then a blank line.\n\n1.1.1 OK OK 1000\n3.2 NON-STRICT OK 1002\n3.4 OK|NON-STRICT OK 1002|none\n7.3.1 OK OK none\n")
+  "# A comment, then a blank line.\n\n1.1.1 OK OK 1000\n3.2 NON-STRICT OK 1002\n3.4 OK OK 1002 | NON-STRICT OK 1002 | NON-STRICT OK none\n7.3.1 OK OK none\n")
+
+;; held : the ratchet's verdicts, as verdicts-parse gives them.
+(define held
+  '(("1.1.1" ("OK" "OK" "1000")) ("3.2" ("NON-STRICT" "OK" "1002"))
+    ("3.4" ("OK" "OK" "1002") ("NON-STRICT" "OK" "1002") ("NON-STRICT" "OK" "none"))
+    ("7.3.1" ("OK" "OK" "none"))))
+
+;; crlf : String -> String — each LF preceded by a CR.
+(define (crlf s)
+  (let-values (((port extract) (open-string-output-port)))
+    (string-for-each (lambda (c) (when (char=? c #\newline) (put-char port #\return)) (put-char port c)) s)
+    (extract)))
+
+(define held-34 "3.4: ratchet OK OK 1002 | NON-STRICT OK 1002 | NON-STRICT OK none")
+
+;; no-case-ran : -> (List Status (Listof String)) — the gate on a run of no case.
+(define (no-case-ran)
+  (list 1 (list "1.1.1: ratchet OK OK 1000, not in the run"
+                "3.2: ratchet NON-STRICT OK 1002, not in the run"
+                (string-append held-34 ", not in the run")
+                "7.3.1: ratchet OK OK none, not in the run"
+                "autobahn: 4 differences from the ratchet, of 4 cases"
+                "autobahn: 4 cases of the ratchet did not run: wstest ends a run at a connection that fails, and still exits 0, so its log says whether one did")))
 
 ;; run-with : String -> String — the run, with case 3.4's text replaced.
 (define (run-with c34) (index-text "chez-websocket" (list ok-111 ns-32 c34 ok-731)))
@@ -139,27 +165,38 @@
       '(refused "unexpected character at index 4")
       (raised (lambda () (json-read "[1, }"))))
 
-    ;; --- the ratchet's lines ----------------------------------------------------
+    ;; --- lines and the ratchet ---------------------------------------------------
 
-    (test-equal "the ratchet: comments and blank lines skipped, four fields a line, a field's alternatives"
-      '(("1.1.1" ("OK") ("OK") ("1000")) ("3.2" ("NON-STRICT") ("OK") ("1002"))
-        ("3.4" ("OK" "NON-STRICT") ("OK") ("1002" "none")) ("7.3.1" ("OK") ("OK") ("none")))
+    (test-equal "text-lines: a line a LF, a CR before it dropped, no line after the last LF"
+      '(("a" "b" "" "c") ("a") () ("a" ""))
+      (map text-lines (list "a\r\nb\n\nc" "a\n" "" "a\r\n\r\n")))
+
+    (test-equal "the ratchet: comments and blank lines skipped, a case and its verdicts, \" | \" between them"
+      held
       (verdicts-parse ratchet))
 
-    (test-equal "a line of three or five fields, two spaces, a code not digits, or a case twice, refused by line"
-      '((refused "line 2: not a case, behavior, behaviorClose and close code")
-        (refused "line 1: not a case, behavior, behaviorClose and close code")
-        (refused "line 1: not a case, behavior, behaviorClose and close code")
+    (test-equal "and read alike from a CRLF checkout"
+      held
+      (verdicts-parse (crlf ratchet)))
+
+    (test-equal "a line not a case and whole verdicts, a code not digits, a verdict or a case twice, refused by line"
+      '((refused "line 2: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
         (refused "line 1: a close code is digits or none")
         (refused "line 1: a close code is digits or none")
-        (refused "line 1: an alternative is empty")
-        (refused "line 1: an alternative is empty")
-        (refused "line 1: not a case, behavior, behaviorClose and close code")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: not a case and its verdicts")
+        (refused "line 1: a verdict is listed twice")
         (refused "line 3: case 1.1.1 is named twice"))
       (map (lambda (text) (raised (lambda () (verdicts-parse text))))
            '("1.1.1 OK OK 1000\n1.1.2 OK OK\n" "1.1.1 OK OK 1000 x\n" "1.1.1  OK OK 1000\n"
-             "1.1.1 OK OK 10a0\n" "1.1.1 OK OK 1000|x\n" "1.1.1 OK| OK 1000\n" "1.1.1 OK |OK 1000\n"
-             " OK OK 1000\n" "1.1.1 OK OK 1000\n# again\n1.1.1 OK OK 1000\n")))
+             "1.1.1 OK OK 10a0\n" "1.1.1 OK OK 1000 | OK OK x\n" "1.1.1 OK OK 1000 |\n"
+             "1.1.1 OK OK 1000 | OK OK\n" "1.1.1 OK OK 1000 || OK OK 1000\n" "1.1.1 OK OK 1000 x OK OK 1000\n"
+             " OK OK 1000\n" "1.1.1 OK OK 1000 | OK OK 1000\n" "1.1.1 OK OK 1000\n# again\n1.1.1 OK OK 1000\n")))
 
     ;; --- the index --------------------------------------------------------------------
 
@@ -199,24 +236,20 @@
       '(0 ("autobahn: 4 cases as the ratchet holds them: 3 OK, 1 NON-STRICT"))
       (gate-run spec ratchet (index-text "chez-websocket" (list ok-731 ok-34 ok-111 ns-32))))
 
-    (test-equal "a case of alternatives passes with each of them, tallied as the run has it"
+    (test-equal "a case of measured verdicts passes with each of them, tallied as the run has it"
       '((0 ("autobahn: 4 cases as the ratchet holds them: 2 OK, 2 NON-STRICT"))
-        (0 ("autobahn: 4 cases as the ratchet holds them: 3 OK, 1 NON-STRICT"))
         (0 ("autobahn: 4 cases as the ratchet holds them: 2 OK, 2 NON-STRICT")))
       (list (gate-run spec ratchet (run-with (case-text "3.4" "NON-STRICT" "OK" "1002")))
-            (gate-run spec ratchet (run-with (case-text "3.4" "OK" "OK" "null")))
             (gate-run spec ratchet (run-with (case-text "3.4" "NON-STRICT" "OK" "null")))))
 
-    (test-equal "and fails with a verdict it does not list, in any field"
-      '((1 ("3.4: ratchet OK|NON-STRICT OK 1002|none, run FAILED OK 1002"
-            "autobahn: 1 difference from the ratchet, of 4 cases"))
-        (1 ("3.4: ratchet OK|NON-STRICT OK 1002|none, run OK UNCLEAN 1002"
-            "autobahn: 1 difference from the ratchet, of 4 cases"))
-        (1 ("3.4: ratchet OK|NON-STRICT OK 1002|none, run OK OK 1000"
-            "autobahn: 1 difference from the ratchet, of 4 cases")))
+    (test-equal "and fails with any other, a pairing of their fields never measured too"
+      (map (lambda (run) (list 1 (list (string-append held-34 ", run " run)
+                                       "autobahn: 1 difference from the ratchet, of 4 cases")))
+           '("FAILED OK 1002" "OK UNCLEAN 1002" "OK OK 1000" "OK OK none"))
       (list (gate-run spec ratchet (run-with (case-text "3.4" "FAILED" "OK" "1002")))
             (gate-run spec ratchet (run-with (case-text "3.4" "OK" "UNCLEAN" "1002")))
-            (gate-run spec ratchet (run-with (case-text "3.4" "OK" "OK" "1000")))))
+            (gate-run spec ratchet (run-with (case-text "3.4" "OK" "OK" "1000")))
+            (gate-run spec ratchet (run-with (case-text "3.4" "OK" "OK" "null")))))
 
     (test-equal "a verdict changed either way, or a close code, fails naming the case"
       '(1 ("3.2: ratchet NON-STRICT OK 1002, run OK OK 1002"
@@ -231,25 +264,24 @@
            "autobahn: 1 difference from the ratchet, of 4 cases"))
       (gate-run spec ratchet (index-text "chez-websocket" (list (case-text "1.1.1" "OK" "UNCLEAN" "1000") ns-32 ok-34 ok-731))))
 
-    (test-equal "a case the run lacks, or the ratchet lacks, fails; a short run says why runs end short"
+    (test-equal "a case the run lacks, or the ratchet lacks, fails; a short run says how many, and why runs end short"
       '(1 ("3.2: ratchet NON-STRICT OK 1002, not in the run"
            "11.1.1: not in the ratchet, run OK OK 1000"
            "autobahn: 2 differences from the ratchet, of 4 cases"
-           "autobahn: a run ends at a connection that fails, and wstest still exits 0: see its log"))
+           "autobahn: 1 case of the ratchet did not run: wstest ends a run at a connection that fails, and still exits 0, so its log says whether one did"))
       (gate-run spec ratchet
                 (index-text "chez-websocket" (list ok-111 ok-34 ok-731 (case-text "11.1.1" "OK" "OK" "1000")))))
 
     (test-equal "a run of no case fails, every case missing"
-      '(1 ("1.1.1: ratchet OK OK 1000, not in the run"
-           "3.2: ratchet NON-STRICT OK 1002, not in the run"
-           "3.4: ratchet OK|NON-STRICT OK 1002|none, not in the run"
-           "7.3.1: ratchet OK OK none, not in the run"
-           "autobahn: 4 differences from the ratchet, of 4 cases"
-           "autobahn: a run ends at a connection that fails, and wstest still exits 0: see its log"))
+      (no-case-ran)
       (gate-run spec ratchet "{\"chez-websocket\": {}}"))
 
+    (test-equal "an empty index, wstest's when no connection opened, fails as a run of no case"
+      (no-case-ran)
+      (gate-run spec ratchet "{}"))
+
     (test-equal "what the gate cannot read is a harness error, status 2, naming the file"
-      '((2 ("autobahn: the ratchet: line 1: not a case, behavior, behaviorClose and close code"))
+      '((2 ("autobahn: the ratchet: line 1: not a case and its verdicts"))
         (2 ("autobahn: the ratchet holds no case"))
         (2 ("autobahn: the index: unexpected end at index 22"))
         (2 ("autobahn: the index: the index holds no agent chez-websocket"))
@@ -259,7 +291,25 @@
       (list (gate-run spec "1.1.1 OK\n" run)
             (gate-run spec "# nothing\n" run)
             (gate-run spec ratchet "{\"chez-websocket\": {\"1")
-            (gate-run spec ratchet "{}")
+            (gate-run spec ratchet (index-text "other" (list ok-111)))
             (gate-run "{\"servers\": []}" ratchet run)
             (gate-run "{\"servers\": [{\"agent\": \"a\"}, {\"agent\": \"b\"}]}" ratchet run)
-            (gate-run "{\"servers\": [{\"url\": \"ws://127.0.0.1:9001\"}]}" ratchet run)))))
+            (gate-run "{\"servers\": [{\"url\": \"ws://127.0.0.1:9001\"}]}" ratchet run)))
+
+    ;; --- gate-main ----------------------------------------------------------------------
+
+    (test-equal "gate-main reads its three paths in order; a wrong count, a path it cannot read, or any raise is status 2"
+      '((0 ("autobahn: 4 cases as the ratchet holds them: 3 OK, 1 NON-STRICT"))
+        (2 ("autobahn: usage: gate.sps SPEC RATCHET INDEX"))
+        (2 ("autobahn: usage: gate.sps SPEC RATCHET INDEX"))
+        (2 ("autobahn: idx cannot be read"))
+        (2 ("autobahn: the spec: unexpected character at index 0"))
+        (2 ("autobahn: the gate raised: boom")))
+      (let ((read (lambda (path) (let ((f (assoc path (list (cons "spec" spec) (cons "ratchet" ratchet) (cons "index" run)))))
+                                   (and f (cdr f))))))
+        (list (main-run '("spec" "ratchet" "index") read)
+              (main-run '("spec" "ratchet") read)
+              (main-run '("spec" "ratchet" "index" "index") read)
+              (main-run '("spec" "ratchet" "idx") read)
+              (main-run '("ratchet" "spec" "index") read)
+              (main-run '("spec" "ratchet" "index") (lambda (path) (assertion-violation 'read "boom"))))))))

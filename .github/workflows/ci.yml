@@ -14,6 +14,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      # A run by hand with a salt misses the Chez cache, so the setup
+      # action's build-and-save path runs: proven now, not at the next floor or
+      # image bump (M5's review). A push or a PR has none, and the key is the
+      # cache's usual one.
+      chez-cache-salt:
+        description: "Appended to the Chez cache key, to run its miss path"
+        required: false
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +49,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           token: ${{ secrets.SUBMODULES_READ_TOKEN }}
+          chez-cache-salt: ${{ inputs.chez-cache-salt }}
 
       - name: Test
         run: make test
@@ -59,6 +69,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           token: ${{ secrets.SUBMODULES_READ_TOKEN }}
+          chez-cache-salt: ${{ inputs.chez-cache-salt }}
 
       # The fuzzing client's 301 cases against tests/autobahn/echo.sps, gated
       # on tests/autobahn/verdicts.txt, both ways.

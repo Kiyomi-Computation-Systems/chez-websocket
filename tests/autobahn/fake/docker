@@ -1,0 +1,45 @@
+#!/bin/sh
+# A stand-in for docker, for tests/test-autobahn-run.sps alone: it plays the
+# fuzzing client's run as FAKE_DOCKER says, so run.sh's own checks are held
+# without Docker.  It reads the spec run.sh mounts at /config and writes an
+# index into the directory it mounts at /reports.
+#   pass     the spec's URL probed, then each case's first verdict in the
+#            ratchet (FAKE_RATCHET) written as the run's
+#   nothing  nothing written, exit 0
+#   kill     as pass, then the echo server killed (SIGKILL), by the pid run.sh
+#            records beside the reports
+#   fail     exit 125, as docker does when it cannot start a container
+#   term     run.sh told to stop (SIGTERM) while the run goes on, then exit 0
+config=; reports=; network=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v) case "$2" in
+          *:/config:ro) config=${2%:/config:ro} ;;
+          *:/reports) reports=${2%:/reports} ;;
+        esac
+        shift 2 ;;
+    --network) network=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "${FAKE_DOCKER:?}" in
+  fail) exit 125 ;;
+  nothing) exit 0 ;;
+  term) kill -TERM "$PPID"; exit 0 ;;
+esac
+url=$(sed -n 's#.*"url": "ws://\([^"]*\)".*#\1#p' "$config/fuzzingclient.json")
+# A GET of 1,000 bytes of header: the echo server answers 400 under its
+# defaults, a request that is no handshake, and 431 under a header limit of
+# 512, which a caller's environment would bring if it reached the server.
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Pad: $(printf '%01000d' 0)" "http://$url/")
+if [ "$network" = host ] && [ "$code" = 400 ]; then
+  awk 'BEGIN { printf "{\"chez-websocket\": {"; n = 0 }
+       /^#/ || /^$/ { next }
+       { printf "%s\"%s\": {\"behavior\": \"%s\", \"behaviorClose\": \"%s\", \"remoteCloseCode\": %s}",
+                (n++ ? ", " : ""), $1, $2, $3, ($4 == "none" ? "null" : $4) }
+       END { print "}}" }' "${FAKE_RATCHET:?}" > "$reports/index.json"
+else
+  echo '{}' > "$reports/index.json"
+fi
+if [ "$FAKE_DOCKER" = kill ]; then kill -9 "$(cat "$reports/../echo.pid")"; fi
+exit 0
