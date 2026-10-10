@@ -69,7 +69,14 @@ WS_ENV_VARS := CHEZ_WS_MAX_MESSAGE_BYTES CHEZ_WS_MAX_QUEUE CHEZ_WS_PING_INTERVAL
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
 SUITE_TIMEOUT ?= 120
 
-.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod clean
+# --- the Autobahn lane (M5, decision 0008) -----------------------------------
+# Autobahn|Testsuite's fuzzing client, from its image pinned by digest (built
+# for linux/amd64 alone, so Docker emulates it elsewhere), against
+# tests/autobahn/echo.sps on this host, gated on tests/autobahn/verdicts.txt.
+AUTOBAHN_IMAGE := crossbario/autobahn-testsuite:25.10.1@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074
+AUTOBAHN_PORT ?= 9001
+
+.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn clean
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -173,6 +180,10 @@ prod: submodules ## Rebuild chez-libuv's shim optimized, run the suite on it, an
 	$(MAKE) -C $(LIBUV_DIR) prod
 	$(MAKE) test FLAVOR=prod
 	$(MAKE) -C $(LIBUV_DIR) check-prod
+
+autobahn: build ## Run Autobahn's fuzzing client in Docker against tests/autobahn/echo.sps, gated on its verdicts
+	@CHEZ=$(CHEZ) LIBDIRS=$(LIBDIRS) IMAGE=$(AUTOBAHN_IMAGE) PORT=$(AUTOBAHN_PORT) OUT=$(BUILD_DIR)/autobahn \
+	  sh tests/autobahn/run.sh
 
 clean: ## Remove our build artifacts and the vendored shim
 	rm -rf $(BUILD_DIR)

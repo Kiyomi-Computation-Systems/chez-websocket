@@ -24,10 +24,11 @@ its code reads each message with a call that waits, sends, and closes. A client
 that stops reading is cut off after a timeout, unless pinging is off or the
 handler has stopped taking its messages. An idle connection costs the server
 about 8 KB. Each part is held to its RFC's test vectors and examples, and the
-binding on a real socket too. The Autobahn lane (M5) is next.
-No compression and no client.
-[[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]] will hold
-it to the RFC in CI. See [[file:.plans/2026-10-04-chez-websocket-project-brief.md][the project brief]],
+binding on a real socket too.
+[[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]] holds it
+to the RFC in CI (M5): an echo server built from it meets all 301 of its cases
+without compression, and a ratchet holds each case's verdict. v0.1.0 (M6) is
+next. No compression and no client. See [[file:.plans/2026-10-04-chez-websocket-project-brief.md][the project brief]],
 [[file:.plans/2026-10-04-chez-websocket-design.md][the design]] and
 [[file:.plans/2026-10-04-chez-websocket-milestone-plan.md][the milestone plan]].
 
@@ -42,8 +43,14 @@ pinned dependencies. All but chez-srfi are private.
 #+begin_src sh
 make submodules   # clone chez-http-server v0.4.1 and the pins it carries
 make test         # build chez-libuv's shim, check every pin, run the suites
+make autobahn     # Autobahn's 301 cases against an echo server, in Docker
 make help         # every target
 #+end_src
+
+=make autobahn= needs Docker. Autobahn's image is built for amd64, so Docker
+emulates it on other machines. On macOS the cases reach the echo server
+through Docker Desktop, and a run there sometimes stops short. The gate says
+so: run it again.
 
 ** License
 
