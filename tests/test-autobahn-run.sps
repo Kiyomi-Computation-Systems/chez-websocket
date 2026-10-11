@@ -8,7 +8,8 @@
 ;;; container path, on macOS and Windows, shares all of it but the echo
 ;;; server's start and stop.  There the fake plays the echo server's container
 ;;; too, so the wait is held to that container's own log, never the one the
-;;; last run left.
+;;; last run left, and a run that ends as its container starts, by a failed
+;;; start or a signal, is held to remove the network it made.
 ;;;
 ;;; Each run is a process of its own, as `make autobahn` starts one, on the
 ;;; Chez that runs the suites: CHEZ names it, as the Makefile's CHEZ does
@@ -70,6 +71,25 @@
         (lambda (port) (put-string port log))))
     (run-lane "container" name "pass"
               (string-append "ECHO_IMAGE=fake FAKE_ECHO=" echo " FAKE_STATE='" dir "/docker'"))))
+
+;; docker-left : String -> (List (Listof String) (Listof String))
+;; What the fake docker of the container run in out/name made, each a
+;; "network" or a "container", in the order it made them, and those of them
+;; still there.
+(define (docker-left name)
+  (let* ((state (string-append out "/" name "/docker"))
+         (made (map (lambda (line)
+                      (let find ((i 0))
+                        (cond ((= i (string-length line)) (list line ""))
+                              ((char=? (string-ref line i) #\space)
+                               (list (substring line 0 i) (substring line (+ i 1) (string-length line))))
+                              (else (find (+ i 1))))))
+                    (text-lines (read-text (string-append state "/made"))))))
+    (list (map car made)
+          (map car (filter (lambda (m)
+                             (file-exists? (string-append state (if (string=? (car m) "network") "/networks/" "/")
+                                                          (cadr m))))
+                           made)))))
 
 ;; said : (List Status (Listof String)) String -> (List Status (U String #f))
 ;; The status, and the first line that begins with `prefix`, or #f.
@@ -148,4 +168,14 @@
 
     (test-equal "and a container run on a tree with no log yet says nothing but the gate's line"
       (list 0 (list passed))
-      (container-lane "fresh" "listens" #f))))
+      (container-lane "fresh" "listens" #f))
+
+    (test-equal "and a container that cannot start is a harness error, its network and the container removed"
+      (list 2 '("fake docker: the container cannot start") '("network" "container") '())
+      (let ((result (container-lane "fails" "fails" #f)))
+        (append result (docker-left "fails"))))
+
+    (test-equal "and a run told to stop as its container starts takes the network and the container with it"
+      (list 143 '() '("network" "container") '())
+      (let ((result (container-lane "cterm" "term" #f)))
+        (append result (docker-left "cterm"))))))

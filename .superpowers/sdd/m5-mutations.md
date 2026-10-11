@@ -467,3 +467,102 @@ container starts more slowly than the echo server listens.
 
 Two `make autobahn` runs, the first from a fresh tree and the second over its log: status 0
 each, no `grep:` line, and no container or network left.
+
+## The container path's network removed (2026-10-11)
+
+Flagged by #71 and fixed in a PR of its own, cut from #71's head and moved onto main after its squash. Darwin 25.6.0 arm64 with macOS's sh
+(bash 3.2), and Linux aarch64 in `chez-libuv-noble-scratch:10.4.1` with dash. `run.sh` is blob
+aa97cfb (#71's cecc148), the fake 266a1ad (5377f84), the suite 14 checks, e917731 (a14ce59).
+Scratch `nl/`.
+- **The finding:** the container branch made its network, then started the container, and set
+  its traps only after that. So when `docker run -d` failed, `run.sh` exited 2 and left the
+  network. A signal before the traps left the network, and the container if one had started.
+- **The fix:** the traps are set as soon as `cleanup` is defined, right after the network is
+  made and before `docker run -d`. Any exit after that removes the network, and the container
+  if there is one.
+- **The checks:** the fake names each network and container it makes in `FAKE_STATE/made`, and
+  keeps a network in `FAKE_STATE/networks` until it is removed. Two new `FAKE_ECHO` modes:
+  - `fails`: the container is made, but its process cannot start. The fake exits 127 and leaves
+    the container, as Docker 29.2.1 does for an entrypoint that does not exist (measured: exit
+    127, the container left `Created`; an image that does not exist exits 125 and makes none).
+  - `term`: `run.sh` is told to stop (SIGTERM) as its container starts.
+
+  Each check reads what was made, by kind, and what of it is left:
+  - **R-CFAIL:** a container that cannot start is a harness error, `(2 ("fake docker: the
+    container cannot start") ("network" "container") ())`.
+  - **R-CTERM:** a run told to stop as its container starts takes both with it, `(143 ()
+    ("network" "container") ())`.
+
+### The test-first run
+
+The new suite and fake on #71's `run.sh`, named and hashed before (`d22ae7cc`): exit 1, the 12
+old checks green, the two new ones red:
+- **R-CFAIL** `(2 (…) ("network" "container") ("network" "container"))`: both left.
+- **R-CTERM** `(143 () ("network" "container") ("network" "container"))`: the TERM killed
+  `run.sh` before any trap.
+
+The first run was red by the wrong value. `made` read `()`, because the check built its value
+as `(append (container-lane …) (docker-left …))`, and Chez evaluated the read before the run. A
+`let` now puts the run first. The second run matched the prediction.
+
+### The mutants
+
+Run 1: 24 rows (the 18 of #71's run 1, re-predicted, and NL-1 to NL-6), 0 mismatches (specs,
+names and predictions hashed `da75c48c`). The runner is #71's. None of RM-1 to RM-10 or CW-1 to
+CW-7 reddens the new checks: each cut is before the network is made, after the container
+starts, or on the host path.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RM-1 … CW-7 | #71's 17 | as #71's run 1 | as named; RM-8 survives |
+| NL-1 | the traps set after the container starts (#71's order) | R-CFAIL, R-CTERM | as named |
+| NL-2 | the cleanup keeps the network | R-CFAIL, R-CTERM | as named |
+| NL-3 | the cleanup keeps the container | R-CFAIL, R-CTERM | as named |
+| NL-4 | the INT and TERM traps set after the container starts | none on macOS | as named, survived |
+| NL-5 | a failed start not caught | R-CFAIL | as named |
+| NL-6 | no INT trap on the container path | none | as named, survived |
+
+New checks and their killers, by value:
+- **R-CFAIL:** by NL-1, both left; NL-2, `("network")` left; NL-3, `("container")` left; and
+  NL-5, by its lines, which gain "autobahn: the echo server ended before it listened:".
+- **R-CTERM:** by NL-1 and NL-2, and by NL-3 with `("container")` left.
+
+The survivors:
+- **NL-4, a platform scope.** macOS's sh (bash 3.2) runs the EXIT trap on a fatal TERM, so moving
+  the EXIT trap up is enough there. Dash does not (below).
+- **NL-6, a scope.** No check sends INT, on either path. The host path's R-TERM holds TERM
+  alone too.
+
+### Under dash
+
+In the Linux container, the suite ran on four `run.sh` variants, named and hashed before
+(`c67766dd`). Each red set was as named:
+- **BASE:** 14 passes.
+- **NL-1:** 12 passes, R-CFAIL and R-CTERM red, both left.
+- **NL-3:** 12 passes, R-CFAIL and R-CTERM red, `("container")` left.
+- **NL-4:** 13 passes, R-CTERM alone red, both left. So the INT and TERM traps' place is held
+  under dash.
+
+One value differed from what was named. In NL-1 and NL-4, R-CTERM's lines are `("Terminated")`,
+not `()`. Dash's outer `sh -c` reports the killed `run.sh` while the command's `> log`
+redirection is still in place, so its line lands in the run's log. Bash prints its own line to
+the suite's stderr.
+
+### On real Docker
+
+Docker Desktop 29.2.1. Each probe calls `run.sh` with `make autobahn`'s environment, named and
+hashed before (`cca02d22`). It cuts the run short, then lists what is left under the run's name.
+
+| probe | #71's `run.sh` | the fixed one |
+|---|---|---|
+| an image that does not exist | 2, its network left | 2, nothing left |
+| an image whose entrypoint does not exist | 2, the network and a `Created` container left | 2, nothing left |
+| TERM once the network exists, as `docker run -d` runs | 143, the network and a running container left | 143, nothing left |
+
+Two `make autobahn` runs, the first from a fresh tree and the second over its log: status 0
+each, no `grep:` line, and no container or network left.
+
+Not changed: a signal while `docker network create` itself runs still leaves the network, if
+Docker has made it. Defining `cleanup` and setting the traps above the create would close that
+too. But then a failed create would run `docker network rm` on whatever network has the name.

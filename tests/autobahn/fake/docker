@@ -17,15 +17,31 @@
 #            its second, the host and port it was given; it runs until
 #            stopped, and its log then says `stopped`
 #   ends     ended before it listened, its log saying so
+#   fails    made, but its process cannot start: exit 127, the container left
+#            behind, as docker leaves one whose entrypoint does not exist
+#            (Docker 29.2.1)
+#   term     run.sh told to stop (SIGTERM) as its container starts
 # There the probe asks that a read of the container's log has shown it
-# listening before the fuzzing client runs.
+# listening before the fuzzing client runs.  Each network and container it
+# makes is named in FAKE_STATE/made, a network kept in FAKE_STATE/networks
+# until it is removed.
 container() { c=${FAKE_STATE:?}/$1; [ -d "$c" ] || { echo "fake docker: no such container: $1" >&2; exit 1; }; }
 for last; do :; done
 case "$1" in
-  network) exit 0 ;;
+  network)
+    n=${FAKE_STATE:?}/networks/$last
+    case "$2" in
+      create) mkdir -p "$FAKE_STATE/networks" && : > "$n" && echo "network $last" >> "$FAKE_STATE/made" ;;
+      rm) [ -e "$n" ] || { echo "fake docker: no such network: $last" >&2; exit 1; }; rm "$n" ;;
+    esac
+    exit ;;
   logs)
     container "$last"
-    if [ "${FAKE_ECHO:?}" = ends ]; then echo "fake: the echo server ended before it listened"; exit 0; fi
+    case "${FAKE_ECHO:?}" in
+      ends) echo "fake: the echo server ended before it listened"; exit 0 ;;
+      listens) ;;
+      *) exit 0 ;;
+    esac
     reads=$(($(cat "$c/reads") + 1)); echo "$reads" > "$c/reads"
     if [ "$reads" -ge 2 ]; then cat "$c/listen"; : > "$c/shown"; fi
     if [ -e "$c/stopped" ]; then echo stopped; fi
@@ -59,8 +75,13 @@ done
 if [ -n "$detached" ]; then
   mkdir -p "${FAKE_STATE:?}/$name" &&
     echo "listening $host $port" > "$FAKE_STATE/$name/listen" &&
-    echo 0 > "$FAKE_STATE/$name/reads" ||
+    echo 0 > "$FAKE_STATE/$name/reads" &&
+    echo "container $name" >> "$FAKE_STATE/made" ||
     exit 125
+  case "${FAKE_ECHO:?}" in
+    fails) echo "fake docker: the container cannot start" >&2; exit 127 ;;
+    term) kill -TERM "$PPID" ;;
+  esac
   exit 0
 fi
 case "${FAKE_DOCKER:?}" in
