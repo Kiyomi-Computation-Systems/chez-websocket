@@ -2288,3 +2288,15 @@ NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-
 - `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok; `make check-help` passes. Rebased onto #76's squash and its reflect, 395, its R-TERM check among them, every pin ok.
 
 NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run. The server's next release pinned here alone.
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **S-LETGO's 2.9 KB, explained**, #77 (the entry above).
+- **The rebases.** #76 merged (96f6285) as #77's merge was asked for, and the merge was refused for a conflict. Both entries had been appended to this ledger. #77 was rebased onto 96f6285, keeping both entries. Then #76's reflect landed (0b90231), and #77 was rebased onto that too. The five files besides the ledger were proved byte-identical to the reviewed head's (7aa4440). The ledger only gained lines, and `make test` passed on each rebased tree, 395. The final head, 32e6944, was pushed with the lease read from `ls-remote`.
+- **The squash.** 32e6944 squashed as 05d6dbf, on 0b90231, with `--match-head-commit` on the full SHA. Its tree, 1b8186d, is the tested head's.
+- **CI.** Billing-blocked. Each run's `linux` and `autobahn` jobs were not started (0 steps, the payments annotation): the PR's 38175693664 (7aa4440) and 38178529477 (32e6944), and main's 38178554139 on the squash. The Darwin runs stood in, as the PR body said. It merged past the red check on the owner's word.
+- **Branches.** `docs/drain-retention-explained` was deleted on the remote by the merge, and locally once this reflect's worktree was detached at 05d6dbf. The worktree is removed after the push. No PR is open.
+
+**Reflect.** Two sessions appended to this ledger at once. Each rebase kept both entries, and the files under review were proved unchanged by it. Re-read main, and the open PRs, right before the merge, not only before the PR.
+
+`make test` green on main (05d6dbf, Darwin arm64): fifteen suites, 395 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The host path's old-log race, from its task. The second review's seven findings left unfixed. The server's next release (the wake-value fix, its decision 0027, the signal fix) pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.
