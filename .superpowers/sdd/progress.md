@@ -2073,3 +2073,24 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the containe
 `make test` green on main: fourteen suites, 384 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: the network-leak fix's PR, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
+
+---
+
+**The container path's network removed when its run ends early (2026-10-11),** on the owner's ask, the task #71 flagged. Branch `fix/autobahn-network-leak`, cut from #71's head (16cc5cc) while #71 was open, then moved onto main's fcbc598 once #71 was squashed as ebb5c1f, whose tree is 16cc5cc's; one PR.
+- **Found** in #71. `run.sh`'s container branch made its network, started the container, and only then set its traps. When `docker run -d` failed, `run.sh` exited 2 and left the network. The owner measured it with an image that does not exist. A signal before the traps left the network too, and the container if it had started.
+- **Landed:**
+  - `run.sh` sets its traps as soon as `cleanup` is defined, right after the network is made and before `docker run -d`.
+  - `tests/autobahn/fake/docker` names each network and container it makes in `FAKE_STATE/made`, and keeps a network in `FAKE_STATE/networks` until it is removed. It gains `FAKE_ECHO=fails` (made, cannot start, exit 127, the container left, as Docker 29.2.1 does) and `FAKE_ECHO=term`.
+  - `tests/test-autobahn-run.sps` gains R-CFAIL and R-CTERM. Each reads what was made, by kind, and what of it is left.
+- **Watched to fail** (`m5-mutations.md`, its last section):
+  - Test-first, on #71's `run.sh`: the two new checks red as named, the 12 old ones green. The first run was red by the wrong value: the check read the state before the run (`append`'s arguments have no order). A `let` fixed it.
+  - 24 rows (#71's 18 and NL-1 to NL-6), 0 mismatches. NL-4 (the INT and TERM traps after the start) survives on macOS, whose sh runs the EXIT trap on a fatal TERM; dash does not, and it reddens R-CTERM there. NL-6 (no INT trap) survives: no check sends INT. RM-8 survives, as before.
+  - Under dash: #71's `run.sh`, NL-3 and NL-4 redden as named.
+  - Real Docker: #71's `run.sh` left the network for a missing image, the network and a `Created` container for a missing entrypoint, and the network and a running container for a TERM during `docker run -d`. The fixed one left nothing in each.
+- **Seen, not changed:** a signal while `docker network create` itself runs can still leave the network. Setting the traps above the create would close it, at the cost of a failed create removing a network of that name.
+- **CI did not run:** GitHub Actions is billing-blocked through October, by the owner's word. Stood in for:
+  - **the `linux` job,** by `make test` in `chez-libuv-noble-scratch:10.4.1` (Linux 6.12 aarch64, dash, libuv 1.48.0): fourteen suites and 386;
+  - **the `autobahn` job,** which runs the host path, whose code is unchanged. Its checks pass under dash. The container path changed, and `make autobahn` on macOS passed twice, from a fresh tree and then over its log, with nothing left.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 386 expected passes, every pin ok.
+
+NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.

@@ -99,7 +99,13 @@ case "$ECHO_AT" in
     # before the container's log is fetched, then finds a file.
     : > "$out/server.log" || exit 2
     docker network create "$name" > /dev/null || exit 2
+    # Once the network is made, whatever ends the run, a container that
+    # cannot start, a signal or an error, the network goes with it, and the
+    # container if there is one.
     cleanup() { docker rm -f "$name" > /dev/null 2>&1; docker network rm "$name" > /dev/null 2>&1; }
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     docker run -d --name "$name" --network "$name" -e CHEZ_HTTP_HOST=0.0.0.0 -e CHEZ_HTTP_PORT=9001 \
       -e CHEZ_WS_MAX_MESSAGE_BYTES=16777216 "$ECHO_IMAGE" > /dev/null || exit 2
     echo_alive() {
@@ -111,9 +117,6 @@ case "$ECHO_AT" in
       docker stop --time 30 "$name" > /dev/null
       docker logs "$name" > "$out/server.log" 2>&1
     }
-    trap cleanup EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
     port=$(wait_listening "$out/server.log") || exit 2
     url="ws://$name:$port"
     network=$name
