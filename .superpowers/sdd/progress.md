@@ -1943,3 +1943,12 @@ NEXT, when CI is back:
 2. The R-TERM probe, then its fix.
 3. The chez-http-server slice for the lost close (design §9), its release pinned here alone, and `none` measured again for 3.4 and 4.2.5.
 4. M6, v0.1.0.
+
+---
+
+**SC-1's record brought up to date (2026-10-11),** on the owner's ask, once chez-http-server #163 had merged as 5f97368. Branch `docs/sc-1-killed-by-server`, cut from 42d5c73. Records only.
+- **What changed upstream.** #66 left SC-1, a taker's deadline armed by the loop's time not brought up to date, as a scope statement: no suite here or in the server saw it. The server's #163 adds a shell check that SC-1 reddens by value (the deadline `0` ms past the stale time, where the check wants at least 300), recorded in its `m8-mutations.md`.
+- **Here.** `m4-mutations.md` gains a dated update under SC-1's note; the run's table is left as it was measured. SC-1 is still a scope statement in this repository: the socket suite times by the loop's clock, and the pin, v0.4.1 (520f70e), predates the server's check. No pin moves: #163 changed only the server's tests.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. Nothing tested changed.
+
+NEXT, unchanged from M5's reflect: main's run on 61be5e7 when CI is back (the block is intermittent: the server's #163 ran and passed on 2026-10-11, while main's runs there were still refused); the R-TERM probe, then its fix; the chez-http-server slice for the lost close; M6, v0.1.0.
