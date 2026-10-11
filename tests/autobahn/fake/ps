@@ -1,15 +1,35 @@
 #!/bin/sh
-# A stand-in for ps, for tests/test-autobahn-run.sps alone: the real ps, but
-# an echo server the fake docker holds lingering (its pid in $OUT/lingers),
-# stopped, reads as `Zl`.  That is how Linux showed a server whose main thread
-# had exited while its io_uring thread (libuv's) still ran: ended, but not
-# yet a process its parent can reap (R-TERM's probe, 2026-10-11).
-out=$(/bin/ps "$@")
+# A stand-in for ps, for tests/test-autobahn-run.sps alone: it answers as the
+# ps on PATH after it, but for an echo server the fake docker holds lingering,
+# stopped, its pid the first line of $FAKE_LINGERS.  That one reads as `Zl`,
+# as Linux showed a server whose main thread had exited while libuv's io_uring
+# thread still ran: ended, but not yet a process its parent can reap (R-TERM's
+# probe, 2026-10-11).  The second time it is asked about, it is continued, so
+# a run that keeps asking sees it end, and one that took the first `Zl` for
+# gone has returned with it still there.
+real=
+rest=$PATH
+while [ -n "$rest" ]; do
+  d=${rest%%:*}
+  case "$rest" in *:*) rest=${rest#*:} ;; *) rest= ;; esac
+  if [ -x "${d:-.}/ps" ] && ! [ "${d:-.}/ps" -ef "$0" ]; then real=${d:-.}/ps; break; fi
+done
+[ -n "$real" ] || { echo "fake ps: no ps on PATH after this one" >&2; exit 127; }
+pid=
+prev=
+for a; do
+  [ "$prev" != -p ] || pid=$a
+  prev=$a
+done
+out=$("$real" "$@")
 status=$?
-for last; do :; done
-if [ -n "${OUT:-}" ] && [ -f "$OUT/lingers" ] && [ "$(cat "$OUT/lingers")" = "$last" ]; then
+if [ -n "$pid" ] && [ -f "${FAKE_LINGERS:-}" ] && [ "$(head -1 "$FAKE_LINGERS")" = "$pid" ]; then
   case "$(printf '%s' "$out" | tr -d ' ')" in
-    T*) out=Zl ;;
+    T*)
+      out=Zl
+      echo asked >> "$FAKE_LINGERS"
+      [ "$(grep -c '^asked$' "$FAKE_LINGERS")" -lt 2 ] || kill -CONT "$pid"
+      ;;
   esac
 fi
 [ -z "$out" ] || printf '%s\n' "$out"

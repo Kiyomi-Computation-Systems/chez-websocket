@@ -10,9 +10,9 @@
 #            records beside the reports
 #   fail     exit 125, as docker does when it cannot start a container
 #   term     run.sh told to stop (SIGTERM) while the run goes on, then exit 0;
-#            first the echo server is held lingering for 500 ms: stopped, and
-#            named in lingers beside echo.pid, so the fake ps reads it as
-#            ended though its parent cannot reap it yet
+#            first the echo server is held lingering: stopped, and named in
+#            FAKE_LINGERS, so the fake ps reads it as ended though its parent
+#            cannot reap it yet, until it is asked about a second time
 #
 # On the container path it plays the echo server's container too, as
 # FAKE_ECHO says, keeping each container's state under FAKE_STATE:
@@ -92,8 +92,7 @@ case "${FAKE_DOCKER:?}" in
   nothing) exit 0 ;;
   term)
     pid=$(cat "$reports/../echo.pid")
-    kill -STOP "$pid" && echo "$pid" > "$reports/../lingers"
-    (sleep 0.5; kill -CONT "$pid") > /dev/null 2>&1 &
+    kill -STOP "$pid" && echo "$pid" > "${FAKE_LINGERS:?}"
     kill -TERM "$PPID"; exit 0 ;;
 esac
 url=$(sed -n 's#.*"url": "ws://\([^"]*\)".*#\1#p' "$config/fuzzingclient.json")
