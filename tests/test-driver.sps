@@ -305,10 +305,11 @@
     (let* ((t (make-taker))
            (sh (connect t none echo handshake)))
       (transport-close! (taker-transport t))
+      (fake-shell-deliver! sh '(eof))
       (fake-shell-settle! sh)
       (let* ((log (log-of t))
              (failures (fake-shell-taker-failures sh)))
-        (test-equal "the stream closed while the thunk waits: its wait raises &client-closed, which is no taker failure"
+        (test-equal "the stream closed while the thunk waits, the client then ending: its wait raises &client-closed, which is no taker failure"
           '((closed client-closed) ()) (list log failures))))
 
     (let* ((t (make-taker))

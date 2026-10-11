@@ -1906,3 +1906,42 @@ server pinned at v0.4.1 (520f70e).
   section: Darwin, Linux aarch64 and x86_64. Here SC-1 is still a scope statement. The
   socket suite times by the loop's clock and cannot see it, and the pin, v0.4.1 (520f70e),
   predates the check.
+
+## Before the server's v0.5.0 pin — D-OUTSIDE's client ends
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`), libuv 1.52.1,
+2026-10-11.
+- **Why:** the server's v0.5.0 (02ef95d) closes a taken stream as it closes its own
+  connections (its decision 0026): the taker is read nothing more, the stream reads on and
+  drops what comes, and once the writes are out it shuts its write side and lingers until
+  the client's end, a read error or `CHEZ_HTTP_LINGER_TIMEOUT`. Its test fake's door closes
+  the same way. Main's suites on v0.5.0: fourteen suites, the driver suite 14 of 15, every
+  other suite's count main's. D-OUTSIDE closed the stream while the thunk waited, with the
+  client still there, and read the log at once: `(() ())` where `((closed client-closed)
+  ())`.
+- **The code:** `tests/test-driver.sps` (blob 98f082b): D-OUTSIDE delivers the client's end
+  (`'(eof)`) after the close and before it settles. Its expected value is main's.
+- **The servers:** v0.4.1, the pin (520f70e, its fake blob c355517); v0.5.0 (02ef95d, its
+  fake blob 4be8e21), the gitlink staged in a second worktree.
+- **The runner** is new, `run.py` (sha256 6e2bde46…): a fake row is a shadow copy of the
+  server's `tests/fake-shell.sls`, one exact edit in it, first on the suites' path; a test
+  row runs an edited copy of the suite. The driver suite alone. Each red set and its values
+  were named and hashed before the run (sha256 86744b98…).
+
+### The mutants
+
+| Row | Mutant | Red on v0.5.0 | Red on v0.4.1 |
+|---|---|---|---|
+| B-0 | none (the shadow unedited) | none, 15 | none, 15 |
+| FV-0 | D-OUTSIDE without the client's end (main's check) | D-OUTSIDE, `(() ())` | none, 15 |
+| FV-END | the fake's client end while the stream closes does not close it | D-OUTSIDE, `(() ())` | not run: no such path |
+| M-18 | the close tells no wait | D-OUTSIDE `((closed) ())`, D-RAISE-DL | the same |
+| M-19 | the close's `&client-closed` counted a failure | D-OUTSIDE (a condition in the failures), D-RAISE-DL | the same |
+| M-20 | the taker's close call is not made | D-BEHIND, D-ABORT, D-OUTSIDE `((client-closed) ())`, D-RAISE-DL, D-RAISE-THUNK | the same |
+
+- **One run, 11 rows, 0 mismatches.** M-18 to M-20 are M4.2's mutants of the same name, at
+  the same text in both fakes.
+- **On v0.4.1 the client's end is inert:** its fake reads nothing once the close is asked
+  for, so the check is main's there, with main's killers.
+- **On v0.5.0 the end is what closes the stream:** without it (FV-0), or with a fake that
+  drops it (FV-END), nothing closes.
