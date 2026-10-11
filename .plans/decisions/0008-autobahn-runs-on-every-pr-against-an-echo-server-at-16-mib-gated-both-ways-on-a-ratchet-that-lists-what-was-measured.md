@@ -4,7 +4,7 @@ Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, each the recommended: "Here and in
 CI", then "16 MiB", "Server slice after the lane" and "Every PR and push", then "List what
 was measured"). Amended 2026-10-10, M5's review: "Container on Docker Desktop", "Keep both
-building on a miss".
+building on a miss". Amended 2026-10-11, after the server's v0.5.0 pin: "Drop none".
 Plan: [the milestone plan](../2026-10-04-chez-websocket-milestone-plan.md) M5
 Design: [the design](../2026-10-04-chez-websocket-design.md) §8, §9
 
@@ -159,3 +159,27 @@ Two forms decided the choices among them, each the recommended.
 - **The tally and the suite's line reader** share `(ws-autobahn)`'s code.
 
 `make test`: fourteen suites, 381 expected passes. The mutants are in `m5-mutations.md`.
+
+## Amendment of 2026-10-11 (the server's v0.5.0): `none` dropped
+
+Item 6's slice is done. The server's v0.5.0 (02ef95d) half-closes a taken stream and
+lingers until the client's end (its decision 0026), and #69 pinned it here. Measured the
+same day, v0.4.1 the control (the [research record](../research/2026-10-09-autobahn-lane.md)'s
+last section):
+- **Autobahn's 3.4, 4.1.5 and 4.2.5** on Linux, alone, 240 runs a server: v0.4.1 lost the
+  1002 in 1 of 720 tries, v0.5.0 in none. M5's NON-STRICT rate came back only with the echo
+  server contending for a CPU.
+- **M5's raw clients:** on macOS v0.4.1 lost the 1009 in 30 of 100 connections, each ending
+  in an error; v0.5.0 in none, each ending cleanly. On Linux v0.4.1 read it in all 100, but
+  6 ended in a reset; v0.5.0 none.
+
+**Decided by form, "Drop none"** (the recommended): 3.4 and 4.2.5 list OK OK 1002 and
+NON-STRICT OK 1002, the verdicts v0.5.0 was measured to give, as item 5 asks. A run that
+loses a 1002 again fails the gate. Weighed: keeping `none` listed, which records the
+measures and lets such a run pass.
+- As a check of the lost close the gate is weak: on Linux even v0.4.1 lost the 1002 once
+  in 720 tries. The server's shell suite holds the linger itself.
+- The gate, run on a full run's index with one case's close code `null`: refused for 3.4
+  and 4.2.5 on the new ratchet, passed on the old; refused for 4.1.5 on both
+  (`m5-mutations.md`).
+- Consequences' last line no longer holds: a client still sending reads the close.

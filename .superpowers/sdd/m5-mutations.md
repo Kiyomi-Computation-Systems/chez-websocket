@@ -337,3 +337,35 @@ on #64's first head (`5dcef89`), named and hashed before (`da330889`): R-NOSTART
 the server alive only when ps shows it and not as a zombie (`2160a781`): 9 of 9 under dash
 in 9 s, and under macOS's sh. `run.sh`'s 11 rows run again on the fix: as in run 1, RM-8 the
 one survivor.
+
+## The ratchet drops `none` (2026-10-11)
+
+After the server's v0.5.0 pin (#69), by form ("Drop none"; decision 0008's amendment of
+2026-10-11). Darwin 25.6.0 arm64, Docker Desktop 29.2.1. The measures are the research
+record's last section; scratch `ws-none/`.
+- **The change:** `tests/autobahn/verdicts.txt` lists 3.4 and 4.2.5 as `OK OK 1002 | NON-STRICT
+  OK 1002`, without `NON-STRICT OK none`, and its note says why.
+- **The oracle:** the gate itself, `tests/autobahn/gate.sps`, on lane run 2's `index.json`:
+  301 cases, every one as the ratchet holds it, the echo server at v0.5.0. Each row turns one
+  case's verdict to `NON-STRICT OK null` and runs the gate against the new ratchet or main's.
+  Each row's status and line were named and hashed before the run (`c00c7d2c`).
+
+| Row | Index | Ratchet | Status, as named |
+|---|---|---|---|
+| G-0 | as run | new | 0 |
+| G-1 | 3.4 `null` | new | 1: "3.4: ratchet OK OK 1002 \| NON-STRICT OK 1002, run NON-STRICT OK none" |
+| G-2 | 3.4 `null` | main's | 0 |
+| G-3 | 4.2.5 `null` | new | 1: the same line for 4.2.5 |
+| G-4 | 4.2.5 `null` | main's | 0 |
+| G-5 | 4.1.5 `null` | new | 1: the same line for 4.1.5 |
+| G-6 | 4.1.5 `null` | main's | 1: the same line; 4.1.5 never listed `none` |
+
+- **One run, 7 rows, 0 mismatches.** The ratchet's edit is what refuses a lost 1002 in 3.4
+  and 4.2.5; 4.1.5 refused it already.
+- **The lane on the new ratchet:** three full `make autobahn` runs, each status 0, every
+  case as held.
+- **The measures' predictions,** named and hashed before each cell (`ws-none/predict.txt`).
+  Two were wrong, both for v0.4.1: a CPU quota of 0.25 did not raise NON-STRICT, since a
+  mostly idle server never spends it; and 150 contended runs gave no `none`, where at least 2
+  were named. The raw probes' v0.4.1 row on macOS read the close 70 times in 100, where at
+  most a few were named (M5: 0). Each v0.5.0 prediction held.
