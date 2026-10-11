@@ -1998,3 +1998,15 @@ NEXT: the PR, and the pin to the server's v0.5.0 (02ef95d) stacked on it, alone.
   The pins are checked on the host, since one image has no git.
 
 NEXT: the PRs; the closing ritual when the owner asks, bottom-up, #68 then this. Then `none` measured again for 3.4, 4.1.5 and 4.2.5 on Linux, and design §9, decision 0008's item 6 and the ratchet's note brought up to date.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the fit and the server's v0.5.0 pin, as two stacked PRs** (the two entries above), bottom-up.
+- **#68, D-OUTSIDE's client ends:** b8e1ff9 squashed as 05cca1c (tree 625bd05, the tested head's; parent 2879eb0). It merged without `--delete-branch`, since #69 was based on it.
+- **#69, the pin:** retargeted to main and rebased from b8e1ff9 onto 05cca1c, 7de17de becoming c83ea8e (tree 6f7e6ab, unchanged), pushed with the lease read from `ls-remote`. It squashed as 99d7cd9 (tree 6f7e6ab; parent 05cca1c), its gitlink 02ef95d.
+- **CI.** Billing-blocked throughout. Every run ended with both jobs, `linux` and `autobahn`, not started (0 steps, the payments annotation): the PRs' 38154991308 (b8e1ff9) and 38155258780 (7de17de), the rebased head's 38156549518 (c83ea8e), and main's on each squash, 38156521949 (05cca1c) and 38156588688 (99d7cd9). The entries' local runs stood in: Darwin, and Linux aarch64 and x86_64 in containers, fourteen suites and 381 each. The two merged past the red check on the owner's word.
+- **Branches.** Both deleted, local and remote, and the fit's worktree removed. This reflect is committed from the pin's worktree, detached at 99d7cd9. The main checkout is fast-forwarded after it, its submodules brought to the new pins. No PR is open.
+
+`make test` green on main: fourteen suites, 381 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: `none` measured again for 3.4, 4.1.5 and 4.2.5 on Linux, each case alone, 30 runs, as M5 measured them; then design §9, decision 0008's item 6 and the ratchet's note brought up to date. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
