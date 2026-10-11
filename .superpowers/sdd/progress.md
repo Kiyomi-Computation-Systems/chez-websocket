@@ -2010,3 +2010,19 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the fit and 
 `make test` green on main: fourteen suites, 381 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: `none` measured again for 3.4, 4.1.5 and 4.2.5 on Linux, each case alone, 30 runs, as M5 measured them; then design §9, decision 0008's item 6 and the ratchet's note brought up to date. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
+
+---
+
+**The ratchet drops `none` for 3.4 and 4.2.5, measured on the server's v0.5.0 (2026-10-11),** on the owner's "let's re-measure none for 3.4, 4.1.5 and 4.2.5", after the v0.5.0 pin (#69). Branch `test/ratchet-drops-none`, cut from 96138ce; one PR.
+- **Measured** (the research record's last section; scratch `ws-none/`), v0.4.1 (2879eb0's tree) the control, each cell's predictions named and hashed before it ran. The echo server in a Linux container on `ab-net`, the ten bad-frame cases alone, M5's flips.
+  - **As M5 ran them**, 30 runs a server: no `none` on either, and NON-STRICT on 3.4, 4.1.5 and 4.2.5 only 1 and 4 times in 90, where M5 saw 37. Run so, the cases cannot tell the servers apart.
+  - **The echo held to 0.25 CPU**: no change; a mostly idle server never spends its quota.
+  - **The echo and a busy loop on one CPU** brought M5's rate back: 30 runs, then 150 in alternating blocks of 50. In all, 720 tries a server: v0.4.1 lost the 1002 once (3.4), v0.5.0 never.
+  - **M5's raw clients**, a 4 MiB frame against a 1 MiB cap. On macOS v0.4.1 lost the close in 30 of 100 connections, every one ending in an error; v0.5.0 in none, every one ending cleanly. On Linux both read it in all 100, but 6 of v0.4.1's ended in a reset and none of v0.5.0's.
+- **DECIDED by form: "Drop none (Recommended)".** 3.4 and 4.2.5 list `OK OK 1002 | NON-STRICT OK 1002`, the verdicts v0.5.0 was measured to give, as decision 0008's item 5 asks. Weighed: keeping `none` listed. As a check of the lost close the gate is weak, since on Linux even v0.4.1 lost the 1002 once in 720 tries; the server's shell suite holds the linger.
+- **Watched to fail** (`m5-mutations.md`): the gate on a full run's index, one case's close code `null`. Refused for 3.4 and 4.2.5 on the new ratchet, passed on main's; refused for 4.1.5 on both. 7 rows, 0 mismatches. Three full `make autobahn` runs passed on the new ratchet.
+- **Records:** the ratchet and its note; decision 0008's amendment of 2026-10-11 (item 6 done, `none` dropped); design §9's lost close done; the research record's new section.
+- **Found on the way, not fixed here:** in `run.sh`'s container path, `wait_listening` reads the last run's `server.log` before `docker logs` rewrites it, so a later run's wait can end before the new container listens. A task was flagged for it.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash): fourteen suites and 381, `run.sh`'s suite 9 of 9.
+
+NEXT: the PR; the closing ritual when the owner asks. Then, when CI is back, main's latest run; the R-TERM probe, then its fix; M6, v0.1.0.

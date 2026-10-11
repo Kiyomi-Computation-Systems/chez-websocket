@@ -474,7 +474,12 @@ is refused.
   close, in 100 of 100 tries; on Linux 14 of 100 ended in a reset. The server's HTTP
   closes half-close and linger for this (its decision 0011); a taken stream's close does
   not. **Decided by form** (0008): a chez-http-server slice after the lane, its release
-  pinned here alone.
+  pinned here alone. **Done** (2026-10-11): the server's v0.5.0 half-closes a taken stream
+  and lingers (its decision 0026), pinned by #69. On macOS a client still sending read the
+  close in 100 of 100 tries, where v0.4.1 read it in 70, every one ending in an error. The
+  close timeout bounds the close's writes; after them the server's linger,
+  `CHEZ_HTTP_LINGER_TIMEOUT` (30 s), bounds the wait for the client's close. The ratchet no
+  longer lists `none` (0008's amendment of 2026-10-11).
 
 - **`Origin`**: decided in M4.1, by form: the request's own host by default (0003,
   §3).

@@ -125,3 +125,46 @@ once its writes are done (`shell.sls`), with no half-close.
   4.2.5 are among the ratchet's whole verdicts.
 - **CI's job start:** a job started 3 to 4 s after its run was created, and its `Set up job`
   took 1 s (runs 38016701245, 38016703127).
+
+## Measured again on the server's v0.5.0 (2026-10-11)
+
+The server's v0.5.0 (02ef95d, pinned here by #69) half-closes a taken stream and lingers
+(its decision 0026). Measured the same day against v0.4.1 (520f70e, this repository at
+2879eb0) as the control. Darwin 25.6.0 arm64, Docker Desktop 29.2.1 (8 CPUs). The echo
+server is `tests/autobahn/echo.sps` in `chez-libuv-noble-scratch:10.4.1` (aarch64, libuv
+1.48.0, the prod shim) on the network `ab-net`, and Autobahn emulated. The runs are M5's
+flips: the ten bad-frame cases, one wstest a run.
+
+**3.4, 4.1.5 and 4.2.5, three tries a run:**
+
+| cell | runs a server | v0.4.1 NON-STRICT | v0.4.1 no close | v0.5.0 NON-STRICT | v0.5.0 no close |
+|---|---|---|---|---|---|
+| as M5 | 30 | 1 of 90 | 0 | 4 of 90 | 0 |
+| the echo held to 0.25 CPU | 30 | 3 of 90 | 0 | 2 of 90 | 0 |
+| the echo and a busy loop on one CPU | 30 | 32 of 90 | 1 (3.4) | 27 of 90 | 0 |
+| the same, alternating blocks of 50 | 150 | 137 of 450 | 0 | 127 of 450 | 0 |
+| **all** | 240 | 173 of 720 | **1 of 720** | 160 of 720 | **0 of 720** |
+
+- M5's rate of NON-STRICT, 37 of 90, came back only with the echo server contending for
+  a CPU. A CPU quota alone does not slow a server that is mostly idle.
+- The seven cases that are always NON-STRICT were NON-STRICT OK 1002 in every run, on both
+  servers.
+- So on Linux these cases show the lost close too rarely to tell the servers apart: v0.4.1
+  lost the 1002 once in 720 tries.
+
+**The lost close, M5's raw clients** (`rst.js` and `rst.py`, unchanged): a 4 MiB text frame
+in 64 KiB writes against a 1 MiB cap, 100 connections a row, and the control (a reserved
+bit, then nothing):
+
+| where | server | close frame read | ends | control |
+|---|---|---|---|---|
+| macOS, the echo on the host (Node 20.10.0) | v0.4.1 | 1009 in 70 of 100 | 74 EPIPE, 26 ECONNRESET | 1002, a clean end, 100 |
+| | v0.5.0 | 1009 in 100 of 100 | 100 clean | 1002, a clean end, 100 |
+| Linux, the echo on `ab-net` (the image's Python 2) | v0.4.1 | 1009 in 100 of 100 | 94 EOF, 6 ECONNRESET | 1002, EOF, 100 |
+| | v0.5.0 | 1009 in 100 of 100 | 100 EOF | 1002, EOF, 100 |
+
+The server logged `message-too-big` 100 times in each row. M5 measured v0.4.1 on macOS at 0
+of 100 read; today 70, every connection still ending in an error.
+
+**The lane on the new ratchet** (`make autobahn`, the echo in its image on Docker Desktop):
+three full runs, each 301 cases as the ratchet holds them, 7 or 8 NON-STRICT.
