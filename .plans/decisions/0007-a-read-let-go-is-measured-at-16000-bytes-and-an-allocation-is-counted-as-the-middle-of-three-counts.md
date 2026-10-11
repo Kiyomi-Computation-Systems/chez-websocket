@@ -3,7 +3,8 @@
 Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, before the server's v0.4.1 pin: "Fix
 both checks here", the recommended). Amended the same day, #57's review: the counter is the
-middle of three counts.
+middle of three counts. Amended 2026-10-11: the 2.9 KB was the heap falling between
+S-LETGO's two readings, which nothing keeps.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §8
 
 ## Context
@@ -30,7 +31,7 @@ date), and neither through anything the binding does.
     −384 B.
   - With the server's drain alone, or its park alone, one-shot again, it passed 6 of 6.
 
-Measured on Darwin arm64, 2026-10-09 ([the research record](../research/2026-10-09-real-socket-measures.md), its last section).
+Measured on Darwin arm64, 2026-10-09 ([the research record](../research/2026-10-09-real-socket-measures.md), its section "Before the server's v0.4.1 pin").
 
 ## Decision
 
@@ -55,14 +56,15 @@ Measured on Darwin arm64, 2026-10-09 ([the research record](../research/2026-10-
   10,556 B through the server, where 7,160 to 7,877 (the server's decision 0025's review).
 - **"Find the server's mechanism first"**: why a full drain keeps about 2.9 KB, and about
   620 B a connection more than v0.4.0, after a big message, and a server change that keeps the full
-  drain without it.
+  drain without it. (Found on 2026-10-11, the amendment below: it keeps nothing.)
 
 ## Consequences
 
 - **The pin moves to v0.4.1 alone.** Every suite passed on it, on Darwin and on Linux:
   twelve, 348 expected passes.
-- **After a big message, v0.4.1 keeps about 2.9 KB, and about 620 B a connection more
-  than v0.4.0, until the next** (the amendment below). It is recorded here and not fixed. A connection still
+- **After a big message, v0.4.1 seemed to keep about 2.9 KB, and about 620 B a connection
+  more than v0.4.0, until the next** (the amendment below). It keeps nothing: two 1-byte
+  messages read the same (the amendment of 2026-10-11). A connection still
   holds less than on v0.4.0: 5,253 to 5,292 B at a bare `await`, where 7,907 to 8,484
   (0005's amendment of this date).
 - **Every suite's allocation checks count the same way** (the middle of three counts, since
@@ -115,3 +117,29 @@ plan's open list" and "A stacked PR on #57".
 - **What the server's drain keeps** (finding 4, "Server plan's open list"): the server's
   plan, its "Open, and not sliced" list (chez-http-server#161).
 - The counter's comment says 4 of 7 runs, as the context above does (finding 6).
+
+## Amendment of 2026-10-11 (the server's plan §14)
+
+The server's plan listed what its full drain keeps after a big read (finding 4 above). It
+settled the item by measurement on 2026-10-11, on its owner's form: **nothing is kept.**
+
+- **The 2.9 KB is the heap falling between S-LETGO's two readings.** S-LETGO's shape, on
+  this binding and the pinned server v0.5.0 (Darwin arm64), two runs each:
+
+  | | a big message, then a small one | two 1-byte messages |
+  |---|---|---|
+  | one connection, 4,000 and 16,000 bytes | 2,880 to 2,984 B | 2,888 to 2,944 B |
+  | ten connections, 4,000 bytes | 8,016 to 9,456 B | 8,544 to 9,536 B |
+
+  Two readings near −54.8 KB, at ten connections, came where Chez gave the thread a fresh
+  stack segment.
+- **Why it falls.** Each wake's full capture, the server's since its decision 0025's
+  review, uses up the thread's stack segment by the drain's depth, about 8 B a call,
+  until Chez gives it a fresh one of about 64 KB. Ten connections are woken ten times a
+  step. On v0.4.0 the drain was one-shot, and the heap did not fall so.
+- **S-LETGO stands.** Its bound, half the 16,008-byte frame, is above the fall; a read
+  kept still holds 16 KB more (R-20).
+- **What the server's measuring found instead** was a waiting coroutine keeping the last
+  value a wake handed it, and more of that kind, fixed in chez-http-server#178 for its
+  next release. This binding wakes its receives with `#t`, so its connections never kept
+  a message that way.

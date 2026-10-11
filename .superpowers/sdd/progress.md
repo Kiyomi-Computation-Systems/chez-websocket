@@ -2271,3 +2271,20 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **R-TERM's pro
 `make test` green on main (96f6285, Darwin arm64): fifteen suites, 395 expected passes, every pin ok.
 
 NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI; then that branch can go. The host path's old-log race, from its task. The second review's seven findings left unfixed. The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
+
+---
+
+**S-LETGO's 2.9 KB, explained (2026-10-11),** on the owner's "do the chez-websocket docs PR", the server's form "A docs PR there, after (Recommended)". One docs branch, `docs/drain-retention-explained`, cut from main at 3637f8a in its own worktree, and rebased onto #76's squash and its reflect (0b90231) before the merge.
+- **What changed upstream.** The server's plan §14 listed what its full drain keeps after a big read, from 0007's finding 4. It settled it by measurement (chez-http-server#178, merged as e5be01a): nothing is kept. The 2.9 KB was the heap falling between S-LETGO's two readings. Each wake's full capture uses up the thread's stack segment by the drain's depth, until Chez gives it a fresh one.
+- **Measured here, on the pinned v0.5.0** (Darwin arm64), with the probe now committed as `.plans/research/spike/s-letgo-floor.sps`. It reads S-LETGO's difference and, beside it, the same for two 1-byte messages:
+  - one connection, 4,000 and 16,000 bytes: 2,880 to 2,984 B, and 2,888 to 2,944 B for two 1-byte messages;
+  - ten connections, 4,000 bytes: 8,016 to 9,456 B, and 8,544 to 9,536 B. Three readings near −55 KB came where a fresh segment was given.
+- **Records corrected:**
+  - decision 0007 (status, its "weighed" note, its consequence, and an amendment of 2026-10-11; its pointer names the research record's section);
+  - the research record (a note under S-LETGO's table, and a section of its own);
+  - the design doc's "measured before the v0.4.1 pin" (and its pointer to the v0.1.0 section, no longer the last);
+  - the socket suite's oracle note.
+- **Nothing else changes.** S-LETGO's bound, half the frame, 8,004 B, is above the fall. No check, export or behaviour changes. This binding wakes its receives with `#t`, so the server's fix (#178, a waiting coroutine kept what woke it) changes nothing it keeps. Its fifteen suites passed on the server's branch, 394.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok; `make check-help` passes. Rebased onto #76's squash and its reflect, 395, its R-TERM check among them, every pin ok.
+
+NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run. The server's next release pinned here alone.
