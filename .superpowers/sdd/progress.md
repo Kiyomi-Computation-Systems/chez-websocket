@@ -2026,3 +2026,15 @@ NEXT: `none` measured again for 3.4, 4.1.5 and 4.2.5 on Linux, each case alone, 
 - `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash): fourteen suites and 381, `run.sh`'s suite 9 of 9.
 
 NEXT: the PR; the closing ritual when the owner asks. Then, when CI is back, main's latest run; the R-TERM probe, then its fix; M6, v0.1.0.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the ratchet drops `none` for 3.4 and 4.2.5** (the entry above), #70.
+- **#70**, at b640699, was squashed as ecbffc8 (tree 8538227, the tested head's; parent 96138ce).
+- **CI.** Billing-blocked: its run, 38161334795, and main's on the squash, 38162015335, each ended with both jobs, `linux` and `autobahn`, not started (0 steps, the payments annotation). The entry's local runs stood in: `make test` on Darwin and in the Linux aarch64 container, fourteen suites and 381, and three full `make autobahn` runs. It merged past the red check on the owner's word.
+- **Branch.** Deleted, local and remote. This reflect is committed from the PR's worktree, detached at ecbffc8, then removed; the main checkout is fast-forwarded after it. No PR is open.
+- **The task flagged for `run.sh`'s container wait** runs in a session of its own, on the owner's word.
+
+`make test` green on main: fourteen suites, 381 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: the `run.sh` fix's PR, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
