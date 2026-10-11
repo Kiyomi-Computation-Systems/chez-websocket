@@ -112,13 +112,15 @@ name stops it there.
 * Limits for one handler
 
 Limits come from the environment ([[file:configuration.org][configuration.org]]). To give
-one handler its own, pass them as the fourth argument. Here, times are in
-milliseconds.
+one handler its own, pass them as the fourth argument, after its settings. Make
+them once too, as your program starts. Here, times are in milliseconds.
 
 #+begin_src scheme
-(websocket-accept request upload (make-handshake-settings '())
+(define upload-limits
   (websocket-limits-with environment-websocket-limits
                          '((max-message-bytes . 16777216))))
+
+(websocket-accept request upload settings upload-limits)
 #+end_src
 
 The fields are ~max-message-bytes~, ~max-queue~, ~ping-interval-ms~,

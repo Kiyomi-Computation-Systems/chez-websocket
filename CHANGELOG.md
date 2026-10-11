@@ -30,6 +30,11 @@ uriparse v0.6.2.
   browser's, and is accepted (decision 0003 and its amendments).
 - **Subprotocols.** The first the handler lists that the client offered is chosen, and
   the `101` names it.
+- **A handler's own settings and limits.** `make-handshake-settings` names a
+  handler's subprotocols and origins, and `make-websocket-limits`, or
+  `websocket-limits-with` over `default-websocket-limits` or
+  `environment-websocket-limits`, its limits. `websocket-accept` takes both
+  (`docs/handlers.org`).
 - **Whole messages.** `websocket-receive` waits for the next message and gives a
   string for text or a bytevector for binary, however the client split it into
   frames. `websocket-send!` sends one as a frame. One receive may wait at a time; any
@@ -65,7 +70,7 @@ uriparse v0.6.2.
   handshakes, and the values peers computed alike (Python, Node, Perl, OpenSSL, ws).
   [Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite)'s fuzzing
   client runs against an echo server built from the library, and a ratchet holds each
-  case's verdict, both ways (decision 0008). `make test` runs fifteen suites and 392
+  case's verdict, both ways (decision 0008). `make test` runs fifteen suites and 394
   checks.
 
 ### Measured
@@ -84,7 +89,7 @@ against chez-http-server v0.5.0.
 - **Memory**, on macOS, Chez Scheme 10.4.1 `tarm64osx` and libuv 1.52.1. By the
   server's own method (a python child holds the connections; the heap after two full
   collections; a connection's cost is the heap with 500 less the heap with 100, over
-  400), five holds each:
+  400), five holds each, `.plans/research/spike/ws-cost.sps`:
 
   | an idle connection | heap |
   |---|---|

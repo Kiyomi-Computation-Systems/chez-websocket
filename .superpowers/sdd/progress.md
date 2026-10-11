@@ -2134,9 +2134,9 @@ NEXT: the release, stacked on this: the connection's cost measured on v0.5.0; CH
 - **What it carries.** The `[0.1.0]` section was written from the milestone plan, the design, the decisions and this ledger, M0 to #72, and checked against the facade's exports and each library's header. The docs entry M6.1 put under Unreleased is in it.
 - **The version:** 0.1.0, the plan's M6. No form: the first release.
 - **The pins:** chez-http-server v0.5.0 (02ef95d), which brings chez-libuv v0.9.0 (3c4e7f0), chez-httparse v0.4.5 (0b7058e) with byte-machine v0.7.0 (c338a57), uriparse v0.6.2 (5ecd88f) and chez-srfi 7879b52.
-- **Measured** (by form, "Re-measure on v0.5.0"; the research record's last section, probes in the scratch `ws-cost/`):
-  - **A connection's cost,** by the server's method, five holds each, Darwin: an idle WebSocket in a receive 5,281 to 5,435 B, and 5,353 to 5,477 B after 10 echoes; the server's own idle connection 1,900 to 2,055 B. Measured first on fcbc598's tree, then again on 270ce0e's once #72 had merged; the records give the second.
-  - **`make autobahn`,** on the container path, twice: on fcbc598's tree, 291 OK, 7 NON-STRICT and 3 INFORMATIONAL, gate passing (61 s); on this tree, 290, 8 and 3, case 3.4 NON-STRICT, one of the three the ratchet lists both ways, gate passing (56 s). No network or container left by either; `ab-net`, M5's of 2026-10-10, was there before.
+- **Measured** (by form, "Re-measure on v0.5.0"; the research record's last section, by the probe `.plans/research/spike/ws-cost.sps`, committed by M6's review):
+  - **A connection's cost,** by the server's method, five holds each, Darwin: an idle WebSocket in a receive 5,281 to 5,435 B, and 5,353 to 5,477 B after 10 echoes; the server's own idle connection 1,900 to 2,055 B. Measured first on 54da491's tree (#73's first commit, on fcbc598), then again on 270ce0e's once #72 had merged; the records give the second.
+  - **`make autobahn`,** on the container path, twice: on 54da491's tree (#73's first commit, on fcbc598), 291 OK, 7 NON-STRICT and 3 INFORMATIONAL, gate passing (61 s); on this tree, 290, 8 and 3, case 3.4 NON-STRICT, one of the three the ratchet lists both ways, gate passing (56 s). No network or container left by either; `ab-net`, M5's of 2026-10-10, was there before.
 - **Built:**
   - CHANGELOG.md: `[0.1.0] - 2026-10-11`, with an intro naming the pins, Added, and Measured; a fresh, empty Unreleased above it; the link references, `[0.1.0]` the tag's release page.
   - README.org's status: v0.1.0 the first release, pointing at the CHANGELOG; an idle connection about 5.3 KB, where it said about 8 KB.
@@ -2150,3 +2150,29 @@ NEXT: the release, stacked on this: the connection's cost measured on v0.5.0; CH
 - `make test` green before the commit (Darwin arm64): fifteen suites, 392 expected passes, every pin ok. Nothing tested changed: CHANGELOG.md, README.org, the design, the research record and the ledger only.
 
 NEXT: the PRs; the closing ritual for both, bottom-up, and the tag, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
+
+---
+
+**M6'S REVIEW (2026-10-11),** on the owner's "fix all" after a `/code-review` (xhigh) over #73 and #74 reported 14 findings. Branch `fix/m6-review`, stacked on `chore/release-0.1.0` (#74); one PR, by form ("One PR"). The tag now goes on this PR's squash, the stack's last.
+- **The docs suite's holes** (the four most severe), each closed and watched to fail:
+  - **A default that is not a number, or is in another unit, passed:** "off", "20 ms" and "16 s" read as unset, or as seconds. DOC-DEFAULTS now reads a cell only as digits then ` s` for a duration and digits alone for a size or a count (the design's §7), anything else `(unreadable row)`.
+  - **Names outside five prefixes went unchecked**, `&websocket-closed` among them: DOC-NAMES now takes `websocket?`, `&websocket-…`, asked for its record type, and `handshake-settings…`. New, DOC-FIELDS: the fields handlers.org lists are the design's §7's, each one `websocket-limits-with` takes.
+  - **The fragments were only read:** new, DOC-FRAGMENTS runs each where its words put it, in a handler when it names `request`, else in a WebSocket's procedure, the names it takes from around it given by the suite. The settings and limits fragments answer RFC 6455's handshake 101; the guard's echoes and shows `1000`.
+- **The pages:** configuration.org's closing bullet said the connection is always cut off; now only a client that has not answered within the close timeout is, timed from when the close was asked for. handlers.org's limits example made its settings and limits at every request; now once, as its own advice says.
+- **The rest:**
+  - `#+begin_src` in any case, and a block never ended red;
+  - a program's forms run as a top-level program's (R6RS §8.1);
+  - a row of no cells, or with no last bar, read;
+  - the suite refuses to run with a `CHEZ_WS_` variable set, as the binding suite does;
+  - the first measures' tree is 54da491, not fcbc598 (the entries above and the research record, corrected in place);
+  - the probe committed as `.plans/research/spike/ws-cost.sps` and `ws-hold.py`, its header saying how to run it, and cited;
+  - `concat` and `copy` in `(ws-play)`, the binding suite's and the docs suite's; lines by `(ws-autobahn)`'s `text-lines`. The driver suite keeps its own, since it does not import `(ws-play)`. `values-of` stays in the docs suite: the limits suite imports nothing that has it;
+  - the CHANGELOG's Added names the per-handler settings and limits.
+- **The probe, as committed,** run again on this tree (Darwin, five holds each): 5,251 to 5,403 B in a receive, 5,381 to 5,511 B after 10 echoes, the server's own 1,809 to 2,054 B, overlapping the release's figures, which stand.
+- **Watched to fail** (`m6-mutations.md`, its review section):
+  - **The new suite:** M6-1 to M6-16 named again, M6-17 to M6-34 new; 0 mismatches. M6-30 to M6-32 are named green: a definition after `serve`, a row with no last bar, a bare `|` line. M6-33, a `CHEZ_WS_` variable set: status 2. M6-14 survives as before, a scope statement.
+  - **#73's suite, the same new mutants:** the first run void, mine: `(ws-play)`'s new exports collide with its own definitions. With those taken out of the scratch copy, 0 mismatches. It passed every hole, and failed M6-30 to M6-32.
+  - **The new suite on #74's pages,** before their fixes: 8 of 8, as named.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, the docs suite's 8, every pin ok. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's. The CHANGELOG says 394.
+
+NEXT: the PR; the closing ritual for #73, #74 and this, bottom-up, and the tag `v0.1.0` on this PR's squash, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.

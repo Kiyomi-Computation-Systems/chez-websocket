@@ -31,10 +31,11 @@ starts, so a bad value stops it there, naming the variable.
   the connection closes with ~1011~.
 - *Slow readers.* A client that reads slowly falls behind. Past the high
   water, sends wait and the server stops reading from it, until the client has
-  read down to the low water. A client that takes longer than the write
-  timeout over a write is cut off.
-- *Closing.* After the server sends its close, the client has the close
-  timeout to read what is left and answer. Then the connection is cut off.
+  read down to the low water. A client past the high water that takes longer
+  than the write timeout over a write is cut off.
+- *Closing.* When the server closes, counted from when the close was asked
+  for, the client has the close timeout to read what is left and answer. One
+  that answers in time closes cleanly; one that has not is cut off.
 
 ~environment-websocket-limits~ is what was read. To give one handler other
 limits, see [[file:handlers.org][handlers.org]].
