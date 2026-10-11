@@ -1963,3 +1963,19 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **SC-1's recor
 `make test` green on main: fourteen suites, 381 expected passes, every pin ok.
 
 NEXT, unchanged: main's run on 61be5e7 when CI is back; the R-TERM probe, then its fix; the chez-http-server slice for the lost close; M6, v0.1.0.
+
+---
+
+**Before the server's v0.5.0 pin: D-OUTSIDE's client ends (2026-10-11),** on the owner's "let's pin chez-websocket to v0.5.0", after the server's v0.5.0 (its #172 and #173, tagged on 02ef95d). Branch `test/fit-server-v0.5.0`, cut from 2879eb0; the pin stacks on it, alone, as #59 followed #57 and #58.
+- **Measured first** (Darwin arm64): main's suites on v0.5.0, the gitlink staged in a scratch worktree. Fourteen suites, the driver suite 14 of 15, every other suite's count main's on v0.4.1.
+  - **The one red is D-OUTSIDE**, "the stream closed while the thunk waits", at `(() ())` where `((closed client-closed) ())`.
+  - **It is the change v0.5.0 makes** (the server's decision 0026). A taken stream's close now lingers until the client ends, a read error or `CHEZ_HTTP_LINGER_TIMEOUT`, and so does its test fake's door. D-OUTSIDE closed the stream with the client still there, and read the log at once.
+- **Built:** `tests/test-driver.sps`: D-OUTSIDE delivers the client's end after the close and before it settles, and its title says so. Its expected value is main's.
+- **On both servers.** On v0.4.1 the client's end is inert: its fake reads nothing once the close is asked for, so the check is main's there. On v0.5.0 it is what closes the stream.
+- **Mutants** (`m4-mutations.md`): 11 rows, 0 mismatches, each red set and its values named and hashed before the run.
+  - M4.2's M-18, M-19 and M-20 redden D-OUTSIDE by value on both servers.
+  - On v0.5.0, two more: the check without the client's end, and a fake that drops the end while the stream closes, each `(() ())`.
+- **Records:** this entry and the mutation log. No CHANGELOG entry: a check's stimulus, not anything a user meets.
+- `make test` green before the commit (Darwin arm64), three runs: fourteen suites, 381 expected passes, each suite's count main's, every pin ok. On v0.5.0, the same tree, three runs: fourteen suites and 381, each suite's count main's on v0.4.1.
+
+NEXT: the PR, and the pin to the server's v0.5.0 (02ef95d) stacked on it, alone. Then `none` measured again for 3.4, 4.1.5 and 4.2.5.
