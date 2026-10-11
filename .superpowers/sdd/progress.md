@@ -2212,3 +2212,46 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **M6, v0.1.0, 
 `make test` green on main (87bc9e6, Darwin arm64): fifteen suites, 394 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: when CI is back, main's latest run; the R-TERM probe, then its fix. The second review's seven findings left unfixed (its entry lists them). The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
+
+---
+
+**R-TERM's probe and fix (2026-10-11),** on the owner's "start the R-TERM probe". Branch `fix/r-term`, cut from 3637f8a.
+- **CI could not run the probe.** Main's latest run, 38169940312, ended with both jobs not started, the billing block. So the probe ran in the local Linux containers instead, each with a pid 1 that never reaps, and found the cause. The measurements are in `m5-mutations.md`, its last section.
+- **The cause.** On a Linux host, libuv 1.48 gives the echo server's loop an io_uring ring with a polling thread, `iou-sqp`. Docker's default seccomp forbids io_uring, so the containers never had that thread, and macOS has no io_uring.
+  - At SIGTERM, the server's main thread exits first, and `ps` shows `Zl` while `iou-sqp` still runs. `echo_alive` read that as gone, but the shell could not reap the server yet.
+  - On the TERM path, `run.sh` exits right after `echo_stop`. The server would then be left to the runner's init, and R-TERM's `kill -0` would sometimes come first: one of the three CI runs on that tree failed. That CI side is inferred, not observed: all CI showed is `(#t 0)` (corrected in place by the review below).
+  - Measured: 0 of 400 runs under the default seccomp on aarch64, half of them under load, and 0 of 100 on x86_64. With io_uring allowed, 19 of 30; with the fix, 0 of 30.
+- **The fix:** `echo_stop` waits for its server once `ps` shows it ended, so the shell reaps its own child.
+- **The check, test-first.**
+  - The fake docker's `term` mode holds the server lingering for 500 ms: stopped, and named in `lingers`. A new fake `ps` reads it as `Zl`.
+  - R-TERM is now red on main's `run.sh` in every run, on macOS and under dash. Before, it could fail only on a Linux host with io_uring.
+- **Watched to fail:** 7 rows on macOS, 0 mismatches, and the same seven under dash. RM-8, a survivor since M5's review, is killed as RT-2: the lingering server outlives the shell's next command.
+- **Seen, not fixed:** R-TWO red in 3 of 50 suite runs under dash, each over the last run's logs.
+  - The likely cause: the host path leaves emptying `server.log` to the server's own redirection, in the forked child. The shell's first `grep` can win that race.
+  - Left for a change of its own.
+- **`probe/r-term`** is kept, to confirm the cause on CI once CI is back (corrected in place by the review below).
+- `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok. On Linux aarch64 in a container with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, `--security-opt seccomp=unconfined`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's.
+
+NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run. The host path's old-log race, in a change of its own. The second review's seven findings left unfixed. The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
+
+---
+
+**R-TERM's review (2026-10-11),** on the owner's "fix all" after a /code-review (xhigh) of #76 reported seven findings. On `fix/r-term`.
+- **Fixed, all seven:**
+  - **The stop is bounded again.** `echo_stop` polls until `ps` shows nothing, not even a zombie, which the shell reaps at the sleep's wait. The unbounded `wait` is gone, so "did not stop within 30 s" holds once more.
+  - **The fake `ps`:**
+    - It asks the `ps` on PATH after itself, not `/bin/ps`.
+    - It takes the pid from `-p`, wherever that is.
+    - It continues a lingering server the second time it is asked, counted in asks, not 500 ms of wall-clock time.
+  - **The marker is named once,** `FAKE_LINGERS`, set by the suite for every lane.
+  - **The records:** the probe section says which runs had the `ps` shim, and that CI's side of the cause is inferred. The R-TERM entry above is corrected in place.
+  - **`probe/r-term` is kept,** with a step that lists the runner's threads and watches the server's exit (90c04fd). It will tell whether CI's runner has the `iou-sqp` thread.
+- **A check of the fake `ps`,** R-FAKEPS: a stub `ps` after it, a lingering pid named by `-p` first, `("Zl" "T")`.
+- **Watched to fail** (`m5-mutations.md`, "R-TERM's review"):
+  - Test-first: R-FAKEPS red on the old fake. The new fakes on the PR head's `run.sh` hung in R-TERM until `timeout` killed it, which is the finding itself.
+  - Mutants: 11 rows, 1 mismatch, RT-3, the prediction's: R-FAKEPS holds the fake's `Zl` too.
+  - The PR head's form, RT-5, hangs. A server that is never continued, FP-3, is red at the 30 s cap.
+  - Under dash with io_uring, all eleven matched macOS but RT-4, the real race there.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 395 expected passes, every pin ok. `make check-help` passes. On Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, `--security-opt seccomp=unconfined`, dash, libuv 1.48.0): fifteen suites and 395, each suite's count Darwin's.
+
+NEXT: the PR's CI, when CI is back, and the closing ritual when the owner asks, `probe/r-term` kept. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause there. The host path's old-log race, in a change of its own. The second review's seven findings left unfixed. The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.

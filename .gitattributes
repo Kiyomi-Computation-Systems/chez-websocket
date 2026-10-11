@@ -3,4 +3,5 @@
 # lines (its reader drops a CR before a LF all the same).
 *.sh                         text eol=lf
 tests/autobahn/fake/docker   text eol=lf
+tests/autobahn/fake/ps       text eol=lf
 tests/autobahn/verdicts.txt  text eol=lf

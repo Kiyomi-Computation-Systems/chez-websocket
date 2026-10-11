@@ -4,7 +4,9 @@
 ;;; the fuzzing client's run, so each check run.sh makes on its host path is
 ;;; watched to fail on its own: the echo server it starts, on a port of its
 ;;; own, in an environment of its own; an index no run wrote; a server that
-;;; ends before it listens, or without stopping; a docker that fails.  The
+;;; ends before it listens, or without stopping; a docker that fails; a run
+;;; told to stop while its server has ended but cannot yet be reaped, which
+;;; tests/autobahn/fake/ps shows as Linux does (R-TERM's probe).  The
 ;;; container path, on macOS and Windows, shares all of it but the echo
 ;;; server's start and stop.  There the fake plays the echo server's container
 ;;; too, so the wait is held to that container's own log, never the one the
@@ -31,11 +33,13 @@
 ;; run-command : String String String String -> String
 ;; The shell command of a run, its echo server where `at` says (run.sh's
 ;; ECHO_AT), docker played as `mode`, the caller's environment holding `extra`
-;; too, its files in out/name and out/name.log.
+;; too, its files in out/name and out/name.log, and the fakes' lingers file,
+;; out/name/lingers.
 (define (run-command at name mode extra)
   (let ((dir (string-append out "/" name)))
     (string-append
      "mkdir -p '" dir "' && env PATH=\"$PWD/tests/autobahn/fake:$PATH\""
+     " FAKE_LINGERS='" dir "/lingers'"
      " FAKE_DOCKER=" mode " FAKE_RATCHET=tests/autobahn/verdicts.txt ECHO_AT=" at
      " CHEZ=\"${CHEZ:-chez}\" LIBDIRS=\"$CHEZSCHEMELIBDIRS\" IMAGE=fake OUT='" dir "'"
      " " extra " sh tests/autobahn/run.sh > '" dir ".log' 2>&1")))
@@ -151,6 +155,19 @@
         (let ((alive (system (string-append "kill -0 \"$(cat '" out "/term/echo.pid')\" 2>/dev/null"))))
           (system (string-append "kill -9 \"$(cat '" out "/term/echo.pid')\" 2>/dev/null"))
           (list (file-exists? (string-append out "/term/echo.pid")) alive))))
+
+    (test-equal "the fake ps answers as the ps on PATH after it, but a lingering server, wherever -p names it, reads as ended"
+      '("Zl" "T")
+      (let ((dir (string-append out "/fakeps")))
+        (system (string-append
+                 "rm -rf '" dir "' && mkdir -p '" dir "/bin' && printf '#!/bin/sh\\necho T\\n' > '" dir "/bin/ps'"
+                 " && chmod +x '" dir "/bin/ps' && echo 4242 > '" dir "/lingers' && ("
+                 " PATH=\"$PWD/tests/autobahn/fake:" dir "/bin:$PATH\"; export PATH; FAKE_LINGERS='" dir "/lingers'; export FAKE_LINGERS;"
+                 " ps -p 4242 -o stat= > '" dir "/lingering'; ps -o stat= -p 4243 > '" dir "/other')"))
+        (map (lambda (name)
+               (let ((lines (text-lines (read-text (string-append dir "/" name)))))
+                 (if (null? lines) "" (car lines))))
+             '("lingering" "other"))))
 
     (test-equal "a docker that fails is a harness error, its status named"
       (list 2 "autobahn: docker run exited 125:")

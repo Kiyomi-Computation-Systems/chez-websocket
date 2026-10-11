@@ -566,3 +566,176 @@ each, no `grep:` line, and no container or network left.
 Not changed: a signal while `docker network create` itself runs still leaves the network, if
 Docker has made it. Defining `cleanup` and setting the traps above the create would close that
 too. But then a failed create would run `docker network rm` on whatever network has the name.
+
+## R-TERM's probe and fix (2026-10-11)
+
+R-TERM failed once on CI, in run 38051609330 on fd9f54d, with `(#t 0)`: the echo server's
+pid still answered `kill -0` once `run.sh` had returned. The same tree ran green twice, on
+9e27973 and 819feec, so it failed one of three CI runs. CI is billing-blocked, so
+`probe/r-term`'s workflow could not run, and the probe ran in local Linux containers instead.
+Scratch `rterm/`.
+
+### The probe
+
+Each run was the term scenario as R-TERM plays it, in a container whose pid 1 is `sleep`. That
+pid 1 never reaps, so a server `run.sh` leaves unreaped stays visible. The aarch64 runs under
+the default seccomp used `probe/r-term`'s script as it was. From the x86_64 runs on, a shim
+also logged each `ps` answer `echo_alive` got.
+- **Docker's default seccomp,** Linux aarch64 (`chez-libuv-noble-scratch:10.4.1`, dash
+  0.5.12): 0 of 200 runs, 0 of 200 more with 2 CPUs and four busy loops, and 40 suite runs
+  under `timeout` green.
+- **The same, x86_64** (`chez-websocket-ci-amd64:10.4.1`, emulated): 0 of 100. `ps` showed the
+  server as `Z` in all 100, and dash reaped it at its next wait every time.
+- **The server's threads.** Under the default seccomp, the server has 1 thread. Under
+  `--security-opt seccomp=unconfined`, it has 2: `scheme` and `iou-sqp-…`. That is the SQPOLL
+  thread of the io_uring ring libuv 1.48 sets up for its loop, which Docker's default seccomp
+  forbids. At SIGTERM, the main thread exits first, and `/proc` shows it `Z` while `iou-sqp`
+  still runs. Not observed on CI: GitHub's hosted runner runs a job's steps on its VM, in no
+  container, so no seccomp profile of Docker's applies there. `probe/r-term` now lists the
+  runner's threads (90c04fd), for when CI is back.
+- **With io_uring allowed:** 19 of 30 runs left the server behind, a zombie of pid 1. In each
+  of them, the last answer `echo_alive` got was `Zl`, so it read the server as gone. But a
+  process whose main thread has exited cannot be reaped while another thread runs. So
+  `run.sh`'s shell could not reap it, and the TERM path exits right after `echo_stop`. On CI,
+  the orphan would go to the runner's init, and R-TERM fails when its `kill -0` comes before
+  init reaps it. That part is inferred: all CI showed is `(#t 0)`.
+- **The fix in that container**, `wait "$echo_pid"` once the poll ends: 0 of 30 left behind,
+  though 27 of the 30 showed `Z` in `ps`.
+
+### The fix and the check
+
+- **`run.sh`** (aa97cfb -> 813cc44): `echo_stop` waits for its server once `ps` shows it ended,
+  so the shell itself reaps it.
+- **The check**, test-first, now holds that window open on every platform:
+  - `term` mode in the fake docker (266a1ad -> 4196869) stops the echo server (SIGSTOP),
+    names its pid in `lingers` beside `echo.pid`, and continues it 500 ms later. Only then does
+    it tell `run.sh` to stop.
+  - A new fake `ps` (e0694e0) answers as the real one, but reads a lingering server that is
+    stopped as `Zl`. That is how Linux showed a server that had ended but could not yet be
+    reaped.
+  - The suite (e917731 -> 0dcc6c1) changed only its header. R-TERM's check is as it was.
+
+### The test-first run
+
+Main's `run.sh` with the new fakes, named and hashed before (`46c70452`): exit 1, 13 passes,
+R-TERM red `(#t 0)`.
+- The first attempt did not count. The new fake `ps` was not executable, so the PATH search
+  passed it over for the real `ps`, and all 14 passed. With its mode 755, the run matched the
+  prediction.
+- Under dash, in the io_uring container: R-TERM red 5 of 5.
+
+With the fix, R-TERM was green in every run: 3 on macOS, 14 of 14 each, and 50 suite runs
+under dash with io_uring, whose only reds were R-TWO's three (below).
+
+### The mutants
+
+Run 1 on macOS (Darwin 25.6.0 arm64, macOS's sh): 7 rows, 0 mismatches. The specs, names and
+predictions were hashed before (`bf30c8a8`). Each row ran the suite on a fresh
+`build/test-autobahn-run`, as CI's tree is fresh.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RT-1 | no wait once the server shows ended | R-TERM | as named |
+| RT-2 | neither the poll nor the wait | R-TERM | as named |
+| RT-3 | RT-1, and the fake `ps` reads a lingering server as stopped, `T` | none | as named |
+| RT-4 | RT-1, and the fake docker's `term` mode as on main, no linger | none | as named |
+| RM-9 | no traps on the host | R-TERM | as named |
+| RM-10 | no pid recorded | R-PID, R-KILL, R-TERM | as named |
+
+- **RT-1, the fix's mutant,** is red by value, `(#t 0)`: the run returned while its server
+  was still there.
+- **RT-2 is RM-8, re-cut now that the wait is there.** RM-8 survived every run since M5's
+  review, since no lane's server outlived the shell's next command. The lingering server
+  outlives it, so the stop's wait is held now.
+- **RT-3 and RT-4, named green,** show what reddens RT-1: a server that reads as ended and
+  cannot yet be reaped. With either half gone, the poll alone is enough, as it always was on
+  macOS. That is why no local run had seen R-TERM fail.
+- **Under dash** (the io_uring container, the same seven, one run each): every row as on
+  macOS. RT-4 green there is chance. With io_uring, it is the real race, 19 of 30 in the probe.
+
+### Seen while measuring
+
+R-TWO failed in 3 of 50 suite runs under dash in the io_uring container, with the fix in
+place (2 of 10, 1 of 15, then 0 of 25). Each time, one of the two runs said "the echo server ended without stopping:", and its
+`server.log` was empty. The suite had run before on the same tree, so each lane's
+`server.log` from the last run was still there.
+- **The likely cause:** on the host path, the server's `> "$out/server.log"` is done by the
+  forked child. So the shell's first `grep` can find the last run's `listening` line. The
+  fuzzing client then gets the old port, and SIGTERM kills a server still loading.
+- The container path empties its log first for this reason ("The container path's wait",
+  above). The host path does not.
+- **Not reproduced on its own:** 0 of 40 runs of two at once over kept logs, and 0 of 20 of
+  one run on one CPU. CI's tree is fresh, so `make test` there never starts over an old log.
+- **Left for a change of its own.** It is not this fix's: it comes before anything the wait
+  touches.
+
+### R-TERM's review (2026-10-11)
+
+On the owner's "fix all" after a /code-review (xhigh) of #76 reported seven findings. Scratch
+`rterm/rev/`.
+- **The stop is bounded again.** The `wait` after the poll had no bound, so a server `ps`
+  showed as a zombie that never finished, or a fake one, held `run.sh` forever, past the 30 s
+  cap. Now `echo_stop` polls until `ps` shows nothing, not even a zombie, and there is no
+  `wait`. The shell reaps its own zombie at its next wait, the sleep's, so the cap still holds.
+  - `run.sh` 813cc44 -> 68eb20a.
+  - `echo_state` is the `ps` read that `echo_alive` and the stop share. `echo_alive`, which
+    `wait_listening`'s subshell uses, still reads a zombie as ended.
+- **The fake `ps`** (e0694e0 -> 95ff446):
+  - It asks the `ps` on PATH after itself (`-ef`), not `/bin/ps`.
+  - It takes the pid from `-p`, wherever that is.
+  - It continues a lingering server the second time it is asked, so the window is counted in
+    asks, not wall-clock time. A run that keeps asking sees the server end, and one that took
+    the first `Zl` as gone has returned with it still there.
+- **The marker is named once**, `FAKE_LINGERS`, which the suite sets for every lane
+  (`out/name/lingers`). The fake docker (4196869 -> 00dfd13) writes it and no longer starts a
+  sleeper.
+- **A check of the fake `ps`,** R-FAKEPS: with a stub `ps` after it on PATH that answers `T`, a
+  lingering pid named by `-p` before `-o` reads `("Zl" "T")`. The suite is 0dcc6c1 -> 31988a6,
+  15 checks.
+- **The records:** the probe section above says which runs had the `ps` shim, and that CI's
+  side is inferred. `probe/r-term` is kept, with a step that lists the runner's threads.
+
+**The test-first runs,** each named and hashed before:
+- **A** (`75eb4d06`): the new suite on the PR's head, its fakes unchanged. Exit 1, 14 passes,
+  R-FAKEPS red `("" "")`: the fake asked `/bin/ps`, which knows no pid 4242 or 4243, and read
+  its marker from `$OUT/lingers`, which the check does not set.
+- **B** (`52b9c470`): the new fakes on the PR head's `run.sh`, under `timeout 60`. Exit 124,
+  killed in R-TERM: the first `Zl` ended the poll, and the `wait` held a server that a second
+  ask would have continued. One part was named wrong: the server was not left stopped.
+  `timeout` signals its process group, TERM and then CONT, and that ended it.
+- **C:** the fix. 15 of 15 on macOS three times, the term server asked about twice each time.
+
+**The mutants,** run 1 on macOS (Darwin 25.6.0 arm64): 11 rows, 1 mismatch. The specs, names
+and predictions were hashed before (`2cd243d7`). Each row ran on a fresh
+`build/test-autobahn-run`, under `timeout 60`.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RT-1 | the stop takes a zombie for gone | R-TERM | as named |
+| RT-2 | the stop's poll removed | R-TERM | as named |
+| RT-3 | RT-1, and the fake `ps` reads a lingering server as `T` | none | R-FAKEPS, MISMATCH |
+| RT-4 | RT-1, and the fake docker's `term` mode with no linger | none | as named |
+| RT-5 | RT-1, then a `wait` (the PR head's form) | none, exit 124 | as named |
+| RM-9 | no traps on the host | R-TERM | as named |
+| RM-10 | no pid recorded | R-PID, R-KILL, R-TERM | as named |
+| FP-1 | the fake `ps` takes its pid from its last argument | R-FAKEPS | as named |
+| FP-2 | the fake `ps` asks `/bin/ps` | R-FAKEPS | as named |
+| FP-3 | the fake `ps` never continues a lingering server | R-TERM | as named |
+
+- **RT-3's mismatch is the prediction's.** R-FAKEPS holds the fake's `Zl` too, so the cut
+  reddens it, `("T" "T")`. R-TERM stayed green, as named: the poll keeps asking, and the
+  second ask continues the server.
+- **RT-5 hangs**, and the runner's `timeout` ends it: an unbounded wait, as the review found.
+- **FP-3 is red at the cap,** in about 30 s, not a hang. A server that never ends meets "did
+  not stop within 30 s", and the run returns without it.
+- **Under dash,** in a fresh io_uring container (`--security-opt seccomp=unconfined`), the
+  eleven ran once each. All matched macOS but RT-4, which was red, `(#t 0)`. With no linger and
+  a zombie taken for gone, that row is the real race, which io_uring shows.
+- 15 suite runs of the fix there, each on a fresh tree, all 15 checks green. The container's
+  zombies stayed at 11 across the last 5 runs, all of them left by the mutant rows.
+- **The probe's real race, on the bounded form:** main's fake docker (no linger) and this
+  `run.sh`, 30 runs in that container: none left the server behind. All 30 showed `Z` in
+  `ps` first, and the poll went on past it until the server was gone. The container's zombies
+  stayed at 11.
