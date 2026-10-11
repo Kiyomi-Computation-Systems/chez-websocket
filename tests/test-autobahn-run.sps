@@ -6,7 +6,9 @@
 ;;; own, in an environment of its own; an index no run wrote; a server that
 ;;; ends before it listens, or without stopping; a docker that fails.  The
 ;;; container path, on macOS and Windows, shares all of it but the echo
-;;; server's start and stop.
+;;; server's start and stop.  There the fake plays the echo server's container
+;;; too, so the wait is held to that container's own log, never the one the
+;;; last run left.
 ;;;
 ;;; Each run is a process of its own, as `make autobahn` starts one, on the
 ;;; Chez that runs the suites: CHEZ names it, as the Makefile's CHEZ does
@@ -25,22 +27,49 @@
                   get-string-all)))
       (if (eof-object? text) "" text))))
 
-;; lane-command : String String String -> String
-;; The shell command of a run, docker played as `mode`, the caller's
-;; environment holding `extra` too, its files in out/name and out/name.log.
-(define (lane-command name mode extra)
+;; run-command : String String String String -> String
+;; The shell command of a run, its echo server where `at` says (run.sh's
+;; ECHO_AT), docker played as `mode`, the caller's environment holding `extra`
+;; too, its files in out/name and out/name.log.
+(define (run-command at name mode extra)
   (let ((dir (string-append out "/" name)))
     (string-append
      "mkdir -p '" dir "' && env PATH=\"$PWD/tests/autobahn/fake:$PATH\""
-     " FAKE_DOCKER=" mode " FAKE_RATCHET=tests/autobahn/verdicts.txt ECHO_AT=host"
+     " FAKE_DOCKER=" mode " FAKE_RATCHET=tests/autobahn/verdicts.txt ECHO_AT=" at
      " CHEZ=\"${CHEZ:-chez}\" LIBDIRS=\"$CHEZSCHEMELIBDIRS\" IMAGE=fake OUT='" dir "'"
      " " extra " sh tests/autobahn/run.sh > '" dir ".log' 2>&1")))
 
-;; lane : String String String -> (List Status (Listof String))
+;; run-lane : String String String String -> (List Status (Listof String))
 ;; A run's status and the lines it wrote.
-(define (lane name mode extra)
-  (let ((status (system (lane-command name mode extra))))
+(define (run-lane at name mode extra)
+  (let ((status (system (run-command at name mode extra))))
     (list status (text-lines (read-text (string-append out "/" name ".log"))))))
+
+;; lane-command : String String String -> String — a run on the host path.
+(define (lane-command name mode extra) (run-command "host" name mode extra))
+
+;; lane : String String String -> (List Status (Listof String)) — a run on
+;; the host path.
+(define (lane name mode extra) (run-lane "host" name mode extra))
+
+;; The log a container run leaves, which the next run on its tree finds: its
+;; first line and its last two, as `make autobahn` left them (macOS,
+;; 2026-10-11).
+(define last-runs-log "listening 0.0.0.0 9001\ndraining 0\nstopped\n")
+
+;; container-lane : String String (U String #f) -> (List Status (Listof String))
+;; A run on the container path, in out/name made anew: its echo server's
+;; container played as `echo` (the fake's FAKE_ECHO), the fuzzing client as
+;; `pass`, and out/name/server.log holding `log` before the run, when given.
+(define (container-lane name echo log)
+  (let ((dir (string-append out "/" name)))
+    (system (string-append "rm -rf '" dir "' && mkdir -p '" dir "'"))
+    (when log
+      (call-with-port (open-file-output-port (string-append dir "/server.log") (file-options)
+                                             (buffer-mode block) (native-transcoder))
+        (lambda (port) (put-string port log))))
+    (run-lane "container" name "pass"
+              (string-append "ECHO_IMAGE=fake FAKE_ECHO=" echo " FAKE_STATE='" dir "/docker'"))))
 
 ;; said : (List Status (Listof String)) String -> (List Status (U String #f))
 ;; The status, and the first line that begins with `prefix`, or #f.
@@ -105,4 +134,18 @@
 
     (test-equal "a docker that fails is a harness error, its status named"
       (list 2 "autobahn: docker run exited 125:")
-      (said (lane "docker" "fail" "") "autobahn: docker run exited 125:"))))
+      (said (lane "docker" "fail" "") "autobahn: docker run exited 125:"))
+
+    (test-equal "on the container path a run waits until its own container listens, though the last run's log says it did"
+      (list 0 passed)
+      (said (container-lane "wait" "listens" last-runs-log) passed))
+
+    (test-equal "and a container that ends before it listens is a harness error, no fuzzing client run, though the last run's log says it listened"
+      (list 2 "autobahn: the echo server ended before it listened:" #f)
+      (let ((result (container-lane "ends" "ends" last-runs-log)))
+        (append (said result "autobahn: the echo server ended before it listened:")
+                (list (file-exists? (string-append out "/ends/reports/index.json"))))))
+
+    (test-equal "and a container run on a tree with no log yet says nothing but the gate's line"
+      (list 0 (list passed))
+      (container-lane "fresh" "listens" #f))))

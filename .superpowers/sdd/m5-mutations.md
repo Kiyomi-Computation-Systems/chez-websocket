@@ -369,3 +369,101 @@ record's last section; scratch `ws-none/`.
   mostly idle server never spends it; and 150 contended runs gave no `none`, where at least 2
   were named. The raw probes' v0.4.1 row on macOS read the close 70 times in 100, where at
   most a few were named (M5: 0). Each v0.5.0 prediction held.
+
+## The container path's wait (2026-10-11)
+
+Found during #70 and fixed in a PR of its own. Darwin 25.6.0 arm64 with macOS's sh, and Linux
+aarch64 in `chez-libuv-noble-scratch:10.4.1` with dash. `run.sh` is blob cecc148 (main's
+a339895), the fake 5377f84 (641873c), the suite 12 checks, a14ce59 (adde458). Scratch
+`ab-wait/`.
+- **The finding:** on the container path, `wait_listening` read `$out/server.log` before its
+  first `echo_alive`, and on that path only `echo_alive` and `echo_stop` write the file.
+  Nothing emptied it first.
+  - On a fresh tree, the first read printed `grep: …/server.log: No such file or directory`.
+  - On every later tree, the last run's log says `listening 0.0.0.0 9001`, so it ended the
+    wait at once, before the new container listened.
+- **The fix:** `run.sh` empties the log before it starts the container. Emptied rather than
+  removed, the wait's first read finds a file. The host path truncates the log as it starts
+  the server, as before.
+- **The checks:** `tests/autobahn/fake/docker` now plays the container path too, as
+  `FAKE_ECHO` says, with its state under `FAKE_STATE`. Its container's log says `listening`
+  from its second read. On the container's network, its fuzzing client passes only once a
+  read of that log has shown the container listening. Each check runs in a tree of its own:
+  - **R-CWAIT:** a run waits until its own container listens, and passes, though the last
+    run's log says it did.
+  - **R-CENDS:** a container that ends before it listens is a harness error, "ended before
+    it listened", and no fuzzing client runs, though the last run's log says it listened.
+  - **R-CFRESH:** a run on a tree with no log yet says nothing but the gate's line.
+
+### The test-first run
+
+The new suite and fake on main's `run.sh`, named and hashed before (`bebc3ad3`): exit 1, the
+nine old checks green, the three new red as named:
+- **R-CWAIT** `(1 #f)`: the wait ended at once, and the fuzzing client found no container seen
+  listening. The gate failed it as a run of no case.
+- **R-CENDS** `(2 #f #t)`: the run went on to the fuzzing client, which wrote its index, and
+  ended "without stopping".
+- **R-CFRESH:** the gate's line came after `grep: …/fresh/server.log: No such file or
+  directory`.
+
+### The mutants
+
+Run 1: 18 rows (17 mutants and the baseline), 0 mismatches (specs hashed `2f44f90b`). The
+runner is M5's review's: each mutant gets a scratch copy of `src/` and `tests/`, and the suite
+runs there.
+- RM-1 to RM-10 ran again, re-predicted for the new suite.
+- RM-4 now also reddens the container's checks, since on that path `echo_alive` is what
+  fetches the log.
+- RM-8 was named as the survivor it was.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RM-1 | the last run's index kept | R-STALE | as named |
+| RM-2 | the caller's environment inherited | R-ENV | as named |
+| RM-3 | no stopped check | R-KILL | as named |
+| RM-4 | a dead server waited for | R-NOSTART, R-CWAIT, R-CENDS, R-CFRESH | as named |
+| RM-5 | docker's status not read | R-DOCKER | as named |
+| RM-6 | the URL at a fixed port | R-PASS, R-ENV, R-TWO | as named |
+| RM-7 | the server at a fixed port | R-TWO | as named |
+| RM-8 | the stop not waited for | none | as named, survived |
+| RM-9 | no traps on the host | R-TERM | as named |
+| RM-10 | no pid recorded | R-PID, R-KILL, R-TERM | as named |
+| CW-1 | the last run's log kept | R-CWAIT, R-CENDS, R-CFRESH | as named |
+| CW-2 | the log removed, not emptied | R-CFRESH | as named |
+| CW-3 | the URL at the host's address | R-CWAIT, R-CFRESH | as named |
+| CW-4 | the fuzzing client on the host's network | R-CWAIT, R-CFRESH | as named |
+| CW-5 | the container's log read before its stop | R-CWAIT, R-CFRESH | as named |
+| CW-6 | a dead container waited for | R-CENDS | as named |
+| CW-7 | the wait never fetches the container's log | R-CWAIT, R-CFRESH | as named |
+
+New checks and their killers, by value:
+- **R-CWAIT** by CW-1 `(1 #f)`.
+- **R-CENDS** by CW-1 `(2 #f #t)`, and by CW-6 `(2 #f #f)` after the 60 s wait.
+- **R-CFRESH** by CW-2, the only one of the fix's own mutants to redden it, with its `grep:`
+  line. So it holds the choice to empty the file, not remove it.
+
+The host path's helpers keep their names and build the same commands, and RM-1 to RM-10 redden
+what they did. No report has a harness error.
+
+### Under dash
+
+In the Linux container, the suite ran on three `run.sh` variants, named and hashed before
+(`d0659a6c`), each as named:
+- **BASE:** 12 passes.
+- **CW-1, main's `run.sh`:** 9 passes. The three new checks were red by the same values as on
+  macOS.
+- **CW-2:** 11 passes, with R-CFRESH alone red.
+
+### On real Docker
+
+Docker Desktop 29.2.1, with `make autobahn`'s environment, named and hashed before
+(`b532dd78`). Each run started over the log the last run left:
+- **Main's `run.sh`,** instrumented to count the wait's polls: `wait: 0 polls`, status 0.
+- **The fixed `run.sh`,** instrumented the same way: `wait: 7 polls`, status 0.
+
+So main's wait never waited. Runs stayed green only because the fuzzing client's emulated
+container starts more slowly than the echo server listens.
+
+Two `make autobahn` runs, the first from a fresh tree and the second over its log: status 0
+each, no `grep:` line, and no container or network left.

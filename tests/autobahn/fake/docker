@@ -10,7 +10,34 @@
 #            records beside the reports
 #   fail     exit 125, as docker does when it cannot start a container
 #   term     run.sh told to stop (SIGTERM) while the run goes on, then exit 0
-config=; reports=; network=
+#
+# On the container path it plays the echo server's container too, as
+# FAKE_ECHO says, keeping each container's state under FAKE_STATE:
+#   listens  its log empty at its first read and `listening HOST PORT` from
+#            its second, the host and port it was given; it runs until
+#            stopped, and its log then says `stopped`
+#   ends     ended before it listened, its log saying so
+# There the probe asks that a read of the container's log has shown it
+# listening before the fuzzing client runs.
+container() { c=${FAKE_STATE:?}/$1; [ -d "$c" ] || { echo "fake docker: no such container: $1" >&2; exit 1; }; }
+for last; do :; done
+case "$1" in
+  network) exit 0 ;;
+  logs)
+    container "$last"
+    if [ "${FAKE_ECHO:?}" = ends ]; then echo "fake: the echo server ended before it listened"; exit 0; fi
+    reads=$(($(cat "$c/reads") + 1)); echo "$reads" > "$c/reads"
+    if [ "$reads" -ge 2 ]; then cat "$c/listen"; : > "$c/shown"; fi
+    if [ -e "$c/stopped" ]; then echo stopped; fi
+    exit 0 ;;
+  inspect)
+    container "$last"
+    if [ "${FAKE_ECHO:?}" = listens ] && [ ! -e "$c/stopped" ]; then echo true; else echo false; fi
+    exit 0 ;;
+  stop) container "$last"; : > "$c/stopped"; exit 0 ;;
+  rm) rm -rf "${FAKE_STATE:?}/$last"; exit 0 ;;
+esac
+config=; reports=; network=; detached=; name=; host=; port=
 while [ $# -gt 0 ]; do
   case "$1" in
     -v) case "$2" in
@@ -18,21 +45,46 @@ while [ $# -gt 0 ]; do
           *:/reports) reports=${2%:/reports} ;;
         esac
         shift 2 ;;
+    -e) case "$2" in
+          CHEZ_HTTP_HOST=*) host=${2#*=} ;;
+          CHEZ_HTTP_PORT=*) port=${2#*=} ;;
+        esac
+        shift 2 ;;
     --network) network=$2; shift 2 ;;
+    --name) name=$2; shift 2 ;;
+    -d) detached=yes; shift ;;
     *) shift ;;
   esac
 done
+if [ -n "$detached" ]; then
+  mkdir -p "${FAKE_STATE:?}/$name" &&
+    echo "listening $host $port" > "$FAKE_STATE/$name/listen" &&
+    echo 0 > "$FAKE_STATE/$name/reads" ||
+    exit 125
+  exit 0
+fi
 case "${FAKE_DOCKER:?}" in
   fail) exit 125 ;;
   nothing) exit 0 ;;
   term) kill -TERM "$PPID"; exit 0 ;;
 esac
 url=$(sed -n 's#.*"url": "ws://\([^"]*\)".*#\1#p' "$config/fuzzingclient.json")
-# A GET of 1,000 bytes of header: the echo server answers 400 under its
-# defaults, a request that is no handshake, and 431 under a header limit of
-# 512, which a caller's environment would bring if it reached the server.
-code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Pad: $(printf '%01000d' 0)" "http://$url/")
-if [ "$network" = host ] && [ "$code" = 400 ]; then
+# reached: whether the URL names the lane's own echo server, listening.
+reached() {
+  if [ "$network" = host ]; then
+    # A GET of 1,000 bytes of header: the echo server answers 400 under its
+    # defaults, a request that is no handshake, and 431 under a header limit
+    # of 512, which a caller's environment would bring if it reached the
+    # server.
+    [ "$(curl -s -o /dev/null -w '%{http_code}' -H "X-Pad: $(printf '%01000d' 0)" "http://$url/")" = 400 ]
+  else
+    # The container of the network's name, at the port it listens on, seen
+    # listening by a read of its log.
+    c=${FAKE_STATE:?}/$network
+    [ -e "$c/shown" ] && [ "$url" = "$network:$(sed -n 's/^listening [^ ]* //p' "$c/listen")" ]
+  fi
+}
+if reached; then
   awk 'BEGIN { printf "{\"chez-websocket\": {"; n = 0 }
        /^#/ || /^$/ { next }
        { printf "%s\"%s\": {\"behavior\": \"%s\", \"behaviorClose\": \"%s\", \"remoteCloseCode\": %s}",
