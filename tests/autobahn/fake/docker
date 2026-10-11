@@ -9,7 +9,10 @@
 #   kill     as pass, then the echo server killed (SIGKILL), by the pid run.sh
 #            records beside the reports
 #   fail     exit 125, as docker does when it cannot start a container
-#   term     run.sh told to stop (SIGTERM) while the run goes on, then exit 0
+#   term     run.sh told to stop (SIGTERM) while the run goes on, then exit 0;
+#            first the echo server is held lingering for 500 ms: stopped, and
+#            named in lingers beside echo.pid, so the fake ps reads it as
+#            ended though its parent cannot reap it yet
 #
 # On the container path it plays the echo server's container too, as
 # FAKE_ECHO says, keeping each container's state under FAKE_STATE:
@@ -87,7 +90,11 @@ fi
 case "${FAKE_DOCKER:?}" in
   fail) exit 125 ;;
   nothing) exit 0 ;;
-  term) kill -TERM "$PPID"; exit 0 ;;
+  term)
+    pid=$(cat "$reports/../echo.pid")
+    kill -STOP "$pid" && echo "$pid" > "$reports/../lingers"
+    (sleep 0.5; kill -CONT "$pid") > /dev/null 2>&1 &
+    kill -TERM "$PPID"; exit 0 ;;
 esac
 url=$(sed -n 's#.*"url": "ws://\([^"]*\)".*#\1#p' "$config/fuzzingclient.json")
 # reached: whether the URL names the lane's own echo server, listening.

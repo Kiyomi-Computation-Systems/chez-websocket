@@ -68,8 +68,12 @@ case "$ECHO_AT" in
       esac
     }
     # SIGTERM drains the server (chez-http-server's docs/handlers.org): it
-    # says `stopped` as it returns.  Once it has, its pid is forgotten, so
-    # nothing signals a process that may have reused it.
+    # says `stopped` as it returns.  Once ps shows it ended, the wait reaps
+    # it: on Linux it can show as a zombie while libuv's io_uring thread
+    # still runs, and the shell cannot reap it until that thread ends.  A run
+    # that exited then left it behind (R-TERM's probe, 2026-10-11).
+    # Once reaped, its pid is forgotten, so nothing signals a process that
+    # may have reused it.
     echo_stop() {
       [ -n "$echo_pid" ] || return 0
       kill -TERM "$echo_pid" 2>/dev/null
@@ -79,6 +83,7 @@ case "$ECHO_AT" in
         if [ "$i" -gt 300 ]; then echo "autobahn: the echo server did not stop within 30 s" >&2; return 1; fi
         sleep 0.1
       done
+      wait "$echo_pid" 2>/dev/null
       echo_pid=
     }
     cleanup() { echo_stop > /dev/null 2>&1; }

@@ -1,0 +1,16 @@
+#!/bin/sh
+# A stand-in for ps, for tests/test-autobahn-run.sps alone: the real ps, but
+# an echo server the fake docker holds lingering (its pid in $OUT/lingers),
+# stopped, reads as `Zl`.  That is how Linux showed a server whose main thread
+# had exited while its io_uring thread (libuv's) still ran: ended, but not
+# yet a process its parent can reap (R-TERM's probe, 2026-10-11).
+out=$(/bin/ps "$@")
+status=$?
+for last; do :; done
+if [ -n "${OUT:-}" ] && [ -f "$OUT/lingers" ] && [ "$(cat "$OUT/lingers")" = "$last" ]; then
+  case "$(printf '%s' "$out" | tr -d ' ')" in
+    T*) out=Zl ;;
+  esac
+fi
+[ -z "$out" ] || printf '%s\n' "$out"
+exit "$status"

@@ -566,3 +566,102 @@ each, no `grep:` line, and no container or network left.
 Not changed: a signal while `docker network create` itself runs still leaves the network, if
 Docker has made it. Defining `cleanup` and setting the traps above the create would close that
 too. But then a failed create would run `docker network rm` on whatever network has the name.
+
+## R-TERM's probe and fix (2026-10-11)
+
+R-TERM failed once on CI, in run 38051609330 on fd9f54d, with `(#t 0)`: the echo server's
+pid still answered `kill -0` once `run.sh` had returned. The same tree ran green twice, on
+9e27973 and 819feec, so it failed one of three CI runs. CI is billing-blocked, so
+`probe/r-term`'s workflow could not run, and the probe ran in local Linux containers instead.
+Scratch `rterm/`.
+
+### The probe
+
+Each run was the term scenario as R-TERM plays it, in a container whose pid 1 is `sleep`. That
+pid 1 never reaps, so a server `run.sh` leaves unreaped stays visible. A shim logged each `ps`
+answer `echo_alive` got.
+- **Docker's default seccomp,** Linux aarch64 (`chez-libuv-noble-scratch:10.4.1`, dash
+  0.5.12): 0 of 200 runs, 0 of 200 more with 2 CPUs and four busy loops, and 40 suite runs
+  under `timeout` green.
+- **The same, x86_64** (`chez-websocket-ci-amd64:10.4.1`, emulated): 0 of 100. `ps` showed the
+  server as `Z` in all 100, and dash reaped it at its next wait every time.
+- **The server's threads.** Under the default seccomp, the server has 1 thread. Under
+  `--security-opt seccomp=unconfined`, it has 2: `scheme` and `iou-sqp-…`. That is the SQPOLL
+  thread of the io_uring ring libuv 1.48 sets up for its loop, which Docker's default seccomp
+  forbids. CI's runner is a VM with no seccomp. At SIGTERM, the main thread exits first, and
+  `/proc` shows it `Z` while `iou-sqp` still runs.
+- **With io_uring allowed:** 19 of 30 runs left the server behind, a zombie of pid 1. In each
+  of them, the last answer `echo_alive` got was `Zl`, so it read the server as gone. But a
+  process whose main thread has exited cannot be reaped while another thread runs. So
+  `run.sh`'s shell could not reap it, and the TERM path exits right after `echo_stop`. On CI,
+  systemd reaps such an orphan within milliseconds, and R-TERM fails when `kill -0` comes first.
+- **The fix in that container**, `wait "$echo_pid"` once the poll ends: 0 of 30 left behind,
+  though 27 of the 30 showed `Z` in `ps`.
+
+### The fix and the check
+
+- **`run.sh`** (aa97cfb -> 813cc44): `echo_stop` waits for its server once `ps` shows it ended,
+  so the shell itself reaps it.
+- **The check**, test-first, now holds that window open on every platform:
+  - `term` mode in the fake docker (266a1ad -> 4196869) stops the echo server (SIGSTOP),
+    names its pid in `lingers` beside `echo.pid`, and continues it 500 ms later. Only then does
+    it tell `run.sh` to stop.
+  - A new fake `ps` (e0694e0) answers as the real one, but reads a lingering server that is
+    stopped as `Zl`. That is how Linux showed a server that had ended but could not yet be
+    reaped.
+  - The suite (e917731 -> 0dcc6c1) changed only its header. R-TERM's check is as it was.
+
+### The test-first run
+
+Main's `run.sh` with the new fakes, named and hashed before (`46c70452`): exit 1, 13 passes,
+R-TERM red `(#t 0)`.
+- The first attempt did not count. The new fake `ps` was not executable, so the PATH search
+  passed it over for the real `ps`, and all 14 passed. With its mode 755, the run matched the
+  prediction.
+- Under dash, in the io_uring container: R-TERM red 5 of 5.
+
+With the fix, R-TERM was green in every run: 3 on macOS, 14 of 14 each, and 50 suite runs
+under dash with io_uring, whose only reds were R-TWO's three (below).
+
+### The mutants
+
+Run 1 on macOS (Darwin 25.6.0 arm64, macOS's sh): 7 rows, 0 mismatches. The specs, names and
+predictions were hashed before (`bf30c8a8`). Each row ran the suite on a fresh
+`build/test-autobahn-run`, as CI's tree is fresh.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| RT-1 | no wait once the server shows ended | R-TERM | as named |
+| RT-2 | neither the poll nor the wait | R-TERM | as named |
+| RT-3 | RT-1, and the fake `ps` reads a lingering server as stopped, `T` | none | as named |
+| RT-4 | RT-1, and the fake docker's `term` mode as on main, no linger | none | as named |
+| RM-9 | no traps on the host | R-TERM | as named |
+| RM-10 | no pid recorded | R-PID, R-KILL, R-TERM | as named |
+
+- **RT-1, the fix's mutant,** is red by value, `(#t 0)`: the run returned while its server
+  was still there.
+- **RT-2 is RM-8, re-cut now that the wait is there.** RM-8 survived every run since M5's
+  review, since no lane's server outlived the shell's next command. The lingering server
+  outlives it, so the stop's wait is held now.
+- **RT-3 and RT-4, named green,** show what reddens RT-1: a server that reads as ended and
+  cannot yet be reaped. With either half gone, the poll alone is enough, as it always was on
+  macOS. That is why no local run had seen R-TERM fail.
+- **Under dash** (the io_uring container, the same seven, one run each): every row as on
+  macOS. RT-4 green there is chance. With io_uring, it is the real race, 19 of 30 in the probe.
+
+### Seen while measuring
+
+R-TWO failed in 3 of 50 suite runs under dash in the io_uring container, with the fix in
+place (2 of 10, 1 of 15, then 0 of 25). Each time, one of the two runs said "the echo server ended without stopping:", and its
+`server.log` was empty. The suite had run before on the same tree, so each lane's
+`server.log` from the last run was still there.
+- **The likely cause:** on the host path, the server's `> "$out/server.log"` is done by the
+  forked child. So the shell's first `grep` can find the last run's `listening` line. The
+  fuzzing client then gets the old port, and SIGTERM kills a server still loading.
+- The container path empties its log first for this reason ("The container path's wait",
+  above). The host path does not.
+- **Not reproduced on its own:** 0 of 40 runs of two at once over kept logs, and 0 of 20 of
+  one run on one CPU. CI's tree is fresh, so `make test` there never starts over an old log.
+- **Left for a change of its own.** It is not this fix's: it comes before anything the wait
+  touches.

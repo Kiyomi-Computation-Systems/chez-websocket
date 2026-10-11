@@ -4,7 +4,9 @@
 ;;; the fuzzing client's run, so each check run.sh makes on its host path is
 ;;; watched to fail on its own: the echo server it starts, on a port of its
 ;;; own, in an environment of its own; an index no run wrote; a server that
-;;; ends before it listens, or without stopping; a docker that fails.  The
+;;; ends before it listens, or without stopping; a docker that fails; a run
+;;; told to stop while its server has ended but cannot yet be reaped, which
+;;; tests/autobahn/fake/ps shows as Linux does (R-TERM's probe).  The
 ;;; container path, on macOS and Windows, shares all of it but the echo
 ;;; server's start and stop.  There the fake plays the echo server's container
 ;;; too, so the wait is held to that container's own log, never the one the
