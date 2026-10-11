@@ -2300,3 +2300,23 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **S-LETGO's 2.
 `make test` green on main (05d6dbf, Darwin arm64): fifteen suites, 395 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The host path's old-log race, from its task. The second review's seven findings left unfixed. The server's next release (the wake-value fix, its decision 0027, the signal fix) pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.
+
+---
+
+**The host path's old log (2026-10-11),** on the owner's task "first prove the mechanism … then fix the host path by emptying server.log in the parent before the server starts". Branch `fix/autobahn-host-log`, cut from 50017c4. The measurements are in `m5-mutations.md`, its last section.
+- **The finding** (R-TERM's "Seen while measuring"): R-TWO red in 3 of 50 suite runs under dash, each over the last run's logs, with an empty `server.log` and "the echo server ended without stopping:".
+- **Proved, not inferred.**
+  - Forced: a copy of `run.sh` whose server child waits, before its own `>`, until the wait has read the log. Main's form failed as R-TWO did, the fuzzing client given the last run's port, 3 of 3 on macOS and 5 of 5 under dash. The fixed form passed every round.
+  - The real race, main's `run.sh` unchanged: 8 runs at once in the io_uring container, each over its last log. 21 of 320 failed as R-TWO did. Each had read the old `listening` line: 4 were given the last run's port, and 17 no port, the child's `>` emptying the log between the wait's `grep` and its `sed`. With the fix, 0 of 320.
+- **The fix:** `run.sh`'s prelude empties `server.log` before either path starts its server. The container path's own emptying is folded into it.
+- **The checks, test-first.** No command `run.sh` calls runs between the fork and the child's `>`, so no fake on PATH can hold that window. The suite writes a held copy of `run.sh` instead.
+  - In that copy, the background command's child names its pid in `FAKE_HELD` and stops itself before its redirections. The fake `ps` continues it the first time it is asked about it.
+  - **R-HWAIT:** over a last run's log, a run passes. **R-HFRESH:** on a tree with no log yet, a run says only the gate's line.
+  - Both are red on main's `run.sh` in every run, 4 of 4 on macOS and 3 of 3 under dash, by the values named.
+- **Watched to fail:** run 1 on macOS, 34 rows, 1 mismatch, the prediction's.
+  - HF-2 (`kill -0` for `kill -STOP`) was named to survive. But its `sh -c` still delays the child by one process start, enough to lose the race often. Run 2 measured it, red 2 of 2 in R-HWAIT and 1 of 2 in R-HFRESH. With no hold at all (HF-4), the checks stay green.
+  - Survivors, scopes: HL-4 (emptied after the fork), HL-5 (a failed emptying not caught), NL-4 and NL-6 as before.
+  - Under dash, eight rows as on macOS.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, every pin ok. On Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, `--security-opt seccomp=unconfined`, dash, libuv 1.48.0): fifteen suites and 397, each suite's count Darwin's.
+
+NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed. The server's next release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.

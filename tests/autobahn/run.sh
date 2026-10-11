@@ -25,9 +25,16 @@ spec=tests/autobahn/fuzzingclient.json
 
 # A run that writes no index must not be gated on the last one's: that file
 # alone goes; the per-case reports a run writes replace the last run's.
+# Its wait reads this run's echo server's log alone, never the last run's,
+# which says `listening`, so the log is emptied here, before either path
+# starts its server.  On the host path the server's own `>` is done by the
+# child that runs it, which can come after the wait's first read (R-TWO
+# under load, 2026-10-11).  Emptied, not removed: the wait's first read then
+# finds a file.
 mkdir -p "$OUT/config" "$OUT/reports" &&
   out=$(cd "$OUT" && pwd) &&
-  rm -f "$out/reports/index.json" ||
+  rm -f "$out/reports/index.json" &&
+  : > "$out/server.log" ||
   exit 2
 
 # wait_listening LOG: until LOG says `listening`, while the echo server lives;
@@ -101,10 +108,6 @@ case "$ECHO_AT" in
   container)
     : "${ECHO_IMAGE:?}"
     name="chez-websocket-autobahn-$$"
-    # The wait reads this run's container's log alone, never the last run's,
-    # which says `listening`.  Emptied, not removed: the wait's first read,
-    # before the container's log is fetched, then finds a file.
-    : > "$out/server.log" || exit 2
     docker network create "$name" > /dev/null || exit 2
     # Once the network is made, whatever ends the run, a container that
     # cannot start, a signal or an error, the network goes with it, and the

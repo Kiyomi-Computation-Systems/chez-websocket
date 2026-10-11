@@ -6,7 +6,9 @@
 ;;; own, in an environment of its own; an index no run wrote; a server that
 ;;; ends before it listens, or without stopping; a docker that fails; a run
 ;;; told to stop while its server has ended but cannot yet be reaped, which
-;;; tests/autobahn/fake/ps shows as Linux does (R-TERM's probe).  The
+;;; tests/autobahn/fake/ps shows as Linux does (R-TERM's probe); a wait held
+;;; to its own server's log, never the one the last run left, though the
+;;; server opens it late, which a copy of run.sh holds open.  The
 ;;; container path, on macOS and Windows, shares all of it but the echo
 ;;; server's start and stop.  There the fake plays the echo server's container
 ;;; too, so the wait is held to that container's own log, never the one the
@@ -30,25 +32,40 @@
                   get-string-all)))
       (if (eof-object? text) "" text))))
 
-;; run-command : String String String String -> String
-;; The shell command of a run, its echo server where `at` says (run.sh's
-;; ECHO_AT), docker played as `mode`, the caller's environment holding `extra`
-;; too, its files in out/name and out/name.log, and the fakes' lingers file,
-;; out/name/lingers.
-(define (run-command at name mode extra)
+;; write-text : String String -> Void — `text` as the file at `path`, which
+;; does not exist yet.
+(define (write-text path text)
+  (call-with-port (open-file-output-port path (file-options) (buffer-mode block) (native-transcoder))
+    (lambda (port) (put-string port text))))
+
+;; script-command : String String String String String -> String
+;; The shell command of a run of `script`, its echo server where `at` says
+;; (run.sh's ECHO_AT), docker played as `mode`, the caller's environment
+;; holding `extra` too, its files in out/name and out/name.log, and the fakes'
+;; files, out/name/lingers and out/name/held.
+(define (script-command script at name mode extra)
   (let ((dir (string-append out "/" name)))
     (string-append
      "mkdir -p '" dir "' && env PATH=\"$PWD/tests/autobahn/fake:$PATH\""
-     " FAKE_LINGERS='" dir "/lingers'"
+     " FAKE_LINGERS='" dir "/lingers' FAKE_HELD='" dir "/held'"
      " FAKE_DOCKER=" mode " FAKE_RATCHET=tests/autobahn/verdicts.txt ECHO_AT=" at
      " CHEZ=\"${CHEZ:-chez}\" LIBDIRS=\"$CHEZSCHEMELIBDIRS\" IMAGE=fake OUT='" dir "'"
-     " " extra " sh tests/autobahn/run.sh > '" dir ".log' 2>&1")))
+     " " extra " sh '" script "' > '" dir ".log' 2>&1")))
+
+;; run-command : String String String String -> String — a run of run.sh.
+(define (run-command at name mode extra)
+  (script-command "tests/autobahn/run.sh" at name mode extra))
+
+;; script-lane : String String String String String -> (List Status (Listof String))
+;; A run's status and the lines it wrote.
+(define (script-lane script at name mode extra)
+  (let ((status (system (script-command script at name mode extra))))
+    (list status (text-lines (read-text (string-append out "/" name ".log"))))))
 
 ;; run-lane : String String String String -> (List Status (Listof String))
-;; A run's status and the lines it wrote.
+;; A run of run.sh: its status and the lines it wrote.
 (define (run-lane at name mode extra)
-  (let ((status (system (run-command at name mode extra))))
-    (list status (text-lines (read-text (string-append out "/" name ".log"))))))
+  (script-lane "tests/autobahn/run.sh" at name mode extra))
 
 ;; lane-command : String String String -> String — a run on the host path.
 (define (lane-command name mode extra) (run-command "host" name mode extra))
@@ -69,12 +86,66 @@
 (define (container-lane name echo log)
   (let ((dir (string-append out "/" name)))
     (system (string-append "rm -rf '" dir "' && mkdir -p '" dir "'"))
-    (when log
-      (call-with-port (open-file-output-port (string-append dir "/server.log") (file-options)
-                                             (buffer-mode block) (native-transcoder))
-        (lambda (port) (put-string port log))))
+    (when log (write-text (string-append dir "/server.log") log))
     (run-lane "container" name "pass"
               (string-append "ECHO_IMAGE=fake FAKE_ECHO=" echo " FAKE_STATE='" dir "/docker'"))))
+
+;; suffix? : String String -> Boolean — whether `s` ends with `end`.
+(define (suffix? s end)
+  (let ((n (string-length s)) (k (string-length end)))
+    (and (>= n k) (string=? (substring s (- n k) n) end))))
+
+;; held-script : String -> (U String #f)
+;; run.sh's text with its one background command, the host path's echo
+;; server's start, held: before that command's redirections, its child names
+;; its pid in $FAKE_HELD and stops itself, and the fake ps continues it the
+;; first time it is asked about it.  So the server's `> server.log` comes after
+;; the run's wait has first read the log, as it can for a child that is late
+;; to run (R-TWO under load, R-TERM's probe).  No command run.sh calls runs in
+;; that window, so no fake on PATH can hold it open.  #f unless run.sh has
+;; exactly one background command, a line ending ` &` and the lines its `\`
+;; joins to it.
+(define (held-script text)
+  (let* ((lines (list->vector (text-lines text)))
+         (background (let find ((i (- (vector-length lines) 1)) (found '()))
+                       (cond ((< i 0) found)
+                             ((suffix? (vector-ref lines i) " &") (find (- i 1) (cons i found)))
+                             (else (find (- i 1) found))))))
+    (and (= (length background) 1)
+         (let* ((end (car background))
+                (start (let back ((i end))
+                         (if (and (> i 0) (suffix? (vector-ref lines (- i 1)) "\\")) (back (- i 1)) i)))
+                (first (vector-ref lines start))
+                (indent (let skip ((k 0))
+                          (if (and (< k (string-length first)) (char=? (string-ref first k) #\space))
+                              (skip (+ k 1))
+                              k))))
+           (vector-set! lines start
+                        (string-append (substring first 0 indent)
+                                       "{ sh -c 'echo \"$PPID\" > \"$0\" && kill -STOP \"$PPID\"' \"$FAKE_HELD\"; exec "
+                                       (substring first indent (string-length first))))
+           (let ((last (vector-ref lines end)))
+             (vector-set! lines end (string-append (substring last 0 (- (string-length last) 2)) "; } &")))
+           (apply string-append (map (lambda (line) (string-append line "\n")) (vector->list lines)))))))
+
+;; The log a host run leaves, which the next run on its tree finds, but at a
+;; port below every system's ephemeral range, which no run's own echo server
+;; is given, and where none answers the fake's probe.
+(define last-host-log "listening 127.0.0.1 9\ndraining 0\nstopped\n")
+
+;; held-lane : String (U String #f) -> (List Status (Listof String))
+;; A run on the host path of held-script's run.sh, written to out/name.sh, in
+;; out/name made anew: the fuzzing client played as `pass`, and
+;; out/name/server.log holding `log` before the run, when given.
+(define (held-lane name log)
+  (let ((dir (string-append out "/" name))
+        (script (held-script (read-text "tests/autobahn/run.sh"))))
+    (system (string-append "rm -rf '" dir "' '" dir ".sh' && mkdir -p '" dir "'"))
+    (when log (write-text (string-append dir "/server.log") log))
+    (if script
+        (begin (write-text (string-append dir ".sh") script)
+               (script-lane (string-append dir ".sh") "host" name "pass" ""))
+        (list 'no-background-command '()))))
 
 ;; docker-left : String -> (List (Listof String) (Listof String))
 ;; What the fake docker of the container run in out/name made, each a
@@ -172,6 +243,14 @@
     (test-equal "a docker that fails is a harness error, its status named"
       (list 2 "autobahn: docker run exited 125:")
       (said (lane "docker" "fail" "") "autobahn: docker run exited 125:"))
+
+    (test-equal "a run waits until its own echo server listens, though the last run's log says one did and the server opens its log only after the wait first reads it"
+      (list 0 passed)
+      (said (held-lane "hwait" last-host-log) passed))
+
+    (test-equal "and a run on a tree with no log yet, its server's log opened as late, says nothing but the gate's line"
+      (list 0 (list passed))
+      (held-lane "hfresh" #f))
 
     (test-equal "on the container path a run waits until its own container listens, though the last run's log says it did"
       (list 0 passed)

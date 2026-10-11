@@ -7,6 +7,10 @@
 # probe, 2026-10-11).  The second time it is asked about, it is continued, so
 # a run that keeps asking sees it end, and one that took the first `Zl` for
 # gone has returned with it still there.
+#
+# An echo server held before it starts, stopped, its pid the first line of
+# $FAKE_HELD (tests/test-autobahn-run.sps's held run.sh), is continued the
+# first time it is asked about while stopped, and answers as it is.
 real=
 rest=$PATH
 while [ -n "$rest" ]; do
@@ -30,6 +34,11 @@ if [ -n "$pid" ] && [ -f "${FAKE_LINGERS:-}" ] && [ "$(head -1 "$FAKE_LINGERS")"
       echo asked >> "$FAKE_LINGERS"
       [ "$(grep -c '^asked$' "$FAKE_LINGERS")" -lt 2 ] || kill -CONT "$pid"
       ;;
+  esac
+fi
+if [ -n "$pid" ] && [ -f "${FAKE_HELD:-}" ] && [ "$(head -1 "$FAKE_HELD")" = "$pid" ]; then
+  case "$(printf '%s' "$out" | tr -d ' ')" in
+    T*) kill -CONT "$pid" ;;
   esac
 fi
 [ -z "$out" ] || printf '%s\n' "$out"

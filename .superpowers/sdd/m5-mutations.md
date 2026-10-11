@@ -668,7 +668,7 @@ place (2 of 10, 1 of 15, then 0 of 25). Each time, one of the two runs said "the
 - **Not reproduced on its own:** 0 of 40 runs of two at once over kept logs, and 0 of 20 of
   one run on one CPU. CI's tree is fresh, so `make test` there never starts over an old log.
 - **Left for a change of its own.** It is not this fix's: it comes before anything the wait
-  touches.
+  touches. Proved and fixed in "The host path's old log", below.
 
 ### R-TERM's review (2026-10-11)
 
@@ -739,3 +739,133 @@ and predictions were hashed before (`2cd243d7`). Each row ran on a fresh
   `run.sh`, 30 runs in that container: none left the server behind. All 30 showed `Z` in
   `ps` first, and the poll went on past it until the server was gone. The container's zombies
   stayed at 11.
+
+## The host path's old log (2026-10-11)
+
+R-TWO's failure from R-TERM's probe ("Seen while measuring", above), proved and fixed in a PR of
+its own, cut from main at 50017c4. Darwin 25.6.0 arm64 with macOS's sh (bash 3.2), and Linux
+aarch64 in `chez-libuv-noble-scratch:10.4.1` with io_uring allowed (`--security-opt
+seccomp=unconfined`), dash 0.5.12, libuv 1.48.0. `run.sh` 68eb20a -> dd768c4, the fake `ps`
+95ff446 -> 1a68c68, the suite 31988a6 -> 020b097, 17 checks. Scratch `hl/`.
+- **The finding:** on the host path, nothing emptied `server.log` before the echo server
+  started. The server's `> "$out/server.log"` is done by the child the shell forks for it. So
+  when the wait's first `grep` comes before the child's `>`, it finds the last run's
+  `listening` line. The container path already emptied its log first ("The container path's
+  wait", above).
+
+### The proof
+
+Each probe was named and hashed before it ran.
+- **The order forced** (`e5ffea8b`, then `a698419e`). Copies of `run.sh` whose server child
+  waits, before its own `>`, until the wait has read the log once. Each round first runs the
+  tree's `run.sh`, which leaves a real log, then the copy over that log.
+  - On macOS, main's form, 3 of 3: status 2, "the echo server ended without stopping:", an
+    empty `server.log`, and the fuzzing client given the last run's port. That is R-TWO's
+    failure exactly. The fixed form passed 3 of 3.
+  - Under dash, the first copy: the last run's port given, 5 of 5. But status 1 with the old
+    log kept, where status 2 and an empty log were named. The child's hold was a 10 ms poll,
+    and the run reached its stop within it. So the TERM ended the child before its `>`, and
+    the old log's `stopped` passed the stop's check. The gate then failed a run of no case.
+  - A second copy has the real race's shape: the child opens its log right after the wait's
+    first read, before the run goes on. Main's form, 5 of 5: R-TWO's failure exactly, the last
+    run's port given. The fixed form passed 5 of 5.
+- **The real race, main's `run.sh` unchanged** (dash, io_uring). 8 runs at once, 40 rounds,
+  each over the log its lane's last round left. 21 of 320 runs failed as R-TWO did: status 2,
+  "ended without stopping:", an empty log.
+  - 4 of them were given the last run's port.
+  - 17 were given no port, `ws://127.0.0.1:`. The wait's `grep` matched the old line, then the
+    child's `>` emptied the log before the `sed` read the port. Only that `>` empties the file,
+    so these read the last run's line too.
+- **The fix under the same load** (`926a6efa`): 0 of 320, as named.
+
+### The fix and the checks
+
+- **`run.sh`:** its prelude empties `server.log` before either path starts its server, beside
+  the index's removal. The container path's own emptying is folded into it. Emptied, not
+  removed, so the wait's first read finds a file.
+- **The checks need a copy of `run.sh`.** The window is between the fork and the child's own
+  `>`, and no command `run.sh` calls runs there. So no fake on PATH can hold it open, as the
+  fake `ps` holds R-TERM's window.
+  - The suite writes a held copy beside each lane's log: `run.sh` with its one background
+    command, the host path's server start, wrapped in `{ …; exec …; } &`.
+  - Before that command's redirections, its child names its pid in `FAKE_HELD` and stops
+    itself (SIGSTOP). The fake `ps` continues it the first time it is asked about it.
+  - On the fixed form, that ask is the wait's first liveness check, after its first read
+    found the log empty. On main's form, the first read finds the old line, so the wait never
+    asks, and the stop's TERM ends the held child before it opens the log.
+  - The copy differs from `run.sh` in that one command alone. If `run.sh` has no background
+    command, or more than one, both checks read `no-background-command`.
+- **The checks,** each in a directory made anew:
+  - **R-HWAIT:** over a last run's log, a run passes. The log says `listening 127.0.0.1 9`.
+    Port 9 is below the ephemeral ranges, so no run's own server is given it.
+  - **R-HFRESH:** on a tree with no log yet, a run says nothing but the gate's line. It holds
+    "emptied, not removed" on the host path, as R-CFRESH does on the container path.
+
+### The test-first run
+
+The new suite and fake `ps` on main's `run.sh`, named and hashed before (`40e891de`). Exit 1,
+the 15 old checks green, the two new ones red as named:
+- **R-HWAIT** `(1 #f)`. The wait read port 9, where the fake's probe reached nothing, so the
+  index held no case. The stop's TERM ended the held child before it opened the log, the old
+  `stopped` passed the stop's check, and the gate failed a run of no case.
+- **R-HFRESH:** the gate's line came after `grep: …/hfresh/server.log: No such file or
+  directory`.
+
+Red the same way in 3 more runs on macOS, and in 3 of 3 under dash (`97420252`). With the fix:
+17 of 17 three times on macOS. Under dash, 10 runs on fresh trees and 10 over kept logs, each
+17 of 17.
+
+### The mutants
+
+Run 1 on macOS: 34 rows, 1 mismatch. The specs, names and predictions were hashed before
+(`36f301c8`). Each row ran the suite on a scratch copy of `src/` and `tests/`, four at a time.
+The earlier rows were re-predicted for 17 checks. CW-1 and CW-2 are re-cut on the shared line as
+HL-1 and HL-2. RM-8 is RT-2 since R-TERM's fix. RT-3 to RT-5 are left out, being about the fake
+`ps`'s linger alone.
+
+| id | mutation | named | the suite |
+|---|---|---|---|
+| BASE | no edit | none | as named |
+| HL-1 | the log not emptied, on either path | R-HWAIT, R-HFRESH, R-CWAIT, R-CENDS, R-CFRESH | as named |
+| HL-2 | the log removed, not emptied | R-HFRESH, R-CFRESH | as named |
+| HL-3 | main's form: the container path's emptying alone | R-HWAIT, R-HFRESH | as named |
+| HL-4 | main's form, and the host's log emptied once its server has started | none | as named, survived |
+| HL-5 | a failed emptying not caught | none | as named, survived |
+| HF-1 | the fake `ps` never continues a held server | R-HWAIT, R-HFRESH | as named |
+| HF-2 | main's form, and the child not held (`kill -0` for `kill -STOP`) | none | R-HWAIT, R-HFRESH, MISMATCH |
+| HF-3 | the held copy finds no background command | R-HWAIT, R-HFRESH | as named |
+| RM-1, RM-2, RM-3, RM-5, RM-7, RM-9, RM-10 | M5's review's | as before | as named |
+| RM-4 | a dead server waited for | R-NOSTART, R-HWAIT, R-HFRESH, R-CWAIT, R-CENDS, R-CFRESH | as named |
+| RM-6 | the URL at a fixed port | R-PASS, R-ENV, R-TWO, R-HWAIT, R-HFRESH | as named |
+| RT-1, RT-2, FP-1, FP-2, FP-3 | R-TERM's | as before | as named |
+| CW-3 … CW-7 | #71's | as before | as named |
+| NL-1 … NL-6 | #72's | as before | as named; NL-4, NL-6 survive |
+
+New checks and their killers, by value:
+- **R-HWAIT:** by HL-1 and HL-3 `(1 #f)`, the finding itself. By HF-1 and RM-4 `(2 #f)`, after
+  the 60 s wait: the held server is never continued. By RM-6 `(1 #f)`, and by HF-3
+  `(no-background-command #f)`.
+- **R-HFRESH:** by HL-1, HL-2 and HL-3, with its `grep:` line. HL-2 is the only one of these
+  that leaves R-HWAIT green, so R-HFRESH is what holds the choice to empty the file, not remove
+  it. Also by HF-1 and RM-4 `(2 ("autobahn: the echo server did not listen within 60 s"))`.
+
+The survivors and the mismatch:
+- **HL-4, a scope.** An emptying after the fork comes before the held server is continued, and
+  before any real server writes. A server faster than the shell's next command would lose its
+  `listening` line to it. No server here is that fast, and no check can make one.
+- **HL-5, a scope.** No check makes the log one that cannot be emptied.
+- **HF-2's mismatch is the prediction's.** The `kill -0` cut still starts an `sh -c` in the child
+  before its `>`. One process start was late enough for the wait's first read to win, and R-HWAIT
+  read `(2 #f)`, R-TWO's own failure: the server opened the log and was stopped while loading.
+  So run 2 (`d816f4a8`), one row at a time, twice:
+  - HF-2: R-HWAIT red both times, R-HFRESH once. A delay of one process start loses the race
+    often, not always.
+  - **HF-4,** main's form with no hold at all, the command only wrapped: survived both times, as
+    named. The child opens its log first.
+  - So the SIGSTOP is what makes the order certain.
+
+**Under dash** (the io_uring container, named and hashed before, `b02db20b`), eight rows once
+each: BASE, HL-1 to HL-4, HF-1, HF-3 and HF-4. Every red set and value as on macOS.
+
+`make test` (Darwin arm64): fifteen suites, 397 expected passes, every pin ok. In the io_uring
+container: fifteen suites and 397, each suite's count Darwin's.
