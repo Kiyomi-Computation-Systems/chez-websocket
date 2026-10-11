@@ -2320,3 +2320,17 @@ NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-
 - `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, every pin ok. On Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, `--security-opt seccomp=unconfined`, dash, libuv 1.48.0): fifteen suites and 397, each suite's count Darwin's.
 
 NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed. The server's next release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.
+
+MERGED to main on 2026-10-11, on the owner's "Do ritual": **The host path's old log** (the entry above), #78.
+- **#78**, at 7ea183d, was squashed as c79c866 (tree 41e9d1a, the tested head's; parent 50017c4), with `--match-head-commit` on the full SHA. Its message is the commit's.
+- **CI did not run.** The PR's run, 38181338934 (7ea183d), ended with `linux` and `autobahn` not started (0 steps, the payments annotation). The entry's local runs stood in: macOS, and Linux aarch64 with io_uring allowed. It merged past the red check on the owner's word.
+- **Branches.** `fix/autobahn-host-log` was deleted, local and remote. The main checkout is on main, fast-forwarded. This reflect is committed from the session's worktree, detached at c79c866. Its app branch, `claude/fervent-mccarthy-433c50`, is local only, with no commits of its own, and is left to the app. No PR is open.
+
+**Reflect.**
+- **Find the seam before choosing the fake.** Both ways the task offered to force the race assumed a fake could stand between the fork and the child's `>`. Nothing `run.sh` calls runs there, so the check holds a copy of `run.sh`, its one command wrapped. Asking first where a fake could stand saved building one that could never be red.
+- **Load, not repetition, showed the race.** 0 of 60 runs in sequence or two at once, but 21 of 320 with 8 at once. 17 of the 21 were given no port at all, so a probe that watched only for the old port would have missed most of them.
+- **A cut that looks neutral can be a measurement.** HF-2's `kill -0` kept one `sh -c` before the `>`, and that alone lost the race most of the time. The window is about one process start wide.
+
+`make test` green on main (c79c866, Darwin arm64): fifteen suites, 397 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI; then that branch can go. The second review's seven findings left unfixed. The server's next release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.
