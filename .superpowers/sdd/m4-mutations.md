@@ -1898,3 +1898,11 @@ server pinned at v0.4.1 (520f70e).
   does the server: its shell suite passed (204 on Darwin, 199 on Linux), and so did every
   suite of its 51 that runs here, 1,951 passes on Darwin, as many as without the mutant.
   `tests/test-clients.sps` stops at status 2 with or without it: its tools are not built here.
+- **Update, 2026-10-11: the server now kills SC-1.** chez-http-server #163 (5f97368, on its
+  main after v0.4.1) adds a check to its `tests/test-shell.sps`: "a taker that holds the loop
+  300 ms as it takes the stream arms its deadline after the hold, at the loop's time brought
+  up to date". Under SC-1 that check reads the deadline `0` ms past the loop's stale time,
+  where it wants at least 300. That is the server's record, its `m8-mutations.md`, last
+  section: Darwin, Linux aarch64 and x86_64. Here SC-1 is still a scope statement. The
+  socket suite times by the loop's clock and cannot see it, and the pin, v0.4.1 (520f70e),
+  predates the check.
