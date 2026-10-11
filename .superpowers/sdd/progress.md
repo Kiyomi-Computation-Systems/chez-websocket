@@ -2191,3 +2191,24 @@ NEXT: the PR; the closing ritual for #73, #74 and this, bottom-up, and the tag `
 - `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's.
 
 NEXT: the PRs; the closing ritual for #73, #74 and #75, bottom-up, and the tag `v0.1.0` on #75's squash, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **M6, v0.1.0, as three stacked PRs** (the four entries above), bottom-up, and **the tag `v0.1.0`**.
+- **#73, the user docs:** 1b9fe1d squashed as b7486b6 (tree ae60f9d, the tested head's; parent 270ce0e). It merged without deleting its branch, since #74 was based on it.
+- **#74, the release:** retargeted to main and rebased from 1b9fe1d onto b7486b6, d46b08d becoming 99df52f (tree dd8c3d5, unchanged), pushed with the lease. It squashed as 68aafbd (tree dd8c3d5; parent b7486b6).
+- **#75, M6's two reviews:** retargeted to main and rebased onto 68aafbd, 1a6a919 becoming 9c46561 (tree fe23180, unchanged), pushed with the lease. It squashed as 87bc9e6 (tree fe23180; parent 68aafbd), its message both commits'.
+- **The tag:** `v0.1.0`, annotated and signed (tag object 6a641d4, EdDSA key D4D955D55C8853D7, a good signature), on 87bc9e6, the stack's last squash: "chez-websocket v0.1.0 — WebSocket for chez-http-server". Its body names CHANGELOG.md's `[0.1.0]`. Pushed; no GitHub release was made, as for the server's tags.
+- **CI.** Billing-blocked: the PRs' last runs, 38169790136 (99df52f) and 38169816473 (9c46561), and main's on each squash, 38169778213 (b7486b6), 38169802989 (68aafbd) and 38169831729 (87bc9e6), each ended with both jobs, `linux` and `autobahn`, not started (0 steps). The entries' local runs stood in, by the owner's form ("Tag on local runs"): `make test` on Darwin, Linux aarch64 and Linux x86_64, and two `make autobahn` runs. They merged past the red check on the owner's word.
+- **Branches.** All three deleted, local and remote. This reflect is committed from the `m6` worktree, detached at 87bc9e6, then removed. The main checkout is fast-forwarded after it. No PR is open.
+
+**M6 is done, and with it the milestone plan:** v0.1.0 is the first release. The README's status names it.
+
+**Reflect.**
+- **The docs needed a check of their own.** The first docs suite passed pages that were wrong, as each review found. A default of "off" or "20 ms" passed. The condition type's name went unchecked, and the snippets were only parsed. Each fix was proved by mutants run against the suite before it: those mutants passed there and fail here.
+- **A measure in a record goes stale with its pin.** The README's "about 8 KB" had stood since M4.3, through the v0.4.1 pin, which cut it to about 5.3 KB. The probe is now committed, so the next pin can measure it again.
+- **Main moved under the stack** (#72, from another session) between the docs' first commit and the PRs. Rebasing first, and measuring again on the rebased tree, kept every count in the records true of a tree on main.
+
+`make test` green on main (87bc9e6, Darwin arm64): fifteen suites, 394 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: when CI is back, main's latest run; the R-TERM probe, then its fix. The second review's seven findings left unfixed (its entry lists them). The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
