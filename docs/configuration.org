@@ -10,7 +10,7 @@ starts, so a bad value stops it there, naming the variable.
 | ~CHEZ_WS_MAX_QUEUE~         | 16      | messages waiting for ~websocket-receive~ before reading stops          |
 | ~CHEZ_WS_PING_INTERVAL~     | 20 s    | quiet time before the server pings; ~0~ turns pinging off              |
 | ~CHEZ_WS_PING_TIMEOUT~      | 20 s    | time for the client's pong; past it, the connection closes with ~1011~ |
-| ~CHEZ_WS_CLOSE_TIMEOUT~     | 10 s    | time for the client to answer the server's close; past it, cut off     |
+| ~CHEZ_WS_CLOSE_TIMEOUT~     | 10 s    | time for the client to finish a close; past it, cut off                |
 | ~CHEZ_WS_WRITE_HIGH_WATER~  | 262144  | bytes unsent before a send waits and reading stops                     |
 | ~CHEZ_WS_WRITE_LOW_WATER~   | 65536   | bytes unsent when both go on again                                     |
 | ~CHEZ_WS_WRITE_TIMEOUT~     | 60 s    | time a client past the high water has for each write; past it, cut off |
@@ -33,9 +33,10 @@ starts, so a bad value stops it there, naming the variable.
   water, sends wait and the server stops reading from it, until the client has
   read down to the low water. A client past the high water that takes longer
   than the write timeout over a write is cut off.
-- *Closing.* When the server closes, counted from when the close was asked
-  for, the client has the close timeout to read what is left and answer. One
-  that answers in time closes cleanly; one that has not is cut off.
+- *Closing.* Whoever begins a close, the client then has the close timeout,
+  counted from when the server's close was queued, to read what is left, and
+  to answer the server's close if the server began it. A client that has not
+  is cut off; one that has closes cleanly.
 
 ~environment-websocket-limits~ is what was read. To give one handler other
 limits, see [[file:handlers.org][handlers.org]].

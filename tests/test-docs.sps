@@ -17,14 +17,17 @@
 ;;;
 ;;; The pages are read as a user reads them: configuration.org's first table
 ;;; whose first column is Variable; every #+begin_src scheme block, in any
-;;; case; the names written in ~code~ or in a block; the fields the handlers
-;;; page lists.  A block that begins with an import is a program: it is run
-;;; with `serve` captured, and its handler played on the server's fake shell
-;;; (decision 0004), as the binding suite plays its own.  Any other block is
-;;; a fragment, run where its words put it: in a handler when it names
-;;; `request`, else in a WebSocket's procedure.  The names a fragment takes
-;;; from around it are `request`, `ws`, `settings`, and the procedures `chat`
-;;; and `upload`; the suite gives each one.  A body is a top-level program's:
+;;; case, with the #+name: line before it, if any; the names written in
+;;; ~code~ or in a block; the fields the handlers page lists.  A block that
+;;; begins with an import is a program: it is run with `serve` captured, and
+;;; its handler played on the server's fake shell (decision 0004), as the
+;;; binding suite plays its own.  Any other block is a fragment, and the
+;;; suite knows each by its name: where it runs, a handler or a WebSocket's
+;;; procedure, how it is played, and what that must give, from the page's
+;;; words about it (`fragment-plays`).  A fragment the suite does not know,
+;;; or one it knows that the page lost, is red.  The names a fragment takes
+;;; from around it are `request`, `ws`, and the procedures `chat` and
+;;; `upload`; the suite gives each one.  A body is a top-level program's:
 ;;; definitions and expressions in any order (R6RS §8.1).
 (import (rnrs) (rnrs eval) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
         (only (chezscheme) getenv)
@@ -87,17 +90,25 @@
 (define (directive? line directive)
   (starts? (string-downcase (trim line)) directive))
 
-;; blocks : String -> (Listof (U String (List 'unterminated String)))
-;; Every #+begin_src scheme block's text, in order; one the page never ends
-;; is (unterminated text).
+;; A #+begin_src scheme block: its #+name, or #f; its text; and whether the
+;; page ends it.
+(define-record-type block (fields name text ended?))
+
+;; blocks : String -> (Listof Block)
+;; Every #+begin_src scheme block, in order.  Its name is the #+name: line
+;; just before it.
 (define (blocks text)
-  (let ((block (lambda (in) (apply string-append (map (lambda (l) (string-append l "\n")) (reverse in))))))
-    (let loop ((ls (text-lines text)) (in #f) (out '()))
-      (cond ((null? ls) (reverse (if in (cons (list 'unterminated (block in)) out) out)))
-            ((and (not in) (directive? (car ls) "#+begin_src scheme")) (loop (cdr ls) '() out))
-            ((and in (directive? (car ls) "#+end_src")) (loop (cdr ls) #f (cons (block in) out)))
-            (in (loop (cdr ls) (cons (car ls) in) out))
-            (else (loop (cdr ls) #f out))))))
+  (let ((joined (lambda (in) (apply string-append (map (lambda (l) (string-append l "\n")) (reverse in))))))
+    ;; `in`, while a block is open: its name, then its lines, newest first.
+    (let loop ((ls (text-lines text)) (name #f) (in #f) (out '()))
+      (cond ((null? ls) (reverse (if in (cons (make-block (car in) (joined (cdr in)) #f) out) out)))
+            ((and (not in) (directive? (car ls) "#+name:"))
+             (loop (cdr ls) (trim (substring (trim (car ls)) 7 (string-length (trim (car ls))))) #f out))
+            ((and (not in) (directive? (car ls) "#+begin_src scheme")) (loop (cdr ls) #f (list name) out))
+            ((and in (directive? (car ls) "#+end_src"))
+             (loop (cdr ls) #f #f (cons (make-block (car in) (joined (cdr in)) #t) out)))
+            (in (loop (cdr ls) #f (cons (car in) (cons (car ls) (cdr in))) out))
+            (else (loop (cdr ls) #f #f out))))))
 
 ;; data : String -> (Listof Datum) — every datum the text reads as.
 (define (data text)
@@ -106,13 +117,13 @@
       (let ((d (read p)))
         (if (eof-object? d) (reverse out) (loop (cons d out)))))))
 
-;; readable : (Listof (U String Any)) -> (Listof String) — the blocks that end and read.
+;; readable : (Listof Block) -> (Listof Block) — the blocks that end and read.
 (define (readable bs)
-  (filter (lambda (t) (and (string? t) (guard (e (#t #f)) (data t) #t))) bs))
+  (filter (lambda (k) (and (block-ended? k) (guard (e (#t #f)) (data (block-text k)) #t))) bs))
 
-;; program? : String -> Boolean — the block begins with an import.
-(define (program? t)
-  (let ((d (data t))) (and (pair? d) (pair? (car d)) (eq? (caar d) 'import))))
+;; program? : Block -> Boolean — the block begins with an import.
+(define (program? k)
+  (let ((d (data (block-text k)))) (and (pair? d) (pair? (car d)) (eq? (caar d) 'import))))
 
 ;; leading-digits : String -> String — the digits the string starts with.
 (define (leading-digits s)
@@ -275,16 +286,8 @@
 (define surroundings
   (list (cons 'request (lambda (request ws) request))
         (cons 'ws (lambda (request ws) ws))
-        (cons 'settings (lambda (request ws) (make-handshake-settings '())))
         (cons 'chat (lambda (request ws) echo))
         (cons 'upload (lambda (request ws) echo))))
-
-;; in-handler? : String -> Boolean — the fragment names `request`.
-(define (in-handler? t)
-  (let walk ((d (data t)))
-    (cond ((eq? d 'request) #t)
-          ((pair? d) (or (walk (car d)) (walk (cdr d))))
-          (else #f))))
 
 ;; fragment : String -> (Request (U WebSocket #f) -> Any)
 ;; The fragment as a procedure of the request and the WebSocket: its forms a
@@ -311,22 +314,37 @@
     (fake-shell-settle! sh)
     sh))
 
-;; heard : FakeShell -> (List (U Nat Datum) (U String #f) Bytevector)
+;; read-head : FakeShell -> (List (U Nat Datum) (Listof (Pair String String)) Bytevector)
 ;; What the client read: the head's status, as the server's (response-reader)
-;; reads that head alone, its Sec-WebSocket-Accept, and every byte after it.
-(define (heard sh)
+;; reads that head alone, its fields, and every byte after it.
+(define (read-head sh)
   (let* ((all (concat (fake-shell-writes sh)))
          (n (bytevector-length all))
          (blank (b "\r\n\r\n")))
     (let scan ((i 0))
-      (cond ((> (+ i 4) n) (list 'no-head #f all))
+      (cond ((> (+ i 4) n) (list 'no-head '() all))
             ((equal? (copy all i (+ i 4)) blank)
-             (let* ((r (read-response (copy all 0 (+ i 4)) #f #f))
-                    (accept (find (lambda (f) (string-ci=? (car f) "Sec-WebSocket-Accept")) (list-ref r 2))))
+             (let ((r (read-response (copy all 0 (+ i 4)) #f #f)))
                (list (if (eq? (list-ref r 4) 'complete) (car r) (list 'unread (list-ref r 4)))
-                     (and accept (cdr accept))
+                     (list-ref r 2)
                      (copy all (+ i 4) n))))
             (else (scan (+ i 1)))))))
+
+;; field : (Listof (Pair String String)) String -> (U String #f)
+(define (field fields name)
+  (let ((f (find (lambda (f) (string-ci=? (car f) name)) fields)))
+    (and f (cdr f))))
+
+;; heard : FakeShell -> (List (U Nat Datum) (U String #f) Bytevector)
+;; The head's status, its Sec-WebSocket-Accept, and every byte after it.
+(define (heard sh)
+  (let ((h (read-head sh)))
+    (list (car h) (field (cadr h) "Sec-WebSocket-Accept") (caddr h))))
+
+;; head-field : String -> (FakeShell -> (List (U Nat Datum) (U String #f)))
+;; The head's status, and the named field of it.
+(define (head-field name)
+  (lambda (sh) (let ((h (read-head sh))) (list (car h) (field (cadr h) name)))))
 
 ;; played : (-> (Request -> Answer)) Bytevector (U Bytevector #f) (FakeShell -> Any) -> Any
 ;; What `hear` makes of the handler `make` gives, on a fake connection that
@@ -342,11 +360,14 @@
         (fake-shell-settle! sh))
       (hear sh))))
 
-;; RFC 6455 §1.3's opening handshake, to the path given.
-(define (handshake path)
-  (b (string-append "GET " path " HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\n"
-                    "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-                    "Sec-WebSocket-Version: 13\r\n\r\n")))
+;; RFC 6455 §1.3's opening handshake, to the path given, with any more
+;; fields given, each a line.
+(define (handshake path . fields)
+  (b (apply string-append
+            "GET " path " HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            (append (map (lambda (f) (string-append f "\r\n")) fields) '("\r\n")))))
 
 ;; What the client reads of an echo: the 101 with §1.3's accept, §5.7's Hello,
 ;; then the server's close answering the client's 1000 with 1000 (§5.5.1).
@@ -360,6 +381,49 @@
 (define (echo-input path) (concat (list (handshake path) rfc-masked-hello)))
 (define client-close (client-frame #x88 (close-body 1000 "")))
 
+;; A client's binary frame announcing 2,000,000 bytes, its header and masking
+;; key alone (§5.2): past the default cap, 1 MiB, which fails it 1009 before
+;; its payload is held (decision 0001), and short of the 16 MiB the limits
+;; fragment gives.
+(define big-header (bv (append (list #x82) (length-bytes 2000000 128) '(#x37 #xFA #x21 #x3D))))
+
+;; fragment-handler : Block Symbol -> (-> (Request -> Answer))
+;; A maker of the fragment's handler: a handler's fragment is one; a
+;; procedure's runs in the WebSocket websocket-accept gives, with its defaults.
+(define (fragment-handler k role)
+  (lambda ()
+    (let ((f (fragment (block-text k))))
+      (if (eq? role 'handler)
+          (lambda (request) (f request #f))
+          (lambda (request) (websocket-accept request (lambda (ws) (f #f ws))))))))
+
+;; The fragments handlers.org names, each with where it runs, how it is
+;; played, given its handler's maker, and what that must give, from the
+;; page's words about it:
+;; - closed-code: a procedure that echoes until the connection closes, then
+;;   displays its code, the client's (§5.5.1's 1000);
+;; - chat-settings: of the subprotocols a client offers, the first in the
+;;   handler's list is chosen (§4.2.2), so chat.v2 of "chat.v1, chat.v2"; a
+;;   page from the origin listed is accepted, one from another site refused
+;;   403;
+;; - upload-limits: a message the default cap refuses is taken, so a frame
+;;   announcing 2,000,000 bytes gets no close.
+(define fragment-plays
+  (list (list "closed-code" 'procedure
+              (lambda (make) (logged (lambda () (played make (echo-input "/") client-close heard))))
+              (list echo-heard "1000"))
+        (list "chat-settings" 'handler
+              (lambda (make)
+                (list (played make (handshake "/" "Sec-WebSocket-Protocol: chat.v1, chat.v2"
+                                              "Origin: https://app.example.com")
+                              #f (head-field "Sec-WebSocket-Protocol"))
+                      (played make (handshake "/" "Origin: https://elsewhere.example")
+                              #f (head-field "Sec-WebSocket-Protocol"))))
+              '((101 "chat.v2") (403 #f)))
+        (list "upload-limits" 'handler
+              (lambda (make) (played make (concat (list (handshake "/") big-header)) #f heard))
+              (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (make-bytevector 0)))))
+
 (run-suite "docs"
   (lambda ()
     ;; Its echoes are the defaults': the binding reads CHEZ_WS_ variables as
@@ -372,7 +436,7 @@
            (rows (table configuration "Variable"))
            (all-blocks (append (blocks configuration) (blocks handlers)))
            (programs (filter program? (readable (blocks handlers))))
-           (fragments (filter (lambda (t) (not (program? t))) (readable (blocks handlers))))
+           (fragments (filter (lambda (k) (not (program? k))) (readable (blocks handlers))))
            (written (names (string-append configuration handlers))))
       ;; The suite's own frames are §5.7's, and the pages name what a handler
       ;; calls first, so a scan that finds nothing cannot pass.
@@ -412,31 +476,33 @@
              (code-spans (paragraph handlers "The fields are"))))
 
       (test-equal "every Scheme block in docs/ ends, and reads as Scheme"
-        (map (lambda (t) 'read) all-blocks)
-        (map (lambda (t) (if (string? t) (guard (e (#t (list 'unread t))) (data t) 'read) t))
+        (map (lambda (k) 'read) all-blocks)
+        (map (lambda (k)
+               (cond ((not (block-ended? k)) (list 'unterminated (block-text k)))
+                     (else (guard (e (#t (list 'unread (block-text k)))) (data (block-text k)) 'read))))
              all-blocks))
 
       ;; --- handlers.org's program and fragments, run ---
 
       (test-equal "handlers.org's first program takes RFC 6455's handshake to /echo with §1.3's accept, echoes a masked Hello as §5.7's frame, and answers the client's close 1000 with 1000"
         echo-heard
-        (played (lambda () (program-handler (car programs))) (echo-input "/echo") client-close heard))
+        (played (lambda () (program-handler (block-text (car programs)))) (echo-input "/echo") client-close heard))
 
       (test-equal "handlers.org's first program answers any other path 404"
         404
-        (played (lambda () (program-handler (car programs)))
+        (played (lambda () (program-handler (block-text (car programs))))
                 (b "GET /other HTTP/1.1\r\nHost: server.example.com\r\n\r\n") #f
                 (lambda (sh) (car (read-response (concat (fake-shell-writes sh)) #f #f)))))
 
-      (test-equal "every fragment of handlers.org runs where its words put it: a handler's answers RFC 6455's handshake 101; a procedure's, played as the echo is, echoes and shows the client's close code"
-        (map (lambda (t) (if (in-handler? t) 101 (list echo-heard "1000"))) fragments)
-        (map (lambda (t)
-               (if (in-handler? t)
-                   (played (lambda () (let ((f (fragment t))) (lambda (request) (f request #f))))
-                           (handshake "/") #f (lambda (sh) (car (heard sh))))
-                   (logged (lambda ()
-                             (played (lambda ()
-                                       (let ((f (fragment t)))
-                                         (lambda (request) (websocket-accept request (lambda (ws) (f #f ws))))))
-                                     (echo-input "/") client-close heard)))))
-             fragments)))))
+      ;; Each fragment the suite knows, by name, and what its play gave, or
+      ;; (missing) when the page has no readable fragment of that name; then
+      ;; any fragment the page has that the suite does not know.
+      (test-equal "every fragment of handlers.org is one the suite knows, by its #+name, and does what the page says of it"
+        (map (lambda (p) (list (car p) (cadddr p))) fragment-plays)
+        (append
+         (map (lambda (p)
+                (let ((k (find (lambda (k) (equal? (block-name k) (car p))) fragments)))
+                  (list (car p) (if k ((caddr p) (fragment-handler k (cadr p))) '(missing)))))
+              fragment-plays)
+         (map (lambda (k) (list 'unknown (block-name k)))
+              (filter (lambda (k) (not (assoc (block-name k) fragment-plays))) fragments)))))))

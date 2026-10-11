@@ -197,3 +197,57 @@ the same helpers now imported: **0 mismatches**.
 
 The new suite on #74's pages, before the closing bullet and the limits example changed:
 8 of 8, as named. Their old code was valid, only made at every request.
+
+## M6's second review
+
+Platform as above, 2026-10-11. A second `/code-review` (xhigh) over #75 reported 12
+findings; the owner said "fix the ones that matter", the five that were. The suite is 8
+checks (blob 6d2cff6); the pages `docs/handlers.org` (blob a96762e) and
+`docs/configuration.org` (blob 9da52e9).
+
+### What changed
+
+DOC-FRAGMENTS no longer guesses a fragment's role from the word `request`, nor holds every
+other fragment to one fragment's echo. Each fragment carries an org `#+name:`, and the
+suite's `fragment-plays` knows each by it: where it runs, how it is played, and what that
+must give, from the page's words about it. Compared by name: a known fragment the page
+lost is `(missing)`, a fragment the suite does not know `(unknown name)`.
+
+| fragment | runs in | played with | must give |
+|---|---|---|---|
+| `closed-code` | a WebSocket's procedure | a masked Hello, then the client's close 1000 | the echo, and `1000` displayed |
+| `chat-settings` | a handler | an offer of `chat.v1, chat.v2` from `https://app.example.com`; then a page from `https://elsewhere.example` | `(101 "chat.v2")`; `(403 #f)` |
+| `upload-limits` | a handler | a frame announcing 2,000,000 bytes, its header alone | the 101, and nothing after it: no 1009 |
+
+The limits fragment makes settings of its own, where it borrowed the chat example's.
+
+### The mutants
+
+Predictions hashed before the run (sha256 `ffda1147`): M6-1 to M6-34 named again, and
+M6-35 to M6-42 new. **0 mismatches.** M6-7, M6-28 and M6-29, each a fragment made
+unreadable or unterminated, now also redden DOC-FRAGMENTS: the page lost a fragment the
+suite knows. The others are named as before.
+
+| ID | mutation | named red | status | result |
+|---|---|---|---|---|
+| M6-35 | the chat example drops its settings | DOC-FRAGMENTS | 1 | as named |
+| M6-36 | the chat example's preference order swapped | DOC-FRAGMENTS | 1 | as named |
+| M6-37 | the limits example drops its limits | DOC-FRAGMENTS | 1 | as named |
+| M6-38 | the chat example's origins lose the app's | DOC-FRAGMENTS | 1 | as named |
+| M6-39 | `closed-code`'s `#+name` removed | DOC-FRAGMENTS | 1 | as named |
+| M6-40 | `chat-settings` named `chat-setting` | DOC-FRAGMENTS | 1 | as named |
+| M6-41 | the chat example's origins `'any` | DOC-FRAGMENTS | 1 | as named |
+| M6-42 | the upload cap 1 MiB | DOC-FRAGMENTS | 1 | as named |
+
+By value, `chat-settings`' and `upload-limits`' entries:
+- M6-35 and M6-38: `((403 #f) (403 #f))`, the app's page refused.
+- M6-36: `((101 "chat.v1") (403 #f))`.
+- M6-41: `((101 "chat.v2") (101 #f))`, the other site's page taken.
+- M6-37 and M6-42: `(101 … #vu8(136 2 3 241))`, a close of 1009.
+- M6-39: `("closed-code" (missing))` and `(unknown #f)`; M6-40: `("chat-settings" (missing))`
+  and `(unknown "chat-setting")`.
+
+**On the first review's suite** (fix/m6-review's head, 36978d5), the same eight on this
+round's pages, predictions hashed before (sha256 `b8faec1e`): each passed, status 0, as
+named. Its handler fragments answered 101 whatever their settings or limits, and it read
+no names.

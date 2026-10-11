@@ -2146,7 +2146,7 @@ NEXT: the release, stacked on this: the connection's cost measured on v0.5.0; CH
   - Linux aarch64 (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0), every suite as `make test` runs it, the pins checked on the host: fifteen suites and 392;
   - Linux x86_64 under emulation (`chez-websocket-ci-amd64:10.4.1`, libuv 1.48.0), the same: fifteen suites and 392, in 98 s;
   - each suite's count alike on the three; and the two `make autobahn` runs above.
-- **The tag.** After the merges, at the closing ritual: `v0.1.0` on the release's squash, annotated and signed, as the server's are: "chez-websocket v0.1.0 — WebSocket for chez-http-server", its body pointing at CHANGELOG.md's `[0.1.0]`. Main's run is read once CI returns.
+- **The tag.** After the merges, at the closing ritual: `v0.1.0` on the stack's last squash, annotated and signed (corrected by M6's second review: the release's squash until M6's review stacked on it, #75), as the server's are: "chez-websocket v0.1.0 — WebSocket for chez-http-server", its body pointing at CHANGELOG.md's `[0.1.0]`. Main's run is read once CI returns.
 - `make test` green before the commit (Darwin arm64): fifteen suites, 392 expected passes, every pin ok. Nothing tested changed: CHANGELOG.md, README.org, the design, the research record and the ledger only.
 
 NEXT: the PRs; the closing ritual for both, bottom-up, and the tag, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
@@ -2176,3 +2176,18 @@ NEXT: the PRs; the closing ritual for both, bottom-up, and the tag, when the own
 - `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, the docs suite's 8, every pin ok. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's. The CHANGELOG says 394.
 
 NEXT: the PR; the closing ritual for #73, #74 and this, bottom-up, and the tag `v0.1.0` on this PR's squash, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
+
+---
+
+**M6'S SECOND REVIEW (2026-10-11),** on the owner's "fix the ones that matter" after a second `/code-review` (xhigh) over #75 reported 12 findings. On `fix/m6-review` (#75), a second commit.
+- **Fixed, the five that matter:**
+  - **The fragments are known by name, not guessed.** DOC-FRAGMENTS took a fragment's role from the word `request`, and held every other fragment to one fragment's echo and `1000`. Now each carries an org `#+name:`, and the suite's `fragment-plays` gives each its own play and result, from the page's words. A fragment the suite does not know, or one it knows that the page lost, is red. So the check cannot pass on an empty page either.
+  - **The handler fragments are held to what they show,** not to a 101 alone. `chat-settings` must choose `chat.v2` of an offer of `chat.v1, chat.v2`, take the app's page and refuse another site's 403. `upload-limits` must take a frame announcing 2,000,000 bytes, which the default cap fails 1009.
+  - **The tag:** the M6.2 entry's tag line now says the stack's last squash, corrected in place. #74's commit message said the same of its own squash; it is amended, its tree unchanged, and this branch moved onto it.
+  - **The limits example** makes settings of its own, `(make-handshake-settings '())`, where it borrowed the chat example's subprotocols and origins.
+  - **configuration.org's close:** whoever begins it, the client has the close timeout, counted from when the server's close was queued, to read what is left, and to answer if the server began it. The table's row says "finish a close".
+- **Not fixed, by the owner's word:** the seven others. Tabs or two spaces before a block's language; `(ws-play)`'s generic `copy` and `concat`; `(ws-autobahn)` imported for `text-lines`; `field?` reading `condition-who`; blocks read more than once; and DOC-NAMES's environment wider than its title.
+- **Watched to fail** (`m6-mutations.md`, its second review's section): M6-1 to M6-34 named again and M6-35 to M6-42 new, 0 mismatches. On the first review's suite the eight new ones each passed, as named.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's.
+
+NEXT: the PRs; the closing ritual for #73, #74 and #75, bottom-up, and the tag `v0.1.0` on #75's squash, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
