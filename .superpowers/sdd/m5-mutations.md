@@ -735,3 +735,7 @@ and predictions were hashed before (`2cd243d7`). Each row ran on a fresh
   a zombie taken for gone, that row is the real race, which io_uring shows.
 - 15 suite runs of the fix there, each on a fresh tree, all 15 checks green. The container's
   zombies stayed at 11 across the last 5 runs, all of them left by the mutant rows.
+- **The probe's real race, on the bounded form:** main's fake docker (no linger) and this
+  `run.sh`, 30 runs in that container: none left the server behind. All 30 showed `Z` in
+  `ps` first, and the poll went on past it until the server was gone. The container's zombies
+  stayed at 11.
