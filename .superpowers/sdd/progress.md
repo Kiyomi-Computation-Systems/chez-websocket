@@ -2255,3 +2255,19 @@ NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's la
 - `make test` green before the commit (Darwin arm64): fifteen suites, 395 expected passes, every pin ok. `make check-help` passes. On Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, `--security-opt seccomp=unconfined`, dash, libuv 1.48.0): fifteen suites and 395, each suite's count Darwin's.
 
 NEXT: the PR's CI, when CI is back, and the closing ritual when the owner asks, `probe/r-term` kept. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause there. The host path's old-log race, in a change of its own. The second review's seven findings left unfixed. The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **R-TERM's probe and fix, and its review** (the two entries above), #76.
+- **#76**, at adadde5, was squashed as 96f6285 (tree ced87cd, the tested head's; parent 3637f8a). Its message is all three commits'.
+- **CI did not run.** The PR's runs, 38174218722 (e487b94), 38176190506 (e59f78e) and 38176289113 (adadde5), and the probe's, 38176038063 (90c04fd), each ended with every job not started (0 steps), the billing block. The entries' local runs stood in: macOS, and Linux aarch64 with io_uring allowed. It merged past the red check on the owner's word.
+- **Branches.** `fix/r-term` was deleted, local and remote. `probe/r-term` (90c04fd) is kept for CI. This checkout is on main, fast-forwarded. #77, another session's, is open.
+
+**Reflect.**
+- **The stand-ins were not running the server CI runs.** Docker's default seccomp forbids io_uring, so in every Linux container here, M5's and M6's included, the echo server had no `iou-sqp` thread. CI's runner and any Linux host have one. The 80+ local runs could never see R-TERM fail. When a CI-only failure will not reproduce, ask first what the sandbox takes away.
+- **A pid 1 that never reaps turned a race into a count.** With `sleep` as init, anything `run.sh` left behind stayed: 19 of 30, where CI's reaper made it one run in three.
+- **The first fix trusted the fake it was tested with.** The `wait` relied on `ps` telling the truth about Z, and the review found it unbounded. The new fake was not executable at first, so a check passed without it. Now R-FAKEPS holds the fake `ps`, and the stop's 30 s cap is held by FP-3.
+
+`make test` green on main (96f6285, Darwin arm64): fifteen suites, 395 expected passes, every pin ok.
+
+NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI; then that branch can go. The host path's old-log race, from its task. The second review's seven findings left unfixed. The next server release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps`.
