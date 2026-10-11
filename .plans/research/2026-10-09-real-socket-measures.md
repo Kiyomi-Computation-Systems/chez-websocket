@@ -284,9 +284,10 @@ branch on main's 270ce0e, the server pinned at v0.5.0 (02ef95d) with chez-libuv 
 Darwin only: the Linux image has no python.
 
 **How.** The server's own method, as in [A connection's cost](#a-connections-cost):
-a probe in the scratch `ws-cost/` starts the server's libuv shell on 127.0.0.1:0 with a
+the probe [`spike/ws-cost.sps`](spike/ws-cost.sps), whose header says how to run it,
+starts the server's libuv shell on 127.0.0.1:0 with a
 handler that accepts `/ws` with an echo procedure and answers anything else 200. A
-python child holds the connections, says `ready`, and closes them when its stdin
+python child, [`spike/ws-hold.py`](spike/ws-hold.py), holds the connections, says `ready`, and closes them when its stdin
 closes. The heap is read after two full collections, once the child is ready, every
 connection is the server's, and every procedure waits in `websocket-receive` (a count
 around the receive says so). A connection's cost is (heap with 500 − heap with 100) /
@@ -299,7 +300,7 @@ around the receive says so). A connection's cost is (heap with 500 − heap with
 | the same, after 10 echoes of a 2-byte text | 5,353 to 5,477 B |
 | the server's own connection, idle after a GET | 1,900 to 2,055 B |
 
-Measured twice: first on fcbc598's tree, then on 270ce0e's, once #72 had merged (its
+Measured twice: first on 54da491's tree (the docs commit, on fcbc598), then on 270ce0e's, once #72 had merged (its
 change is the Autobahn lane's `run.sh` alone). The table is the second's; the first gave
 5,194 to 5,372 B, 5,316 to 5,524 B and 1,818 to 1,967 B.
 

@@ -81,6 +81,7 @@ condition says how it closed:
 | ~(websocket-closed-reason e)~ | the client's reason, or ~""~                                             |
 | ~(websocket-closed-clean? e)~ | whether a close went each way                                            |
 
+#+name: closed-code
 #+begin_src scheme
 (guard (e ((websocket-closed? e)
            (display (websocket-closed-code e))))
@@ -94,6 +95,7 @@ condition says how it closed:
 Settings are the third argument. Make them once, as your program starts: a bad
 name stops it there.
 
+#+name: chat-settings
 #+begin_src scheme
 (define settings
   (make-handshake-settings '("chat.v2" "chat.v1")
@@ -112,13 +114,19 @@ name stops it there.
 * Limits for one handler
 
 Limits come from the environment ([[file:configuration.org][configuration.org]]). To give
-one handler its own, pass them as the fourth argument. Here, times are in
-milliseconds.
+one handler its own, pass them as the fourth argument, after its settings:
+~(make-handshake-settings '())~ are the defaults. Make them once too, as your
+program starts. Here, times are in milliseconds.
 
+#+name: upload-limits
 #+begin_src scheme
-(websocket-accept request upload (make-handshake-settings '())
+(define upload-settings (make-handshake-settings '()))
+
+(define upload-limits
   (websocket-limits-with environment-websocket-limits
                          '((max-message-bytes . 16777216))))
+
+(websocket-accept request upload upload-settings upload-limits)
 #+end_src
 
 The fields are ~max-message-bytes~, ~max-queue~, ~ping-interval-ms~,

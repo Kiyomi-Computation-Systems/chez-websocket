@@ -63,17 +63,6 @@
         (only (websocket limits) websocket-limits-environment-variables)
         (websocket) (ws-play))
 
-;; copy : Bytevector Nat Nat -> Bytevector — bv[from, to), copied.
-(define (copy bv from to)
-  (let ((o (make-bytevector (- to from)))) (bytevector-copy! bv from o 0 (- to from)) o))
-
-;; concat : (Listof Bytevector) -> Bytevector
-(define (concat bvs)
-  (let ((out (make-bytevector (fold-left (lambda (n bv) (+ n (bytevector-length bv))) 0 bvs))))
-    (fold-left (lambda (at bv) (bytevector-copy! bv 0 out at (bytevector-length bv)) (+ at (bytevector-length bv)))
-               0 bvs)
-    out))
-
 ;; --- the frames, by RFC 6455 §5.2 and §5.3 ----------------------------------
 
 (define nothing (make-bytevector 0))
