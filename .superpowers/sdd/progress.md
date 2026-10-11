@@ -2127,3 +2127,26 @@ NEXT: M6, v0.1.0, from its own session. When CI is back, main's latest run; the 
 - `make test` green before the commit, on the rebased tree (Darwin arm64): fifteen suites, 392 expected passes, every pin ok; main's fourteen and 386, and the docs suite's 6. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0), every suite as `make test` runs it, the pins checked on the host: fifteen suites and 392, each suite's count Darwin's.
 
 NEXT: the release, stacked on this: the connection's cost measured on v0.5.0; CHANGELOG.md's Unreleased moved under `[0.1.0]`; the README's status; then the PRs, and at the closing ritual, the signed tag `v0.1.0` on the release's squash.
+
+---
+
+**M6.2, v0.1.0's release, on `chore/release-0.1.0` (2026-10-11),** on the owner's "chez-websocket M6". Stacked on `docs/m6-1-user-docs`, both on main's 270ce0e.
+- **What it carries.** The `[0.1.0]` section was written from the milestone plan, the design, the decisions and this ledger, M0 to #72, and checked against the facade's exports and each library's header. The docs entry M6.1 put under Unreleased is in it.
+- **The version:** 0.1.0, the plan's M6. No form: the first release.
+- **The pins:** chez-http-server v0.5.0 (02ef95d), which brings chez-libuv v0.9.0 (3c4e7f0), chez-httparse v0.4.5 (0b7058e) with byte-machine v0.7.0 (c338a57), uriparse v0.6.2 (5ecd88f) and chez-srfi 7879b52.
+- **Measured** (by form, "Re-measure on v0.5.0"; the research record's last section, probes in the scratch `ws-cost/`):
+  - **A connection's cost,** by the server's method, five holds each, Darwin: an idle WebSocket in a receive 5,281 to 5,435 B, and 5,353 to 5,477 B after 10 echoes; the server's own idle connection 1,900 to 2,055 B. Measured first on fcbc598's tree, then again on 270ce0e's once #72 had merged; the records give the second.
+  - **`make autobahn`,** on the container path, twice: on fcbc598's tree, 291 OK, 7 NON-STRICT and 3 INFORMATIONAL, gate passing (61 s); on this tree, 290, 8 and 3, case 3.4 NON-STRICT, one of the three the ratchet lists both ways, gate passing (56 s). No network or container left by either; `ab-net`, M5's of 2026-10-10, was there before.
+- **Built:**
+  - CHANGELOG.md: `[0.1.0] - 2026-10-11`, with an intro naming the pins, Added, and Measured; a fresh, empty Unreleased above it; the link references, `[0.1.0]` the tag's release page.
+  - README.org's status: v0.1.0 the first release, pointing at the CHANGELOG; an idle connection about 5.3 KB, where it said about 8 KB.
+  - Design §9 and the research record: the measure.
+- **CI is billing-blocked,** so by the owner's form ("Tag on local runs") these stand in, on this branch's tree before this entry:
+  - Darwin arm64, `make test`: fifteen suites, 392 expected passes, every pin ok;
+  - Linux aarch64 (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0), every suite as `make test` runs it, the pins checked on the host: fifteen suites and 392;
+  - Linux x86_64 under emulation (`chez-websocket-ci-amd64:10.4.1`, libuv 1.48.0), the same: fifteen suites and 392, in 98 s;
+  - each suite's count alike on the three; and the two `make autobahn` runs above.
+- **The tag.** After the merges, at the closing ritual: `v0.1.0` on the release's squash, annotated and signed, as the server's are: "chez-websocket v0.1.0 — WebSocket for chez-http-server", its body pointing at CHANGELOG.md's `[0.1.0]`. Main's run is read once CI returns.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 392 expected passes, every pin ok. Nothing tested changed: CHANGELOG.md, README.org, the design, the research record and the ledger only.
+
+NEXT: the PRs; the closing ritual for both, bottom-up, and the tag, when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix.
