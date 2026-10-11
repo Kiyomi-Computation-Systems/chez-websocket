@@ -134,4 +134,9 @@ only, needed the owner's word first: "Here and in CI", by form (0008).
 
 ## M6 — v0.1.0
 
-The CHANGELOG's first release, the README's status, and the tag.
+The CHANGELOG's first release, the README's status, and the tag. By form (2026-10-11),
+"docs/ first": user docs before the release, `docs/handlers.org` and
+`docs/configuration.org`, held to the library by `tests/test-docs.sps`; "Re-measure on
+v0.5.0": a connection's cost measured again for the README and the CHANGELOG; "Tag on
+local runs", CI being billing-blocked; "Release before them": the Autobahn lane's open
+items do not hold the release.

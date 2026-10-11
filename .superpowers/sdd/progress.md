@@ -2105,3 +2105,25 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the containe
 `make test` green on main: fourteen suites, 386 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: M6, v0.1.0, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix.
+
+---
+
+**M6.1, the user docs (2026-10-11),** on the owner's "chez-websocket M6". Branch `docs/m6-1-user-docs`, cut from fcbc598, then rebased onto 270ce0e once #72 merged; the release stacks on it (by form, "Two stacked PRs": this +602, the release +147).
+- **Forms, each the recommended:**
+  - **"docs/ first":** v0.1.0 had no user docs. The README said how to build, and the API lived in the facade's header and the design's §1 and §7.
+  - **"Re-measure on v0.5.0":** the README's "about 8 KB" an idle connection costs is M4.3's figure. At the v0.4.1 pin it measured 5,253 to 5,292 B at a bare `await`, 303 to 340 B more in a receive (design §9), and nothing has measured it on v0.5.0. The release measures it again.
+  - **"Tag on local runs":** CI is billing-blocked through October, by the owner's word. As the server's v0.5.0 was tagged.
+  - **"Release before them":** R-TERM's one CI failure and the network-leak fix are both in the Autobahn lane's `run.sh`, which no user loads.
+- **Built:**
+  - `docs/handlers.org`: the design's §1 echo example; the handshake's refusals; receive, send, close and the subprotocol; what each close sends and what `&websocket-closed` says; subprotocols and origins; limits for one handler; what it does not do.
+  - `docs/configuration.org`: the eight `CHEZ_WS_` variables, their defaults, units, spelling and least values; the queue, quiet clients, slow readers and the close; the server's own variables, by link at v0.5.0.
+  - README.org: "Using it", pointing at both. CHANGELOG.md: the docs under Unreleased. The plan's M6: the four forms.
+- **Held by a check, not a comment:** `tests/test-docs.sps`, six checks. The configuration table's variables are the library's, in its order, and its defaults, read as an environment, are the library's in each variable's unit. Every name of the library's the pages write is one `(websocket)` exports. Every Scheme block reads. The handlers page's first program, `serve` captured, is played on the fake shell: RFC 6455's handshake to /echo answered 101 with §1.3's accept, a masked Hello echoed as §5.7's frame, the client's close 1000 answered 1000; and another path 404.
+- **Tests first:** before the pages, status 2 at the first read, as named. On the first pages, 5 of 6: the echo check's stimulus sent the client's close in the Hello's read, so the binding answered the close before the procedure ran, and a send while the server's close is under way sends nothing. The close now comes in a read of its own.
+- **Mutants** (`m6-mutations.md`, new): 16 and the baseline.
+  - Run 1: 2 mismatches. M6-15's cut replaces every occurrence, and the runner's pre-flight asked for one. M6-11, the program's `(websocket)` import dropped, ended the suite in a harness error: Chez refuses an unbound identifier as the program is evaluated, and the program loaded outside any check. Fixed: each check loads and plays the program, a raise answering `(raised message)` in its place. My prediction had been DOC-ECHO alone; it became DOC-ECHO and DOC-404 before run 2.
+  - Runs 2 and 3: 0 mismatches, and run 4, on the rebased tree, the pages' and the suite's blobs unchanged: 0. Every check has a killer by value.
+  - **M6-14 survives, a scope statement:** the pages' prose and their tables of statuses and codes are the handshake's and the protocol's, held to the RFC by their own suites, and not seen here.
+- `make test` green before the commit, on the rebased tree (Darwin arm64): fifteen suites, 392 expected passes, every pin ok; main's fourteen and 386, and the docs suite's 6. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0), every suite as `make test` runs it, the pins checked on the host: fifteen suites and 392, each suite's count Darwin's.
+
+NEXT: the release, stacked on this: the connection's cost measured on v0.5.0; CHANGELOG.md's Unreleased moved under `[0.1.0]`; the README's status; then the PRs, and at the closing ritual, the signed tag `v0.1.0` on the release's squash.

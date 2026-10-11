@@ -1,0 +1,115 @@
+# M6 — mutation log
+
+Every check in M6 was watched to fail: a single named mutation breaks the
+asserted property, the check goes red, and the mutation is reverted. Recorded
+per global-constraints ("a test is finished when it has been watched to fail").
+
+## M6.1 — the user docs
+
+Platform: Darwin 25.6.0 arm64 (Apple M1), Chez Scheme 10.4.1 (`tarm64osx`),
+2026-10-11. The pages are `docs/configuration.org` (blob 523b7b7) and
+`docs/handlers.org` (blob 898156f); the suite `tests/test-docs.sps`, 6 checks
+(blob 145c284). The server is pinned at v0.5.0 (02ef95d).
+
+The runner (scratch `m6mut/`): each mutant alone, one edit to the tree, the suite
+run, the checks that went red and its status compared with those named before the
+run, the file put back. A pre-flight checks that each cut matches its text once,
+or at least once for a mutant that replaces every occurrence.
+
+### The checks
+
+| ID | check |
+|---|---|
+| DOC-VARS | configuration.org's table names the variables (websocket limits) reads, in its order |
+| DOC-DEFAULTS | its defaults, read as the environment, are the library's, each in its variable's unit |
+| DOC-NAMES | every name of the library's that docs/ writes is one (websocket) exports |
+| DOC-READ | every Scheme block in docs/ reads as Scheme |
+| DOC-ECHO | handlers.org's first program, on the fake shell: RFC 6455's handshake to /echo answered 101 with §1.3's accept, a masked Hello echoed as §5.7's frame, the client's close 1000 answered 1000 |
+| DOC-404 | the same program answers any other path 404 |
+
+Provenance (status 3): the suite's frames are §5.7's; the pages name
+`websocket-accept`, `websocket-receive`, `websocket-send!` and `websocket-close!`,
+so a scan that finds nothing cannot pass; handlers.org holds a program.
+
+### The oracles
+
+- **(websocket limits)**: `websocket-limits-environment-variables`, in its order, and
+  `default-websocket-limits`, which the limits suite holds to the design's §7.
+- **(websocket)**: what it exports.
+- **RFC 6455**: §1.3's handshake and accept, §5.7's frames, §5.5.1's echoed close code.
+- **handlers.org's own words**: /echo is echoed, anything else gets 404.
+
+### The test-first runs
+
+- **Before the pages:** the suite stopped at its first read, `open-file-input-port`
+  on `docs/configuration.org`, "No such file or directory", status 2, as named.
+- **On the first pages:** 5 of 6. DOC-ECHO read `#vu8(136 2 3 232)`, the close alone,
+  where the echo was named. The stimulus was mine: the Hello and the client's close
+  came in one read, so the binding answered the close before the procedure ran, and
+  a send while the server's close is under way sends nothing (design §6, as
+  websockets does). The close now comes in a read of its own. 6 of 6.
+
+### The mutants
+
+Run 1, predictions hashed before it (sha256 `79222c6d`): 16 mutants and the
+baseline, **2 mismatches**.
+- **M6-15**, the runner's: the mutant replaces every `websocket-close!`, and the
+  pre-flight asked for one. The runner now takes a mutant that replaces all.
+- **M6-11**, the suite's and mine. With `(websocket)` gone from the program's
+  imports, the suite ended in a harness error, status 2, with 4 passes. Chez
+  refuses an unbound identifier as the program is evaluated, and the program was
+  loaded outside any check. I had predicted DOC-ECHO alone, expecting the refusal
+  only when the handler ran. **Fixed:** `played` loads and plays the program inside
+  each check, and a raise answers `(raised message)` in the check's place. M6-11's
+  prediction became DOC-ECHO and DOC-404, before run 2.
+
+Run 2, on the fixed suite, predictions hashed before it (sha256 `df2d5e0a`):
+**0 mismatches**. Run 3, on the blobs above: **0 mismatches**. Run 4, the same blobs
+rebased onto main's 270ce0e (#72): **0 mismatches**.
+
+| ID | mutation | named red | status | result |
+|---|---|---|---|---|
+| BASE | none | none | 0 | as named |
+| M6-1 | `CHEZ_WS_PING_INTERVAL`'s default 20 s → 30 s | DOC-DEFAULTS | 1 | as named |
+| M6-2 | `CHEZ_WS_WRITE_TIMEOUT`'s row removed | DOC-VARS | 1 | as named |
+| M6-3 | the two waters' rows swapped | DOC-VARS | 1 | as named |
+| M6-4 | the close timeout written 10000 ms | DOC-DEFAULTS | 1 | as named |
+| M6-5 | `CHEZ_WS_MAX_QUEUE` written `CHEZ_WS_MAX_QUE` | DOC-VARS | 1 | as named |
+| M6-6 | `websocket-send!` written `websocket-send` in the table | DOC-NAMES | 1 | as named |
+| M6-7 | the guard example's last paren dropped | DOC-READ | 1 | as named |
+| M6-8 | the echo sends the message with `"!"` after it | DOC-ECHO | 1 | as named |
+| M6-9 | the echo's path `/echo` → `/chat` | DOC-ECHO | 1 | as named |
+| M6-10 | the example's 404 → 400 | DOC-404 | 1 | as named |
+| M6-11 | the program's import of `(websocket)` dropped | DOC-ECHO, DOC-404 | 1 | as named (run 2) |
+| M6-12 | the library's default ping interval 20000 → 30000 ms | DOC-DEFAULTS | 1 | as named |
+| M6-13 | the facade's export of `websocket-subprotocol` dropped | DOC-NAMES | 1 | as named |
+| M6-14 | the handshake table's 403 → 401 | none | 0 | as named, survived |
+| M6-15 | every `websocket-close!` in handlers.org → `websocket-shut!` | none | 3 | as named (run 2) |
+| M6-16 | the table's header `Variable` → `Name` | DOC-VARS | 1 | as named |
+
+Every check has a killer by value:
+- **DOC-VARS** by M6-2, the list without `CHEZ_WS_WRITE_TIMEOUT`; M6-3 with the waters
+  swapped; M6-5 with `CHEZ_WS_MAX_QUE`; M6-16, `()`.
+- **DOC-DEFAULTS** by M6-1, `30000` in the ping interval's place; M6-4, `10000000` in
+  the close timeout's; M6-12, the library's `30000` against the page's `20000`.
+- **DOC-NAMES** by M6-6, `("websocket-send")`, and M6-13, `("websocket-subprotocol")`.
+- **DOC-READ** by M6-7, `(unread …)` for the guard example, the other three `read`.
+- **DOC-ECHO** by M6-8, `#vu8(129 6 … 33 …)`, the Hello with `!`; M6-9,
+  `((unread need-input) #f …)`, the 404's head; M6-11, `(raised "attempt to reference
+  unbound identifier")`.
+- **DOC-404** by M6-10, `400`, and M6-11.
+- **M6-15**: `PROVENANCE-ERROR docs: the pages' names were not found: the scan reads
+  nothing`, status 3.
+
+**The survivor, a scope statement.** M6-14: the suite holds the variables, the
+names, the blocks and the first program, not the pages' prose or their tables of
+statuses and codes. Those are the handshake's and the protocol's, held to the RFC by
+their own suites; a page that misstates one is not seen here.
+
+### On Linux
+
+`chez-libuv-noble-scratch:10.4.1` (Linux 6.12.76-linuxkit aarch64, dash, libuv
+1.48.0), every suite run as `make test` runs it, the pins checked on the host:
+fifteen suites, 392 expected passes on the rebased tree, each suite's count Darwin's. The image names
+Chez `scheme`, so `chez` was a wrapper script in the container: a link named `chez`
+looks for `chez.boot`.
