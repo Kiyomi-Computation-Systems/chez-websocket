@@ -2094,3 +2094,14 @@ NEXT: the network-leak fix's PR, from its own session. When CI is back, main's l
 - `make test` green before the commit (Darwin arm64): fourteen suites, 386 expected passes, every pin ok.
 
 NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the container path's network removed when its run ends early** (the entry above), #72.
+- **#72**, at c548090, was squashed as 0298c48 (tree d950062, the tested head's; parent fcbc598).
+- **CI.** Billing-blocked: its run, 38165077964, and main's on the squash, 38165234147, each ended with both jobs, `linux` and `autobahn`, not started (0 steps). The entry's local runs stood in: `make test` on Darwin and in the Linux aarch64 container, fourteen suites and 386, and two `make autobahn` runs on the container path. It merged past the red check on the owner's word.
+- **Branch.** Deleted, local and remote. This reflect is committed from the PR's worktree, detached at 0298c48, then removed; the main checkout is fast-forwarded after it. No PR is open. Another session's M6.1 branch, `chore/release-0.1.0` (worktree `m6`), is cut from fcbc598 and has no PR yet.
+
+`make test` green on main: fourteen suites, 386 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: M6, v0.1.0, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix.
