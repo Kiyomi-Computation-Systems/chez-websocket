@@ -272,3 +272,36 @@ Darwin arm64. Probes in the scratch `ws-spark/rv/`.
     and 1 of 6 once a helper procedure was added, on v0.4.1;
   - the middle of three, 100 frames apart, with or without a `call/1cc`: 6 of 6 on each
     server, each way.
+
+## For v0.1.0, on the server's v0.5.0 (2026-10-11)
+
+A connection's cost measured again for the first release (M6, by form: "Re-measure on
+v0.5.0"). The README's "about 8 KB" was M4.3's figure at v0.4.0; the v0.4.1 pin's
+measure above was the socket suite's setting, not this one.
+
+**Where.** Darwin 25.6.0 arm64, Chez 10.4.1, libuv 1.52.1. The tree is M6's release
+branch on main's 270ce0e, the server pinned at v0.5.0 (02ef95d) with chez-libuv v0.9.0.
+Darwin only: the Linux image has no python.
+
+**How.** The server's own method, as in [A connection's cost](#a-connections-cost):
+a probe in the scratch `ws-cost/` starts the server's libuv shell on 127.0.0.1:0 with a
+handler that accepts `/ws` with an echo procedure and answers anything else 200. A
+python child holds the connections, says `ready`, and closes them when its stdin
+closes. The heap is read after two full collections, once the child is ready, every
+connection is the server's, and every procedure waits in `websocket-receive` (a count
+around the receive says so). A connection's cost is (heap with 500 − heap with 100) /
+400. Every hold ended with the child's exit 0 and no connection left. None of the
+`CHEZ_WS_` variables was set.
+
+| an idle connection, five holds each | heap |
+|---|---|
+| a WebSocket, its procedure in `websocket-receive` after the 101 | 5,281 to 5,435 B |
+| the same, after 10 echoes of a 2-byte text | 5,353 to 5,477 B |
+| the server's own connection, idle after a GET | 1,900 to 2,055 B |
+
+Measured twice: first on fcbc598's tree, then on 270ce0e's, once #72 had merged (its
+change is the Autobahn lane's `run.sh` alone). The table is the second's; the first gave
+5,194 to 5,372 B, 5,316 to 5,524 B and 1,818 to 1,967 B.
+
+The first row is the README's figure, about 5.3 KB. M4.3's, 7,898 to 8,367 B, was before
+the server parked its coroutines by `call/cc` (its v0.4.1, decision 0025).

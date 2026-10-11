@@ -528,6 +528,10 @@ is refused.
     303 to 340 B more at v0.4.1 (0005's amendment of that date). After a 4,000-byte
     message, v0.4.1 keeps about 2.9 KB more until the next, and about 620 B a connection
     more than v0.4.0 (0007, amended). The server's plan lists it as open.
+  - **Measured again for v0.1.0** (2026-10-11, Darwin; the server's method; on its
+    v0.5.0). An idle WebSocket in a receive held 5,281 to 5,435 B, and 5,353 to 5,477 B
+    after 10 echoes; the server's own idle connection 1,900 to 2,055 B
+    ([the measures](research/2026-10-09-real-socket-measures.md), its last section).
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`
