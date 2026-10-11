@@ -2061,3 +2061,15 @@ NEXT: the `run.sh` fix's PR, from its own session. When CI is back, main's lates
 - `make test` green before the commit (Darwin arm64): fourteen suites, 384 expected passes, every pin ok.
 
 NEXT: the PR; the closing ritual when the owner asks. Then the network left by a failed container start, from its task. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the container path's wait reads this run's log alone** (the entry above), #71.
+- **#71**, at 16cc5cc, was squashed as ebb5c1f (tree f7156bd, the tested head's; parent 7d33b4a).
+- **CI.** Billing-blocked: its run, 38163493911, and main's on the squash, 38163636478, each ended with both jobs, `linux` and `autobahn`, not started (0 steps, the payments annotation). The entry's local runs stood in: `make test` on Darwin and in the Linux aarch64 container, fourteen suites and 384, and two `make autobahn` runs on the container path. It merged past the red check on the owner's word.
+- **Branch.** Deleted, local and remote. This reflect is committed from the PR's worktree, detached at ebb5c1f, then removed; the main checkout is fast-forwarded after it. No PR is open.
+- **The task flagged for the network a failed container start leaves** runs in a session of its own, on the owner's word. Its branch, `fix/autobahn-network-leak`, was cut from #71's head, 16cc5cc, whose tree the squash keeps.
+
+`make test` green on main: fourteen suites, 384 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
+
+NEXT: the network-leak fix's PR, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
