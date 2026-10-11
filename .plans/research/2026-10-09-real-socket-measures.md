@@ -233,6 +233,11 @@ a collection's; the rest:
 - Linux, 16,000 bytes, two runs: 88 to 112 B, and 16,112 kept, on v0.4.0; 2,888 to
   2,928 B, and 18,896 to 18,920 kept, on v0.4.1.
 
+*The v0.4.1 column is the heap falling between the two readings, not a message kept: two
+1-byte messages read the same. The −61 KB readings fit a fresh stack segment, about
+64 KB less the step's fall, better than a collection ([S-LETGO's 2.9 KB, measured
+again](#s-letgos-29-kb-measured-again-2026-10-11)).*
+
 **The binding suite's done count** (R-DONE-ALLOC-BEHIND), on v0.4.1, Darwin:
 - the suite read 64 B in 4 of 7 runs, and 0 in 6 of 6 on v0.4.0, and 6 of 6 with the
   server's drain, or its park, alone one-shot again;
@@ -306,3 +311,37 @@ change is the Autobahn lane's `run.sh` alone). The table is the second's; the fi
 
 The first row is the README's figure, about 5.3 KB. M4.3's, 7,898 to 8,367 B, was before
 the server parked its coroutines by `call/cc` (its v0.4.1, decision 0025).
+
+## S-LETGO's 2.9 KB, measured again (2026-10-11)
+
+The server's plan §14 asked what its full drain keeps after a big read (0007's finding 4).
+Measured, it keeps nothing. Decision 0007's amendment of this date records it.
+
+**Where.** Darwin 25.6.0 arm64, Chez 10.4.1, libuv 1.52.1; this repository's main
+(3637f8a) and the pinned server v0.5.0 (02ef95d).
+
+**How.** [`spike/s-letgo-floor.sps`](spike/s-letgo-floor.sps), S-LETGO's own setting: one
+loop, its drain 200 ms and its tick 10 ms, each procedure receiving and dropping what it
+receives. It reads the heap after a big message less the heap after a 1-byte one, as the
+socket suite does. Beside it, it reads the same for two 1-byte messages, the floor. Three
+of each, after two rounds' warm-up.
+
+| two runs each, and the committed probe's one | a big message, then a small one | two 1-byte messages |
+|---|---|---|
+| one connection, 4,000 and 16,000 bytes | 2,880 to 2,984 B | 2,888 to 2,944 B |
+| ten connections, 4,000 bytes | 8,016 to 9,456 B | 8,544 to 9,536 B |
+
+At ten connections, three readings of −54,640 to −55,072 B came where Chez gave the thread
+a fresh stack segment, about 64 KB less the step's fall.
+
+- **So it is the fall, not a message.** Each wake's full capture, the server's since its
+  v0.4.1, uses up the thread's stack segment by the drain's depth, until Chez gives it a
+  fresh one. The server's plan measured it with its scheduler alone: about 248 B a wake
+  0 calls deep, 8 B more for each call, and a fresh segment of 62.5 to 64.2 KB every
+  34 to 244 wakes. Ten connections are woken ten times a step.
+- **S-LETGO's bound, 8,004 B, is above the fall.** A kept read holds the 16 KB besides
+  (R-20: 18,872 to 18,968 B on v0.4.1).
+- **What the server's measuring found instead:** a waiting coroutine kept the last value
+  a wake handed it, and more of that kind. That is fixed in chez-http-server#178 for its
+  next release. This binding wakes its receives with `#t`, so its connections never kept a
+  message that way.

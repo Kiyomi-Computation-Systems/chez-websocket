@@ -65,8 +65,11 @@
 ;;;   says so (status 3), as it did at 40,000 bytes.  Let go, the heap after
 ;;;   it and after a 1-byte message measured 88 to 112 B apart on the server's
 ;;;   v0.4.0, and 2,872 to 2,952 B on its v0.4.1, about as after a 4,000-,
-;;;   40,000- or 400,000-byte message (decision 0007).  The bound is half the
-;;;   frame.
+;;;   40,000- or 400,000-byte message (decision 0007).  Two 1-byte messages
+;;;   measure as far apart, 2,888 to 2,944 B on its v0.5.0, whose drain is
+;;;   v0.4.1's: the heap falls between the readings, as the full drain uses
+;;;   up the thread's stack, and nothing is kept (0007's amendment of
+;;;   2026-10-11).  The bound is half the frame.
 ;;; - The cap, 4,000 turns: over ten times the most a wait here took, 366
 ;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
 ;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.
