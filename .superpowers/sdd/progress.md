@@ -1979,3 +1979,22 @@ NEXT, unchanged: main's run on 61be5e7 when CI is back; the R-TERM probe, then i
 - `make test` green before the commit (Darwin arm64), three runs: fourteen suites, 381 expected passes, each suite's count main's, every pin ok. On v0.5.0, the same tree, three runs: fourteen suites and 381, each suite's count main's on v0.4.1.
 
 NEXT: the PR, and the pin to the server's v0.5.0 (02ef95d) stacked on it, alone. Then `none` measured again for 3.4, 4.1.5 and 4.2.5.
+
+---
+
+**The server's v0.5.0, pinned alone (2026-10-11),** on the owner's "let's pin chez-websocket to v0.5.0". Branch `chore/pin-server-v0.5.0`, stacked on `test/fit-server-v0.5.0` (#68); one PR, one commit.
+- **The pin:** chez-http-server moves from v0.4.1 (520f70e) to v0.5.0 (02ef95d). Its taken stream's close half-closes and lingers (its decision 0026): the slice this project's decision 0008 asked for in item 6, for the close design §9 found lost. Of the pins it carries, chez-libuv moves from v0.8.0 (ad3bb47) to v0.9.0 (3c4e7f0). chez-httparse 0b7058e, byte-machine c338a57, uriparse 5ecd88f and chez-srfi 7879b52 are unchanged.
+- **What reaches here:**
+  - **The binding's close lingers.** `close-stream!` arms the close timeout, its call an abort, then calls `transport-close!`. On v0.5.0 the stream reads on, dropping what the client sends, and once the writes are out it shuts its write side, so a client still sending reads the close frame, not a reset. The close timeout still bounds the writes. Once they are out, the server's linger bounds the rest, `CHEZ_HTTP_LINGER_TIMEOUT` (30 s), until the client closes; until then the stream counts toward the server's connection cap. The transport's close call, which the binding steps as the stream's end, comes once the client has closed.
+  - **chez-libuv v0.9.0:** the libuv floor is still 1.48. Its shim gained two functions, so `make build` rebuilds it. A loop run short of C stack is refused as `&uv-stack-exhausted`.
+  - **The test fake's door closes the same way.** D-OUTSIDE was fitted first (#68). Every other suite passed on v0.5.0 unchanged.
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` answered the one predicted line (named and hashed before the run), `PIN MISMATCH: vendor/chez-http-server at 02ef95d…, expected 520f70e…`, with the five carried pins ok, chez-libuv at 3c4e7f0.
+- **Records:** the Makefile's pin and the README's `make submodules` line. Design §9, decision 0008's item 6 and the ratchet's note on `none` wait for `none` measured again.
+- `make test` green before the commit (Darwin arm64), three runs: fourteen suites, 381 expected passes, each suite's count main's on v0.4.1, every pin ok. The binding suite passed 6 of 6, 55 each. `make prod` green, its shim checked a prod build.
+- **CI is billing-blocked,** so Linux ran in containers, on this tree:
+  - aarch64 (`chez-libuv-noble-scratch:10.4.1`, libuv 1.48.0): fourteen suites, 381, each suite's count main's;
+  - x86_64 under emulation (`chez-websocket-ci-amd64:10.4.1`, libuv 1.48.0): fourteen suites, 381, each suite's count main's.
+
+  The pins are checked on the host, since one image has no git.
+
+NEXT: the PRs; the closing ritual when the owner asks, bottom-up, #68 then this. Then `none` measured again for 3.4, 4.1.5 and 4.2.5 on Linux, and design §9, decision 0008's item 6 and the ratchet's note brought up to date.

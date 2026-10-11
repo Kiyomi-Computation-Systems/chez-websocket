@@ -41,7 +41,7 @@ chez-http-server, is a submodule pinned at a release tag, and it brings its own
 pinned dependencies. All but chez-srfi are private.
 
 #+begin_src sh
-make submodules   # clone chez-http-server v0.4.1 and the pins it carries
+make submodules   # clone chez-http-server v0.5.0 and the pins it carries
 make test         # build chez-libuv's shim, check every pin, run the suites
 make autobahn     # Autobahn's 301 cases against an echo server, in Docker
 make help         # every target
