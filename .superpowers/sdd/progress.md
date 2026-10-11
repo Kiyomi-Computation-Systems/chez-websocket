@@ -2038,3 +2038,26 @@ MERGED to main on 2026-10-11, on the owner's "do closing ritual": **the ratchet 
 `make test` green on main: fourteen suites, 381 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: the `run.sh` fix's PR, from its own session. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.
+
+---
+
+**The container path's wait reads this run's log alone (2026-10-11),** on the owner's ask, the task #70 flagged. Branch `fix/autobahn-container-wait`, cut from 7d33b4a; one PR.
+- **Found** during #70. On the container path, `make autobahn`'s default on macOS and Windows, `run.sh`'s `wait_listening` read `$out/server.log` before anything had fetched the new container's log, and nothing emptied it first.
+  - On a fresh tree, the first read printed `grep: … No such file or directory`.
+  - On every later run, the last run's log says `listening`, so it ended the wait at once.
+  - Measured on real Docker, over the last run's log: main's wait polled 0 times and the fixed one 7. Only the fuzzing client's slower start, in its emulated container, had kept runs green.
+- **Landed:**
+  - `run.sh` empties the log before it starts the container. It empties the file rather than removing it, so the wait's first read finds one.
+  - `tests/autobahn/fake/docker` plays the container path too. Its container's log says `listening` from its second read, and its fuzzing client passes only once a read has shown that.
+  - `tests/test-autobahn-run.sps` gains three checks: R-CWAIT, R-CENDS and R-CFRESH. The host path's helpers keep their names and build the same commands (compared for all nine calls).
+- **Watched to fail** (`m5-mutations.md`, its last section):
+  - Test-first, on main's `run.sh`: the three new checks red as named, the nine old ones green.
+  - 18 rows (RM-1 to RM-10 again, CW-1 to CW-7 and the baseline), 0 mismatches. RM-8 survives, as before.
+  - Under dash in the Linux container, main's `run.sh` and the removed-log mutant (CW-2) redden the same checks by the same values.
+- **Seen, not changed:** when the echo container's `docker run -d` fails, the network made for it is left, since the cleanup trap is set only after the container starts. Measured with an image that does not exist; the network was removed by hand. A task was flagged for it.
+- **CI did not run:** GitHub Actions is billing-blocked through October, by the owner's word. Stood in for:
+  - **the `linux` job,** by `make test` in `chez-libuv-noble-scratch:10.4.1` (Linux 6.12 aarch64, dash, libuv 1.48.0): fourteen suites and 384;
+  - **the `autobahn` job,** which runs the host path, whose code is unchanged. Its checks pass under dash. The container path changed, and `make autobahn` on macOS passed twice, from a fresh tree and then over its log.
+- `make test` green before the commit (Darwin arm64): fourteen suites, 384 expected passes, every pin ok.
+
+NEXT: the PR; the closing ritual when the owner asks. Then the network left by a failed container start, from its task. When CI is back, main's latest run; the R-TERM probe, then its fix. M6, v0.1.0.

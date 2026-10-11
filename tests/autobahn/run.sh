@@ -94,6 +94,10 @@ case "$ECHO_AT" in
   container)
     : "${ECHO_IMAGE:?}"
     name="chez-websocket-autobahn-$$"
+    # The wait reads this run's container's log alone, never the last run's,
+    # which says `listening`.  Emptied, not removed: the wait's first read,
+    # before the container's log is fetched, then finds a file.
+    : > "$out/server.log" || exit 2
     docker network create "$name" > /dev/null || exit 2
     cleanup() { docker rm -f "$name" > /dev/null 2>&1; docker network rm "$name" > /dev/null 2>&1; }
     docker run -d --name "$name" --network "$name" -e CHEZ_HTTP_HOST=0.0.0.0 -e CHEZ_HTTP_PORT=9001 \
