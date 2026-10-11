@@ -32,6 +32,13 @@ next. No compression and no client. See [[file:.plans/2026-10-04-chez-websocket-
 [[file:.plans/2026-10-04-chez-websocket-design.md][the design]] and
 [[file:.plans/2026-10-04-chez-websocket-milestone-plan.md][the milestone plan]].
 
+** Using it
+
+A chez-http-server handler takes a WebSocket by answering what
+=websocket-accept= returns, and its procedure reads and writes with
+=websocket-receive= and =websocket-send!=. [[file:docs/handlers.org][docs/handlers.org]] shows how, and
+[[file:docs/configuration.org][docs/configuration.org]] lists the =CHEZ_WS_= variables that set its limits.
+
 ** Building
 
 You need Chez Scheme 10.4.1 or later, built with threads, and libuv 1.48 or
