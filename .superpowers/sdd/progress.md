@@ -1952,3 +1952,14 @@ NEXT, when CI is back:
 - `make test` green before the commit (Darwin arm64): fourteen suites, 381 expected passes, every pin ok. Nothing tested changed.
 
 NEXT, unchanged from M5's reflect: main's run on 61be5e7 when CI is back (the block is intermittent: the server's #163 ran and passed on 2026-10-11, while main's runs there were still refused); the R-TERM probe, then its fix; the chez-http-server slice for the lost close; M6, v0.1.0.
+
+---
+
+MERGED to main on 2026-10-11, on the owner's "do closing ritual": **SC-1's record brought up to date** (the entry above), #67.
+- **#67**, at 33cf87e, was squashed as 803ed6e (tree 76306f2, the tested head's; parent 42d5c73).
+- **CI did not run** on its head: run 38141891555 ended with both jobs not started (0 steps, the payments annotation), the billing block. Records only; the entry's `make test` stood in. It merged past that red check on the owner's word.
+- **Branch.** Deleted, local and remote; main fast-forwarded. The session's worktree was removed.
+
+`make test` green on main: fourteen suites, 381 expected passes, every pin ok.
+
+NEXT, unchanged: main's run on 61be5e7 when CI is back; the R-TERM probe, then its fix; the chez-http-server slice for the lost close; M6, v0.1.0.
