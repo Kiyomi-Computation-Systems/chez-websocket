@@ -535,6 +535,11 @@ is refused.
     after 10 echoes; the server's own idle connection 1,900 to 2,055 B
     ([the measures](research/2026-10-09-real-socket-measures.md), its section "For
     v0.1.0, on the server's v0.5.0").
+  - **Measured again at the v0.6.0 pin** (2026-10-12, Darwin; the server's method; v0.5.0
+    beside it the same hour). An idle WebSocket in a receive held 5,330 to 5,397 B on
+    v0.6.0 and 5,353 to 5,367 B on v0.5.0, and S-LETGO's floor read the same on both
+    ([the measures](research/2026-10-09-real-socket-measures.md), its section "At the
+    server's v0.6.0 pin").
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`

@@ -44,4 +44,4 @@ limits, see [[file:handlers.org][handlers.org]].
 The server's own variables still apply: where it listens, how many connections
 it takes, and how long a closed connection lingers for the client
 (~CHEZ_HTTP_LINGER_TIMEOUT~). See chez-http-server's
-[[https://github.com/Kiyomi-Computation-Systems/chez-http-server/blob/v0.5.0/docs/configuration.org][configuration.org]].
+[[https://github.com/Kiyomi-Computation-Systems/chez-http-server/blob/v0.6.0/docs/configuration.org][configuration.org]].

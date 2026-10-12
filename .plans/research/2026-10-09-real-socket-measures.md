@@ -345,3 +345,42 @@ a fresh stack segment, about 64 KB less the step's fall.
   a wake handed it, and more of that kind. That is fixed in chez-http-server#178 for its
   next release. This binding wakes its receives with `#t`, so its connections never kept a
   message that way.
+
+## At the server's v0.6.0 pin (2026-10-12)
+
+A connection's cost and S-LETGO's floor, measured again for the pin, as v0.1.0's NEXT
+asked. The server's v0.6.0 brings decision 0027 and #178, a waiting coroutine let go of
+what woke it. Neither was expected to move either measure, since this binding wakes its
+receives with `#t`.
+
+**Where.** Darwin 25.6.0 arm64, Chez 10.4.1, libuv 1.52.1. The tree is
+`chore/pin-server-v0.6.0` on main's 1e416af, the server's checkout at v0.6.0 (47c787d)
+and, the same hour, at v0.5.0 (02ef95d). chez-libuv is v0.9.0 under both.
+
+**How.** The committed probes, as their headers say, with none of the `CHEZ_WS_`
+variables set: [`spike/ws-cost.sps`](spike/ws-cost.sps), five holds of each kind, and
+[`spike/s-letgo-floor.sps`](spike/s-letgo-floor.sps), three readings of each difference
+after two rounds' warm-up. Every hold ended cleanly.
+
+| an idle connection, five holds each | v0.5.0 | v0.6.0 |
+|---|---|---|
+| a WebSocket, its procedure in `websocket-receive` after the 101 | 5,353 to 5,367 B | 5,330 to 5,397 B |
+| the same, after 10 echoes of a 2-byte text | 5,339 to 5,510 B | 5,317 to 5,495 B |
+| the server's own connection, idle after a GET | 1,808 to 1,970 B | 1,962 to 1,978 B |
+
+| S-LETGO's setting | v0.5.0 | v0.6.0 |
+|---|---|---|
+| one connection, 4,000 and 16,000 bytes: a big message, then a small one | 2,880 to 3,056 B | 2,880 to 2,896 B |
+| the same: two 1-byte messages | 2,872 to 2,976 B | 2,896 to 2,984 B |
+| ten connections, 4,000 bytes: a big message, then a small one | 9,328 to 9,344 B | 9,456 to 9,552 B |
+| the same: two 1-byte messages | 8,584 to 9,552 B | 8,640 to 9,552 B |
+
+Three readings came where Chez gave the thread a fresh stack segment, and are left out of
+the ranges: −54,904 B (v0.5.0, ten connections, a big message), −54,768 B (v0.6.0, the
+same) and −61,392 B (v0.6.0, one connection, two 1-byte messages, in the 16,000-byte
+run). Each is about 64 KB less the step's fall.
+
+- **Nothing moved.** Each v0.6.0 range overlaps v0.5.0's, measured the same hour. The
+  README's "about 5.3 KB" stands.
+- **The floor is still the fall.** A big message, then a small one, reads as two small
+  ones do, on both pins. S-LETGO's bound, 8,004 B, is above it.

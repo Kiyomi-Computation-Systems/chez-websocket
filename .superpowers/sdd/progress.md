@@ -2334,3 +2334,31 @@ MERGED to main on 2026-10-11, on the owner's "Do ritual": **The host path's old 
 `make test` green on main (c79c866, Darwin arm64): fifteen suites, 397 expected passes, every pin ok, the server at v0.5.0 (02ef95d).
 
 NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI; then that branch can go. The second review's seven findings left unfixed. The server's next release pinned here alone, with a connection's cost measured again by `.plans/research/spike/ws-cost.sps` and S-LETGO's floor by `.plans/research/spike/s-letgo-floor.sps`.
+
+---
+
+**The server's v0.6.0, pinned alone (2026-10-12),** on the owner's "start the v0.6.0 pin", picked over waiting for the release that carries chez-libuv v0.10.0: a suite or Autobahn that moved would then be the server's alone. Branch `chore/pin-server-v0.6.0`, cut from main at 1e416af in its own worktree; one PR, one commit.
+- **The pin:** chez-http-server moves from v0.5.0 (02ef95d) to v0.6.0 (47c787d, the tag signed, a good signature). The pins it carries are v0.5.0's: chez-libuv 3c4e7f0 (v0.9.0), chez-httparse 0b7058e, byte-machine c338a57, uriparse 5ecd88f and chez-srfi 7879b52.
+- **Measured first** (Darwin arm64): main's suites unchanged, the server's checkout at v0.6.0 and `SERVER_PIN` not, run with `make -o check-pins test`. Three runs: fifteen suites and 397, each suite's count main's on v0.5.0, the baseline run the same hour in this worktree. No fit was needed, unlike v0.5.0's (#68).
+- **What reaches here** (the server's CHANGELOG `[0.6.0]`, read against `src/`):
+  - **The close's writes are bounded by the server too** (its decision 0027). Once `transport-close!` is asked for, each write the close waits for has `CHEZ_HTTP_WRITE_TIMEOUT` (60 s), and the stream is aborted past it. `close-stream!` arms the close timeout (10 s) before it calls `transport-close!`, so with the defaults the binding's bound comes first, as 0027 says. The protocol asks for `close-stream` after a clean close, after a failure's close frame, and at the stream's end, so a client that reads nothing there is cut at the earlier of the two. CHANGELOG.md's Unreleased says so.
+  - **A signal sent as `serve` logs `listening` drains it** (#174), where before it could end the process undrained.
+  - **A taker's early bytes wait for its read-start** (#179). The binding starts reading in its take-over, before it steps the bytes read past the request, so it lost nothing before.
+  - **A taker hears its client's end once** (#181), and **a waiting coroutine lets go of what woke it** (#178). The binding wakes its receives with `#t`.
+  - **The fake shell keeps closer to the server.** A deadline passing, and `fake-shell-settle!`, now run the connection's scheduler; a write after the close is told `ECANCELED` on the next turn. The binding and driver suites passed on it unchanged.
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` answered the predicted lines (hashed before the run, 51f31c54): `PIN MISMATCH: vendor/chez-http-server at 47c787d…, expected 02ef95d…`, the five carried pins ok, exit 2.
+- **Measured again, as v0.1.0's NEXT asked** (Darwin arm64; the research record's section "At the server's v0.6.0 pin"; v0.5.0 beside it the same hour):
+  - a connection's cost, by `ws-cost.sps`: an idle WebSocket in a receive 5,330 to 5,397 B on v0.6.0, 5,353 to 5,367 B on v0.5.0. The README's "about 5.3 KB" stands.
+  - S-LETGO's floor, by `s-letgo-floor.sps`: a big message, then a small one, reads as two small ones on both, 2,880 to 2,984 B at one connection on v0.6.0.
+- **Autobahn** (`make autobahn`, the container path on Docker Desktop, the echo image rebuilt from this tree, its server's `serve.sls` v0.6.0's): two runs, each `301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`, exit 0.
+- **Records:** the Makefile's pin; the README's `make submodules` line; `docs/configuration.org`'s link to the server's configuration page, now at v0.6.0; CHANGELOG.md's Unreleased; the design's "What a connection costs"; the research record's new section.
+- `make prod` green: fifteen suites and 397 on the prod shim, each suite's count main's, and both check-prod runs a prod build.
+- **CI is billing-blocked,** so Linux ran in containers on this tree, io_uring allowed (`--security-opt seccomp=unconfined`):
+  - aarch64 (`chez-libuv-noble-scratch:10.4.1`, libuv 1.48.0): fifteen suites, 397, each suite's count Darwin's;
+  - x86_64 under emulation (`chez-websocket-ci-amd64:10.4.1`, libuv 1.48.0): fifteen suites, 397, each suite's count Darwin's.
+
+  The pins are checked on the host.
+- **The chez-libuv v0.10.0 handoff** (from the chez-libuv session, 2026-10-12): it reaches here only through a server release that carries chez-http-server#185 (merged as f27633d). That pin moves alone too, and its counts, `make prod`, Autobahn, and any new chez-libuv condition go back to that session.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, each suite's count main's on v0.5.0, every pin ok; `make check-help` passes.
+
+NEXT: the PR; the closing ritual when the owner asks. Then the server's release that carries chez-libuv v0.10.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed.
