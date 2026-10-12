@@ -2362,3 +2362,17 @@ NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-
 - `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, each suite's count main's on v0.5.0, every pin ok; `make check-help` passes.
 
 NEXT: the PR; the closing ritual when the owner asks. Then the server's release that carries chez-libuv v0.10.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed.
+
+MERGED to main on 2026-10-12, on the owner's "do closing ritual": **The server's v0.6.0, pinned alone** (the entry above), #79.
+- **#79**, at 1e6867a, was squashed as e168cd6 (tree 99c078a, the tested head's; parent 1e416af), with `--match-head-commit` on the full SHA. Its message is the commit's.
+- **CI did not run.** The PR's run, 38297020379 (1e6867a), and main's on the squash, 38297557590, each ended with `linux` and `autobahn` not started (0 steps, the payments annotation). The entry's local runs stood in: macOS, Autobahn twice, and Linux aarch64 and x86_64 with io_uring allowed. It merged past the red check on the owner's word.
+- **Branches.** `chore/pin-server-v0.6.0` was deleted, local and remote. The main checkout is fast-forwarded, and `make submodules` brought its server checkout from 02ef95d to the new gitlink, 47c787d: a fast-forward alone leaves the old pin checked out (`git submodule status` marks it `+`). This reflect is committed from the pin's worktree, detached at e168cd6, which is removed after the push. No PR is open.
+
+**Reflect.**
+- **Measure the old pin beside the new, the same hour.** v0.5.0's range for the server's own connection read 1,808 to 1,970 B today and 1,900 to 2,055 B yesterday: a day's drift is as wide as any change the pin could make. Read beside a same-hour baseline, "nothing moved" is a comparison, not a reading against old numbers.
+- **A pin's behaviour change reaches the docs only with a check.** The server's write bound on a close is real, but here it shows only past a close timeout set above 60 s. Tracing `close-stream`'s three paths showed where it applies, and no check here holds it, so it went to the CHANGELOG, not `docs/`.
+- **Pinning alone keeps the next pin readable.** v0.6.0 moved no suite, no cost and no Autobahn verdict. Whatever moves at the next pin is chez-libuv v0.10.0's.
+
+`make test` green on main (e168cd6, Darwin arm64): fifteen suites, 397 expected passes, each suite's count as before the pin, every pin ok, the server at v0.6.0 (47c787d).
+
+NEXT: the server's release that carries chez-libuv v0.10.0 (chez-http-server#185, f27633d), pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed.
