@@ -2466,3 +2466,17 @@ MERGED to main on 2026-10-16, on the owner's "do closing ritual": **Plan and tim
 `make test` green on e999f48, whose tree is c2012ca's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: before going public, the owner decides on what is still private. README.org's Building and `.github/actions/setup/action.yml` both say the pins are private, all but chez-srfi. `.plans/`, `.superpowers/` and AGENTS.md's pointers to them are tracked. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
+
+MERGED to main on 2026-10-16, on the owner's "Run the closing ritual for PR 83, merging past CI if billing still blocks it": **Only chez-http-server is private now**, #83. The owner said many of the pins are now public. `gh api` and unauthenticated requests agreed: chez-libuv, chez-httparse, uriparse and byte-machine are public, and chez-http-server and this repository are private.
+- **What it changed.** README.org's Building says chez-http-server is private and the pins it carries are public. The setup action's comments say the same, and its missing-token error now asks for read access to chez-http-server alone. No behaviour changed: `SUBMODULES_READ_TOKEN` is still required, and the rewrite still sends the org's URLs through it, which reads the public pins as any token does.
+- **#83**, at 0c03760, was squashed as cb122ea (tree 04ab77a, the tested head's; parent 0876908), with `--match-head-commit` on the full SHA.
+- **CI did not run.** The PR's run, 38959618002 (0c03760), and main's on the squash, 38959853562, each ended with `linux` and `autobahn` not started (the payments annotation). `make test` on 0c03760 stood in, and it merged past the red check on the owner's word.
+- **Branches.** `docs/public-deps` was deleted, local and remote. The main checkout is fast-forwarded to cb122ea. No PR is open.
+
+**Reflect.**
+- **A claim about who can read a repository is checked with and without credentials.** `gh api` reports a repository's visibility, but it runs as the owner, who reads everything. An unauthenticated request returning 404 for chez-http-server and 200 for the rest is what a stranger cloning the project sees.
+- **Narrowing what a token is said to need is safe only where nothing is narrowed in fact.** The error message now names one repository, but the URL rewrite still covers the whole org. That holds because any token reads public repositories. Narrowing the rewrite itself to chez-http-server would change how clones are fetched, which CI cannot prove while billing blocks it, so the rewrite stays.
+
+`make test` green on 0c03760, whose tree is cb122ea's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: before going public, chez-http-server's own visibility, and whether `.plans/`, `.superpowers/` and AGENTS.md's pointers to them ship. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
