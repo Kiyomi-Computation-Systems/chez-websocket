@@ -2436,3 +2436,18 @@ NEXT: the server's release that carries chez-libuv v0.10.0 or v0.11.0, pinned he
 - `make test` green before the commit (Darwin arm64), three runs: fifteen suites, 398 expected passes, every pin ok; `make check-help` passes.
 
 NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.
+
+MERGED to main on 2026-10-16, on the owner's "Do closing ritual": **The server's v0.7.0, pinned** (the entry above), #81.
+- **#81**, at df4307f, was squashed as 04a68ba (tree 12b902b, the tested head's; parent 9be5265; the gitlink a9f0ef5), with `--match-head-commit` on the full SHA. Its message is the commit's.
+- **CI did not run.** The PR's run, 38940322362 (df4307f), and main's on the squash, 38951792929, each ended with `linux` and `autobahn` not started (0 steps, the payments annotation). The entry's local runs stood in: macOS three times, `make prod`, Autobahn twice, and Linux aarch64 and x86_64 with io_uring allowed. It merged past the red check on the owner's word.
+- **Branches.** `chore/pin-server-v0.7.0` was deleted, local and remote. The main checkout is fast-forwarded; `make submodules` brought its server checkout from 47c787d to a9f0ef5, and chez-libuv under it to afe79a5, and `make build` relinked the shim; `make check-pins` reads every pin ok. This reflect is committed from the pin's worktree, detached at 04a68ba, which is removed after the push. No PR is open.
+- **The chez-libuv session** (yuzu-libuv-issues-a) was sent the report its v0.10.0 handoff asked for: the counts, `make prod`, Autobahn, the cost, and that no chez-libuv condition was met.
+
+**Reflect.**
+- **A fake's fix can break a check that read the fake's slip as the server's rule.** W-END held a client's end waking a send while reading was stopped. The server never does that; only v0.6.0's fake did. A check against a fake holds the fake unless it is probed against the server too. The server's #187 probed its libuv shell first, which is what showed the check was wrong rather than the fake.
+- **`fake-shell-settle!` is a client that reads everything.** The first probe of the write-timeout path settled the fake and saw the send go on, not time out. Settling delivers every later turn, each write the client reads. To keep a client that reads nothing, move the clock with `tick!` and deliver later turns only by name.
+- **A reading that is not the known step gets its own re-run, not a guess.** S-LETGO's floor showed −13,528 B once, unlike the −55 KB and −61 KB steps of a fresh stack segment. Three more runs per pin did not show it again. It is recorded beside its re-runs, its cause not found, rather than explained.
+
+`make test` green on main (04a68ba, Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release pinned here when one comes.
