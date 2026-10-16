@@ -14,7 +14,7 @@ CHEZ ?= chez
 
 # --- the pin -----------------------------------------------------------------
 SERVER_DIR := vendor/chez-http-server
-SERVER_PIN := 47c787d15ca2ceb3cdcaf3087d2b105c562ec30a  # v0.6.0
+SERVER_PIN := a9f0ef5597853858ec73e8d49b92ea7ca3905e2c  # v0.7.0
 
 # --- the pins it carries ------------------------------------------------------
 LIBUV_DIR        := $(SERVER_DIR)/vendor/chez-libuv

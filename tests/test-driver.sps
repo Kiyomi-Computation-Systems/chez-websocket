@@ -25,8 +25,10 @@
 ;;; How a test plays the client.  `fake-shell-feed-input!` delivers the
 ;;; client's bytes only while the taker reads, as libuv does, so a test of
 ;;; read-stop feeds its bytes that way.  `fake-shell-deliver!` hands the taker
-;;; one event whatever its read state, a read already under way, and a test
-;;; uses it to place a read, or the client's end, between two turns.  What
+;;; one event, a read already under way, at once while it reads; while it has
+;;; stopped, the fake keeps the event until it reads again, as the server
+;;; does.  A test uses it to place a read, or the client's end, between two
+;;; turns.  What
 ;;; the client reads is read back as a client would, by the server's
 ;;; (response-reader), on chez-httparse's strict response parser.
 (import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)

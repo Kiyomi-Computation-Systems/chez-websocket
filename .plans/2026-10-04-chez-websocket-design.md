@@ -402,9 +402,10 @@ is refused.
     versions. It also checks that no borrowed library has one of this project's names.
   - **How a test plays the client.** `fake-shell-feed-input!` delivers the client's
     bytes only while the taker reads, as libuv does, so a test of read-stop feeds its
-    bytes that way. `fake-shell-deliver!` hands over one event whatever the read
-    state, and places a read, or the client's end, between two turns (M4.2's
-    review).
+    bytes that way. `fake-shell-deliver!` hands over one event, and places a read,
+    or the client's end, between two turns (M4.2's review). Since the server's
+    v0.7.0, an event given while the taker has stopped reading is kept until it
+    reads again, as the server keeps it.
   - **The binding suite** (`tests/test-binding.sps`, M4.3) also:
     - drains the scheduler after the fake's timer fires
       (`fake-shell-schedule!`), as the libuv shell drains it after every turn;
@@ -540,6 +541,11 @@ is refused.
     v0.6.0 and 5,353 to 5,367 B on v0.5.0, and S-LETGO's floor read the same on both
     ([the measures](research/2026-10-09-real-socket-measures.md), its section "At the
     server's v0.6.0 pin").
+  - **Measured again at the v0.7.0 pin** (2026-10-16, Darwin; the server's method; v0.6.0
+    beside it the same hour). An idle WebSocket in a receive held 5,332 to 5,344 B on
+    v0.7.0 and 5,179 to 5,477 B on v0.6.0, and S-LETGO's floor read the same on both
+    ([the measures](research/2026-10-09-real-socket-measures.md), its section "At the
+    server's v0.7.0 pin").
 - **A close the transport cannot force** (M4; found building M3.2).
   - **The gap.** The server's `transport-close!` closes the stream only once every
     write has been written (chez-http-server v0.3.0, `shell.sls`: `taker-close!`

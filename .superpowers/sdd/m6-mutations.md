@@ -301,3 +301,48 @@ end was not an end, so `closed-code` ran on into `chat-settings`, and the name k
 **M6-1 to M6-42 again,** on the fixed suite, the runner rebuilt from the session's record
 (its mutants' sha256 `ffda1147`, as recorded): BASE and all 42 as named, 0 mismatches. On
 main's suite the same, before any change.
+
+## At the server's v0.7.0 pin (2026-10-16)
+
+### What changed
+
+The binding suite's check "a send waiting when the connection ends is woken at once,
+before the client reads" (W-END) leaned on the server's v0.6.0 fake, which handed a
+client's end to a taker that had stopped reading. The server never tells it then, and
+its v0.7.0 fake keeps it until reading starts again (the server's #187). By the
+server's form of that day, the pin rewrites the check to what the server does, as two:
+
+- **W-END:** the end not told while reading is stopped; the send goes on once the client
+  reads down to the low water, and the end, read after it, raises 1006 in the receive
+  that follows. `((1) (1) (1 2) (1 2 (closed 1006 "" #f)))`.
+- **W-END-TIMEOUT:** to a client that reads nothing, the send waits on until the write
+  timeout, not a millisecond before, then raises 1006, logged `write-timeout`.
+
+### Test first
+
+Both new checks on the server's v0.6.0 tree, the rest of the suite unchanged: both red, by
+value, the end told at once, `(1 (closed 1006 "" #f))` in each first place; 54 passed, as
+predicted.
+
+### The mutants
+
+Of `src/websocket/private/binding.sls`, on v0.7.0, the binding suite alone. Predictions
+hashed before the first run (sha256 `d12650a9`), for the two checks' red or green and the
+value each red shows; the runner and its mutants, `2a3ee6fd`. **0 mismatches.**
+
+| ID | mutation | W-END | W-END-TIMEOUT | the suite's reds |
+|---|---|---|---|---|
+| BASE | none | green | green | 0 |
+| K-13 | `read-stop` not performed | `ended` told at once | `ended` told at once | 8 |
+| K-14 | `read-start` not performed | last `(1 2)` | green | 5 |
+| K-17 | `closed` not performed | last `(1 2)` | notes `(1)` | 17 |
+| K-18 | every end clean | `(closed 1006 "" #t)` | `(closed 1006 "" #t)` | 12 |
+| K-48 | the end wakes no receive | last `(1 2)` | green | 6 |
+| K-49 | the end wakes no send | green | notes `(1)` | 3 |
+| WE-1 | a done wakes the sends though the client is still behind | `one` is `(1 2)` | green | 2 |
+| WE-2 | the write timeout armed for the close timeout's 10 s | green | `before` closed | 4 |
+
+K-49, the end that wakes no send, was killed by the old W-END and C-SENDCLOSING (m4's
+table). It is now killed by W-END-TIMEOUT, by the write timeout's check and by
+C-SENDCLOSING: a send told the end while reading is stopped is a write-timeout's, or
+the server's close's, not a client's.

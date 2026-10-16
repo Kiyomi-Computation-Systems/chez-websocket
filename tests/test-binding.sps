@@ -48,8 +48,9 @@
 ;;;
 ;;; How a test plays the client is the driver suite's: `fake-shell-feed-input!`
 ;;; delivers only while the binding reads, `fake-shell-deliver!` hands over
-;;; one event whatever the read state, and `fake-shell-deliver-later!` the
-;;; next later turn, such as a write the client reads.  feed-input! lets
+;;; one event, kept while the binding has stopped reading until it reads
+;;; again, as the server keeps it, and `fake-shell-deliver-later!` the next
+;;; later turn, such as a write the client reads.  feed-input! lets
 ;;; every later turn happen before each read, a client that reads; `unread!`
 ;;; plays one that reads nothing, `reading-at!` one that reads at a rate,
 ;;; and a spy sees what the binding asks of the transport.  What the client reads
@@ -420,19 +421,44 @@
         (test-equal "a send waiting with more than the low water unsent still waits, and goes on once the client has read down to it"
           '((1) (1 2)) (list one (seen n)))))
 
-    (let* ((n (make-notes))
-           (sh (connect (accepting (lambda (ws)
-                                     (guard (e ((websocket-closed? e) (note! n (closed e))))
-                                       (websocket-receive ws)
-                                       (websocket-send! ws "Hello") (note! n 1)
-                                       (websocket-send! ws "Hello") (note! n 2)))
-                                   (make-handshake-settings '())
-                                   (limits '((write-high-water . 7) (write-low-water . 4))))
-                        handshake)))
-      (fake-shell-deliver! sh (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
-      (fake-shell-deliver! sh '(eof))
-      (test-equal "a send waiting when the connection ends is woken at once, before the client reads, and raises &websocket-closed"
-        '(1 (closed 1006 "" #f)) (seen n)))
+    ;; The client's end while a send waits: reading has stopped, the client
+    ;; behind, and the server reads nothing then, so the end waits with the
+    ;; client's bytes until reading starts again (the server's v0.7.0, its
+    ;; fake as its libuv shell).  The send is not told it: it goes on once the
+    ;; client reads down to the low water, the end read after it; or, to a
+    ;; client that reads nothing, the write timeout ends it.
+    (let ((ending (lambda (n)
+                    (connect (accepting (lambda (ws)
+                                          (guard (e ((websocket-closed? e) (note! n (closed e))))
+                                            (websocket-receive ws)
+                                            (websocket-send! ws "Hello") (note! n 1)
+                                            (websocket-send! ws "Hello") (note! n 2)
+                                            (note! n (websocket-receive ws))))
+                                        (make-handshake-settings '())
+                                        (limits '((write-high-water . 7) (write-low-water . 4))))
+                             handshake)))
+          (turn! (lambda (sh) (fake-shell-deliver-later! sh) (fake-shell-schedule! sh))))
+      (let* ((n (make-notes))
+             (sh (ending n)))
+        (fake-shell-deliver! sh (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+        (fake-shell-deliver! sh '(eof))
+        (let* ((ended (seen n))
+               (one (begin (turn! sh) (seen n)))
+               (two (begin (turn! sh) (seen n))))
+          (turn! sh)
+          (test-equal "a send waiting when the client's end comes is not told it while reading is stopped: it goes on once the client reads down to the low water, and the end, read after it, raises &websocket-closed, 1006, in the receive that follows"
+            '((1) (1) (1 2) (1 2 (closed 1006 "" #f))) (list ended one two (seen n)))))
+      (let* ((n (make-notes))
+             (sh (ending n)))
+        (fake-shell-deliver! sh (list 'bytes-arrived rfc-masked-hello 0 (bytevector-length rfc-masked-hello)))
+        (fake-shell-deliver! sh '(eof))
+        (let ((ended (seen n)))
+          (tick! sh 59999)
+          (let* ((before (seen n))
+                 (run (logged (lambda () (tick! sh 1) (seen n)))))
+            (test-equal "a send waiting when the client's end comes, to a client that reads nothing, waits on: the write timeout aborts the stream, not a millisecond before, and the send raises &websocket-closed, 1006, logged write-timeout"
+              (list '(1) '(1) (list '(1 (closed 1006 "" #f)) (server-logged 'websocket-failed '(#f write-timeout))))
+              (list ended before run))))))
 
     ;; --- a client that does not read (0006; M4.3 step 2) ---
 
