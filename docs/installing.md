@@ -47,13 +47,15 @@ make check-pins
 
 ## Run a program
 
-Save the echo from [Home](README.md) as `echo.sps`, then:
+From the repository's root, run the echo from [examples](../examples):
 
 ```sh
-make run PROGRAM=echo.sps
+make run PROGRAM=examples/echo.sps
 ```
 
-Connect a client, such as `websocat ws://127.0.0.1:8080/echo`: each line you
-send comes back. Stop the server with Ctrl-C.
+Open http://127.0.0.1:8080/ in a browser: type a line, and it comes back. Any
+WebSocket client works too, such as `websocat ws://127.0.0.1:8080/echo`. Stop
+the server with Ctrl-C.
 
+Your own program runs the same way: `make run PROGRAM=path/to/program.sps`.
 `make dev` starts a REPL with the same library path.

@@ -48,6 +48,8 @@ An echo server: whatever a client sends to `/echo` comes back.
   program.
 - [Handlers](handlers.md): taking a WebSocket, reading, writing, closing,
   subprotocols, origins and limits for one handler.
+- [Examples](../examples): an echo, a chat room and a clock, each with a page
+  to try it from a browser.
 - [Configuration](configuration.md): the `CHEZ_WS_` variables.
 - [How it works](how-it-works.md): a pure core, and a binding over the
   server.

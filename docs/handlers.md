@@ -130,6 +130,18 @@ The fields are `max-message-bytes`, `max-queue`, `ping-interval-ms`,
 `ping-timeout-ms`, `close-timeout-ms`, `write-high-water`, `write-low-water`
 and `write-timeout-ms`.
 
+## More examples
+
+[examples](../examples) holds whole servers, each with a page at `/` to try
+it from a browser:
+
+- [chat.sps](../examples/chat.sps): a chat room. A procedure may send to any
+  connection's WebSocket, not just its own, so each message goes to every
+  other client. A client that has just closed raises `&websocket-closed` at
+  the sender, which passes it over.
+- [clock.sps](../examples/clock.sps): the server speaks first, a tick each
+  second, and still reads what the client sends between ticks.
+
 ## What it does not do
 
 No compression: a client that asks for it gets none. No client side: this
