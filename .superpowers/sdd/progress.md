@@ -2186,7 +2186,7 @@ NEXT: the PR; the closing ritual for #73, #74 and this, bottom-up, and the tag `
   - **The tag:** the M6.2 entry's tag line now says the stack's last squash, corrected in place. #74's commit message said the same of its own squash; it is amended, its tree unchanged, and this branch moved onto it.
   - **The limits example** makes settings of its own, `(make-handshake-settings '())`, where it borrowed the chat example's subprotocols and origins.
   - **configuration.org's close:** whoever begins it, the client has the close timeout, counted from when the server's close was queued, to read what is left, and to answer if the server began it. The table's row says "finish a close".
-- **Not fixed, by the owner's word:** the seven others. Tabs or two spaces before a block's language; `(ws-play)`'s generic `copy` and `concat`; `(ws-autobahn)` imported for `text-lines`; `field?` reading `condition-who`; blocks read more than once; and DOC-NAMES's environment wider than its title.
+- **Not fixed, by the owner's word:** the six others (first written as seven). Tabs or two spaces before a block's language; `(ws-play)`'s generic `copy` and `concat`; `(ws-autobahn)` imported for `text-lines`; `field?` reading `condition-who`; blocks read more than once; and DOC-NAMES's environment wider than its title.
 - **Watched to fail** (`m6-mutations.md`, its second review's section): M6-1 to M6-34 named again and M6-35 to M6-42 new, 0 mismatches. On the first review's suite the eight new ones each passed, as named.
 - `make test` green before the commit (Darwin arm64): fifteen suites, 394 expected passes, every pin ok. `make check-help` passes. Linux aarch64 in a container (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 394, each suite's count Darwin's.
 
@@ -2376,3 +2376,18 @@ MERGED to main on 2026-10-12, on the owner's "do closing ritual": **The server's
 `make test` green on main (e168cd6, Darwin arm64): fifteen suites, 397 expected passes, each suite's count as before the pin, every pin ok, the server at v0.6.0 (47c787d).
 
 NEXT: the server's release that carries chez-libuv v0.10.0 (chez-http-server#185, f27633d), pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The second review's seven findings left unfixed.
+
+---
+
+**The second review's rest (2026-10-16),** on the owner's "fix the seven docs-suite findings": the six M6's second review left, its items 7 to 12, which the ledger counted as seven (corrected in place). Branch `fix/docs-suite-review`, cut from main at 6caf10b in its own worktree; one PR.
+- **Fixed, all six** (`m6-mutations.md`, its section "The second review's rest"):
+  - **A block's lines are read as org reads them.** A directive's words may have any spaces or tabs around and between them, in any case. A tab-indented block, or one written `#+begin_src  scheme`, was skipped, so a block that did not read passed DOC-READ.
+  - **DOC-FIELDS holds each field to its own limit.** A name is a field when `websocket-limits-with` takes it and, set to 100,000, changes that field alone. It no longer reads the refusal's `condition-who`. A provenance guard refuses a value that is some field's default.
+  - **DOC-NAMES asks `library-exports`** for `(websocket)`'s names, as its title says. `(rnrs)` exports no name its prefixes match, so no answer changes today.
+  - **Each page is split once and each block read once**, its data kept in its record.
+  - **`(ws-play)`'s `copy` and `concat` are `bv-slice` and `bv-concat`**, its header saying so.
+  - **`text-lines` is `(ws-text)`'s**, with the `split` under it, a library of `(rnrs)` alone. The gate, `(ws-autobahn)`, imports it, and so do the docs, Autobahn and `run.sh` suites.
+- **Watched to fail:** seven new mutants and a guard's, predicted on main's suite and on the fixed one, hashed before; 0 mismatches. On main, DR-1 to DR-3, DF-1 and DF-2 passed, and DR-4 and DR-5 were red on pages org reads as written. M6-1 to M6-42 again, on main's suite and on the fixed one, the runner rebuilt from this session's record (its mutants' sha256 `ffda1147`, as recorded): 0 mismatches.
+- `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, each suite's count main's, every pin ok; `make check-help` passes. Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 397, each suite's count Darwin's.
+
+NEXT: the PR; the closing ritual when the owner asks. The server's release that carries chez-libuv v0.10.0 or v0.11.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.

@@ -19,7 +19,7 @@
 ;;; Chez that runs the suites: CHEZ names it, as the Makefile's CHEZ does
 ;;; (CI's is `scheme`); unset, it is `chez`.  Its files go under
 ;;; build/test-autobahn-run, which `make clean` removes.
-(import (rnrs) (srfi :64) (ws-testing) (ws-autobahn)
+(import (rnrs) (srfi :64) (ws-testing) (ws-text)
         (only (chezscheme) system current-directory))
 
 (define out (string-append (current-directory) "/build/test-autobahn-run"))

@@ -8,7 +8,10 @@
 ;;;   agree with the library, and the library with the design.
 ;;; - The design's §7: durations given in whole seconds, sizes and counts in
 ;;;   their own unit; and the limits' fields, in make-websocket-limits' order.
-;;; - (websocket): the names it exports, the names a handler may call.
+;;; - (websocket): the names it exports, the names a handler may call, as
+;;;   Chez's library-exports lists them.
+;;; - websocket-limits-with: the fields it takes, each setting the limit of
+;;;   its name and no other.
 ;;; - RFC 6455: §1.3's handshake and its Sec-WebSocket-Accept; §5.7's frames,
 ;;;   a masked Hello and its unmasked echo; §5.5.1, a close answered with a
 ;;;   close that echoes its code.
@@ -16,9 +19,11 @@
 ;;;   anything else 404; a closed connection's code is the client's.
 ;;;
 ;;; The pages are read as a user reads them: configuration.org's first table
-;;; whose first column is Variable; every #+begin_src scheme block, in any
-;;; case, with the #+name: line before it, if any; the names written in
-;;; ~code~ or in a block; the fields the handlers page lists.  A block that
+;;; whose first column is Variable; every #+begin_src scheme block, as org
+;;; reads its lines, in any case, indented or not, any spaces or tabs between
+;;; their words, with the #+name: line before it, if any; the names written in
+;;; ~code~ or in a block; the fields the handlers page lists.  Each block is
+;;; read once, as the page is split into blocks.  A block that
 ;;; begins with an import is a program: it is run with `serve` captured, and
 ;;; its handler played on the server's fake shell (decision 0004), as the
 ;;; binding suite plays its own.  Any other block is a fragment, and the
@@ -30,9 +35,9 @@
 ;;; `upload`; the suite gives each one.  A body is a top-level program's:
 ;;; definitions and expressions in any order (R6RS §8.1).
 (import (rnrs) (rnrs eval) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
-        (only (chezscheme) getenv)
+        (only (chezscheme) getenv library-exports)
         (only (http-server limits) default-limits)
-        (only (ws-autobahn) text-lines)
+        (only (ws-text) text-lines)
         (websocket) (websocket limits) (ws-play))
 
 ;; --- reading the pages ---------------------------------------------------------
@@ -42,11 +47,22 @@
   (call-with-port (open-file-input-port path (file-options) (buffer-mode block) (native-transcoder))
     get-string-all))
 
-;; trim : String -> String — without the spaces around it.
+;; blank? : Char -> Boolean — a space or a tab, which org reads alike.
+(define (blank? c) (or (char=? c #\space) (char=? c #\tab)))
+
+;; trim : String -> String — without the blanks around it.
 (define (trim s)
   (let* ((cs (string->list s))
-         (drop (lambda (cs) (let loop ((cs cs)) (if (and (pair? cs) (char=? (car cs) #\space)) (loop (cdr cs)) cs)))))
+         (drop (lambda (cs) (let loop ((cs cs)) (if (and (pair? cs) (blank? (car cs))) (loop (cdr cs)) cs)))))
     (list->string (reverse (drop (reverse (drop cs)))))))
+
+;; words : String -> (Listof String) — the runs of characters between blanks.
+(define (words s)
+  (let loop ((cs (string->list s)) (word '()) (out '()))
+    (let ((flush (lambda () (if (null? word) out (cons (list->string (reverse word)) out)))))
+      (cond ((null? cs) (reverse (flush)))
+            ((blank? (car cs)) (loop (cdr cs) '() (flush)))
+            (else (loop (cdr cs) (cons (car cs) word) out))))))
 
 ;; starts? : String String -> Boolean
 (define (starts? s prefix)
@@ -86,27 +102,45 @@
                    (else (rows (cdr ls) (cons (split-bars (car ls)) out))))))
           (else (find (cdr ls))))))
 
-;; directive? : String String -> Boolean — the line is the org directive, in any case.
-(define (directive? line directive)
-  (starts? (string-downcase (trim line)) directive))
+;; directive : String -> (Listof String)
+;; The line's words, in lower case: an org directive is read in any case,
+;; indented or not, any blanks between its words.
+(define (directive line) (words (string-downcase line)))
 
-;; A #+begin_src scheme block: its #+name, or #f; its text; and whether the
-;; page ends it.
-(define-record-type block (fields name text ended?))
+;; name-line? : String -> Boolean — a #+name: line.
+(define (name-line? line)
+  (let ((w (directive line))) (and (pair? w) (starts? (car w) "#+name:"))))
+
+;; begin-line? : String -> Boolean — a #+begin_src line whose language is scheme.
+(define (begin-line? line)
+  (let ((w (directive line))) (and (pair? w) (pair? (cdr w)) (string=? (car w) "#+begin_src") (string=? (cadr w) "scheme"))))
+
+;; end-line? : String -> Boolean — a #+end_src line.
+(define (end-line? line)
+  (let ((w (directive line))) (and (pair? w) (string=? (car w) "#+end_src"))))
+
+;; A #+begin_src scheme block: its #+name, or #f; its text; whether the page
+;; ends it; and the data its text reads as, or #f when it does not end or
+;; does not read.
+(define-record-type block (fields name text ended? forms))
+
+;; read-block : (U String #f) String Boolean -> Block — the block, its text read once.
+(define (read-block name text ended?)
+  (make-block name text ended? (and ended? (guard (e (#t #f)) (data text)))))
 
 ;; blocks : String -> (Listof Block)
 ;; Every #+begin_src scheme block, in order.  Its name is the #+name: line
-;; just before it.
+;; just before it, as written.
 (define (blocks text)
   (let ((joined (lambda (in) (apply string-append (map (lambda (l) (string-append l "\n")) (reverse in))))))
     ;; `in`, while a block is open: its name, then its lines, newest first.
     (let loop ((ls (text-lines text)) (name #f) (in #f) (out '()))
-      (cond ((null? ls) (reverse (if in (cons (make-block (car in) (joined (cdr in)) #f) out) out)))
-            ((and (not in) (directive? (car ls) "#+name:"))
-             (loop (cdr ls) (trim (substring (trim (car ls)) 7 (string-length (trim (car ls))))) #f out))
-            ((and (not in) (directive? (car ls) "#+begin_src scheme")) (loop (cdr ls) #f (list name) out))
-            ((and in (directive? (car ls) "#+end_src"))
-             (loop (cdr ls) #f #f (cons (make-block (car in) (joined (cdr in)) #t) out)))
+      (cond ((null? ls) (reverse (if in (cons (read-block (car in) (joined (cdr in)) #f) out) out)))
+            ((and (not in) (name-line? (car ls)))
+             (let ((line (trim (car ls)))) (loop (cdr ls) (trim (substring line 7 (string-length line))) #f out)))
+            ((and (not in) (begin-line? (car ls))) (loop (cdr ls) #f (list name) out))
+            ((and in (end-line? (car ls)))
+             (loop (cdr ls) #f #f (cons (read-block (car in) (joined (cdr in)) #t) out)))
             (in (loop (cdr ls) #f (cons (car in) (cons (car ls) (cdr in))) out))
             (else (loop (cdr ls) #f #f out))))))
 
@@ -118,12 +152,11 @@
         (if (eof-object? d) (reverse out) (loop (cons d out)))))))
 
 ;; readable : (Listof Block) -> (Listof Block) — the blocks that end and read.
-(define (readable bs)
-  (filter (lambda (k) (and (block-ended? k) (guard (e (#t #f)) (data (block-text k)) #t))) bs))
+(define (readable bs) (filter block-forms bs))
 
 ;; program? : Block -> Boolean — the block begins with an import.
 (define (program? k)
-  (let ((d (data (block-text k)))) (and (pair? d) (pair? (car d)) (eq? (caar d) 'import))))
+  (let ((d (block-forms k))) (and (pair? d) (pair? (car d)) (eq? (caar d) 'import))))
 
 ;; leading-digits : String -> String — the digits the string starts with.
 (define (leading-digits s)
@@ -186,13 +219,25 @@
   '(max-message-bytes max-queue ping-interval-ms ping-timeout-ms
     close-timeout-ms write-high-water write-low-water write-timeout-ms))
 
-;; field? : Symbol -> Boolean
-;; Whether websocket-limits-with takes the name as a field: it refuses any
-;; other naming itself, and a value it does not take naming make-websocket-limits.
-(define (field? name)
-  (guard (e ((assertion-violation? e) (not (eq? (condition-who e) 'websocket-limits-with))))
-    (websocket-limits-with default-websocket-limits (list (cons name 1)))
-    #t))
+;; A value every field takes, and no field's default: neither water refuses
+;; it, at least the low water's default and at most the high water's.  The
+;; suite checks it is no default, as it starts.
+(define set-to 100000)
+
+;; field-set : Symbol -> (U Symbol (List 'not-a-field Symbol) (List 'sets Symbol (Listof Symbol)))
+;; The name, when websocket-limits-with takes it as a field and the one limit
+;; set-to changes is the field of that name: else (not-a-field name), when
+;; it raises anything, or (sets name changed), the fields it changed.
+(define (field-set name)
+  (guard (e (#t (list 'not-a-field name)))
+    (let ((changed (let loop ((ns field-names)
+                              (now (values-of (websocket-limits-with default-websocket-limits (list (cons name set-to)))))
+                              (was (values-of default-websocket-limits))
+                              (out '()))
+                     (cond ((null? ns) (reverse out))
+                           ((equal? (car now) (car was)) (loop (cdr ns) (cdr now) (cdr was) out))
+                           (else (loop (cdr ns) (cdr now) (cdr was) (cons (car ns) out)))))))
+      (if (equal? changed (list name)) name (list 'sets name changed)))))
 
 ;; --- the names a page writes ---------------------------------------------------
 
@@ -222,17 +267,11 @@
             ((name-char? (car cs)) (loop (cdr cs) (cons (car cs) word) out))
             (else (loop (cdr cs) '() (flush)))))))
 
-;; unbound : (Listof String) -> (Listof String)
-;; The names (websocket) does not export, in order.  A condition type's name,
-;; &..., is syntax, so it is asked for its record type.
-(define (unbound ns)
-  (let ((env (environment '(rnrs) '(websocket))))
-    (filter (lambda (n)
-              (let ((s (string->symbol n)))
-                (guard (e (#t #t))
-                  (eval (if (char=? (string-ref n 0) #\&) `(record-type-descriptor ,s) s) env)
-                  #f)))
-            ns)))
+;; The names (websocket) exports, a condition type's &... among them.
+(define exported (map symbol->string (library-exports '(websocket))))
+
+;; unbound : (Listof String) -> (Listof String) — the names (websocket) does not export, in order.
+(define (unbound ns) (filter (lambda (n) (not (member n exported))) ns))
 
 ;; --- running a block -------------------------------------------------------------
 
@@ -264,13 +303,12 @@
                                (begin ,(car fs) #f))
                             out))))))
 
-;; program-handler : String -> (Request -> Answer)
+;; program-handler : (Listof Datum) -> (Request -> Answer)
 ;; The program's handler: its import form's libraries made an environment,
 ;; its other forms run there with `serve` bound to a procedure that keeps
 ;; what it is handed.
-(define (program-handler text)
-  (let* ((forms (data text))
-         (env (apply environment (cdar forms)))
+(define (program-handler forms)
+  (let* ((env (apply environment (cdar forms)))
          (kept #f))
     ((eval `(lambda (serve) ,@(body (cdr forms))) env)
      (lambda (handler . _) (set! kept handler)))
@@ -289,15 +327,14 @@
         (cons 'chat (lambda (request ws) echo))
         (cons 'upload (lambda (request ws) echo))))
 
-;; fragment : String -> (Request (U WebSocket #f) -> Any)
+;; fragment : (Listof Datum) -> (Request (U WebSocket #f) -> Any)
 ;; The fragment as a procedure of the request and the WebSocket: its forms a
 ;; body in the environment a handler's program imports, (rnrs), (http-server)
 ;; and (websocket), each name it takes from around it given by the suite,
 ;; unless it defines that name itself.  A name it neither defines nor takes,
 ;; nor the libraries export, is refused as it is evaluated.
-(define (fragment text)
-  (let* ((forms (data text))
-         (own (defined forms))
+(define (fragment forms)
+  (let* ((own (defined forms))
          (taken (filter (lambda (s) (not (memq (car s) own))) surroundings))
          (proc (eval `(lambda ,(map car taken) ,@(body forms))
                      (environment '(rnrs) '(http-server) '(websocket)))))
@@ -318,16 +355,16 @@
 ;; What the client read: the head's status, as the server's (response-reader)
 ;; reads that head alone, its fields, and every byte after it.
 (define (read-head sh)
-  (let* ((all (concat (fake-shell-writes sh)))
+  (let* ((all (bv-concat (fake-shell-writes sh)))
          (n (bytevector-length all))
          (blank (b "\r\n\r\n")))
     (let scan ((i 0))
       (cond ((> (+ i 4) n) (list 'no-head '() all))
-            ((equal? (copy all i (+ i 4)) blank)
-             (let ((r (read-response (copy all 0 (+ i 4)) #f #f)))
+            ((equal? (bv-slice all i (+ i 4)) blank)
+             (let ((r (read-response (bv-slice all 0 (+ i 4)) #f #f)))
                (list (if (eq? (list-ref r 4) 'complete) (car r) (list 'unread (list-ref r 4)))
                      (list-ref r 2)
-                     (copy all (+ i 4) n))))
+                     (bv-slice all (+ i 4) n))))
             (else (scan (+ i 1)))))))
 
 ;; field : (Listof (Pair String String)) String -> (U String #f)
@@ -372,13 +409,13 @@
 ;; What the client reads of an echo: the 101 with §1.3's accept, §5.7's Hello,
 ;; then the server's close answering the client's 1000 with 1000 (§5.5.1).
 (define echo-heard
-  (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (concat (list rfc-hello (server-frame #x88 (close-body 1000 ""))))))
+  (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (bv-concat (list rfc-hello (server-frame #x88 (close-body 1000 ""))))))
 
 ;; The echo's input: the handshake to the path and a masked Hello; then, in a
 ;; read of its own once the echo is out, the client's close.  A close that
 ;; came with the Hello would be answered before the procedure ran, and a send
 ;; while the server's close is under way sends nothing.
-(define (echo-input path) (concat (list (handshake path) rfc-masked-hello)))
+(define (echo-input path) (bv-concat (list (handshake path) rfc-masked-hello)))
 (define client-close (client-frame #x88 (close-body 1000 "")))
 
 ;; A client's binary frame announcing 2,000,000 bytes, its header and masking
@@ -392,7 +429,7 @@
 ;; procedure's runs in the WebSocket websocket-accept gives, with its defaults.
 (define (fragment-handler k role)
   (lambda ()
-    (let ((f (fragment (block-text k))))
+    (let ((f (fragment (block-forms k))))
       (if (eq? role 'handler)
           (lambda (request) (f request #f))
           (lambda (request) (websocket-accept request (lambda (ws) (f #f ws))))))))
@@ -421,7 +458,7 @@
                               #f (head-field "Sec-WebSocket-Protocol"))))
               '((101 "chat.v2") (403 #f)))
         (list "upload-limits" 'handler
-              (lambda (make) (played make (concat (list (handshake "/") big-header)) #f heard))
+              (lambda (make) (played make (bv-concat (list (handshake "/") big-header)) #f heard))
               (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (make-bytevector 0)))))
 
 (run-suite "docs"
@@ -434,9 +471,10 @@
     (let* ((configuration (slurp "docs/configuration.org"))
            (handlers (slurp "docs/handlers.org"))
            (rows (table configuration "Variable"))
-           (all-blocks (append (blocks configuration) (blocks handlers)))
-           (programs (filter program? (readable (blocks handlers))))
-           (fragments (filter (lambda (k) (not (program? k))) (readable (blocks handlers))))
+           (handler-blocks (blocks handlers))
+           (all-blocks (append (blocks configuration) handler-blocks))
+           (programs (filter program? (readable handler-blocks)))
+           (fragments (filter (lambda (k) (not (program? k))) (readable handler-blocks)))
            (written (names (string-append configuration handlers))))
       ;; The suite's own frames are §5.7's, and the pages name what a handler
       ;; calls first, so a scan that finds nothing cannot pass.
@@ -448,6 +486,8 @@
         (provenance-failure "the pages' names were not found: the scan reads nothing"))
       (when (null? programs)
         (provenance-failure "handlers.org holds no program"))
+      (when (member set-to (values-of default-websocket-limits))
+        (provenance-failure "the value the fields are set to is a default: a field set to it changes nothing"))
 
       ;; --- configuration.org ---
 
@@ -470,29 +510,29 @@
       (test-equal "every name of the library's that docs/ writes is one (websocket) exports"
         '() (unbound written))
 
-      (test-equal "the fields handlers.org lists are the limits' fields, each one websocket-limits-with takes, in their order"
+      (test-equal "the fields handlers.org lists are the limits' fields, each one websocket-limits-with takes and sets in its own place, in their order"
         field-names
-        (map (lambda (s) (let ((name (string->symbol s))) (if (field? name) name (list 'not-a-field name))))
-             (code-spans (paragraph handlers "The fields are"))))
+        (map (lambda (s) (field-set (string->symbol s))) (code-spans (paragraph handlers "The fields are"))))
 
       (test-equal "every Scheme block in docs/ ends, and reads as Scheme"
         (map (lambda (k) 'read) all-blocks)
         (map (lambda (k)
                (cond ((not (block-ended? k)) (list 'unterminated (block-text k)))
-                     (else (guard (e (#t (list 'unread (block-text k)))) (data (block-text k)) 'read))))
+                     ((not (block-forms k)) (list 'unread (block-text k)))
+                     (else 'read)))
              all-blocks))
 
       ;; --- handlers.org's program and fragments, run ---
 
       (test-equal "handlers.org's first program takes RFC 6455's handshake to /echo with §1.3's accept, echoes a masked Hello as §5.7's frame, and answers the client's close 1000 with 1000"
         echo-heard
-        (played (lambda () (program-handler (block-text (car programs)))) (echo-input "/echo") client-close heard))
+        (played (lambda () (program-handler (block-forms (car programs)))) (echo-input "/echo") client-close heard))
 
       (test-equal "handlers.org's first program answers any other path 404"
         404
-        (played (lambda () (program-handler (block-text (car programs))))
+        (played (lambda () (program-handler (block-forms (car programs))))
                 (b "GET /other HTTP/1.1\r\nHost: server.example.com\r\n\r\n") #f
-                (lambda (sh) (car (read-response (concat (fake-shell-writes sh)) #f #f)))))
+                (lambda (sh) (car (read-response (bv-concat (fake-shell-writes sh)) #f #f)))))
 
       ;; Each fragment the suite knows, by name, and what its play gave, or
       ;; (missing) when the page has no readable fragment of that name; then

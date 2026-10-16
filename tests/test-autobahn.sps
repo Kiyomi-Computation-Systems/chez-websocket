@@ -34,7 +34,7 @@
 ;;;   is a harness error, status 2.
 ;;; - gate-main, gate.sps's body: its three paths in order; a wrong count, an
 ;;;   unreadable path, or any raise at all, status 2.
-(import (rnrs) (srfi :64) (ws-testing) (ws-autobahn))
+(import (rnrs) (srfi :64) (ws-testing) (ws-text) (ws-autobahn))
 
 ;; raised : (-> Any) -> (U (List 'refused String) (List 'returned Any))
 ;; What a thunk did: the message of the &error it raised, or what it gave.

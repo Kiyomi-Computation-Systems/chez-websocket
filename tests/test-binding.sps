@@ -94,16 +94,16 @@
 ;; every byte after it.  A head the reader does not finish exactly at its end
 ;; is answered `(unread status)`, with the reader's last status.
 (define (answer sh)
-  (let* ((all (concat (fake-shell-writes sh)))
+  (let* ((all (bv-concat (fake-shell-writes sh)))
          (n (bytevector-length all))
          (blank (b "\r\n\r\n")))
     (let scan ((i 0))
       (cond ((> (+ i 4) n) (list 'no-head '() all))
-            ((equal? (copy all i (+ i 4)) blank)
-             (let ((r (read-response (copy all 0 (+ i 4)) #f #f)))
+            ((equal? (bv-slice all i (+ i 4)) blank)
+             (let ((r (read-response (bv-slice all 0 (+ i 4)) #f #f)))
                (list (if (eq? (list-ref r 4) 'complete) (car r) (list 'unread (list-ref r 4)))
                      (list-ref r 2)
-                     (copy all (+ i 4) n))))
+                     (bv-slice all (+ i 4) n))))
             (else (scan (+ i 1)))))))
 
 ;; after-101 : FakeShell -> (List (U Nat Datum) Bytevector) — the status, and
@@ -342,7 +342,7 @@
     ;; --- messages ---
 
     (let* ((n (make-notes))
-           (sh (connect (accepting (echoing n)) (concat (list handshake rfc-masked-hello)))))
+           (sh (connect (accepting (echoing n)) (bv-concat (list handshake rfc-masked-hello)))))
       (test-equal "a masked Hello sent with the handshake is received as the string Hello, and its echo is §5.7's unmasked frame"
         (list '("Hello") (list 101 rfc-hello))
         (list (seen n) (after-101 sh))))
@@ -358,9 +358,9 @@
 
     (let* ((n (make-notes))
            (data (pattern 256))
-           (sh (connect (accepting (echoing n)) (concat (list handshake (client-frame #x82 data))))))
+           (sh (connect (accepting (echoing n)) (bv-concat (list handshake (client-frame #x82 data))))))
       (test-equal "a binary message is received as its bytevector, and echoed as §5.7's 256-byte binary frame"
-        (list (list data) (list 101 (concat (list (bv '(#x82 #x7E #x01 #x00)) data))))
+        (list (list data) (list 101 (bv-concat (list (bv '(#x82 #x7E #x01 #x00)) data))))
         (list (seen n) (after-101 sh))))
 
     (let* ((n (make-notes))
@@ -370,10 +370,10 @@
            (near (list (bv '(#xEE #xBB #xBF)) (bv '(#xEF #xBA #xBF)) (bv '(#xEF #xBB #xBE))))
            (texts (append (list bom-a bom nothing) near))
            (sh (connect (accepting (echoing n))
-                        (concat (cons handshake (map (lambda (x) (client-frame #x81 x)) texts))))))
+                        (bv-concat (cons handshake (map (lambda (x) (client-frame #x81 x)) texts))))))
       (test-equal "a text beginning with U+FEFF is received with it, one of U+FEFF alone, an empty text as the empty string, and texts of U+EEFF, U+FEBF and U+FEFE, one byte off U+FEFF, as themselves; each echoed as its own bytes"
         (list '((#xFEFF #x41) (#xFEFF) () (#xEEFF) (#xFEBF) (#xFEFE))
-              (list 101 (concat (map (lambda (x) (server-frame #x81 x)) texts))))
+              (list 101 (bv-concat (map (lambda (x) (server-frame #x81 x)) texts))))
         (list (map (lambda (s) (if (string? s) (map char->integer (string->list s)) s)) (seen n))
               (after-101 sh))))
 
@@ -502,7 +502,7 @@
     (let* ((spy (make-spy))
            (sh (connect (spying (accepting (receiving-all (make-notes))) spy) handshake))
            (one (client-frame #x89 (make-bytevector 125 7)))
-           (delivered (unread! sh (concat (vector->list (make-vector (div 1048576 (bytevector-length one)) one))))))
+           (delivered (unread! sh (bv-concat (vector->list (make-vector (div 1048576 (bytevector-length one)) one))))))
       (test-equal "a client that sends pings and reads nothing: reading stops at the pong that takes what is unsent past the high water, so the server holds the high water and that one pong"
         (let ((pongs (+ 1 (div 262144 127))))
           (list (* 4096 (+ 1 (div (* pongs 131) 4096))) pongs (* pongs 127) #f))
@@ -563,7 +563,7 @@
       (reading-at! sh spy 2048 150)
       (test-equal "a message past 64 KiB is written in writes of 64 KiB, the last the rest, so a client that reads each within the write timeout is not cut off, however long the whole message takes: 300,000 bytes read at 2 KiB a second"
         (list '(65536 65536 65536 65536 37866) #f '(sent)
-              (list 101 (concat (list (bv (cons #x82 (length-bytes 300000 0))) payload))))
+              (list 101 (bv-concat (list (bv (cons #x82 (length-bytes 300000 0))) payload))))
         (list (reverse (spy-asked spy)) (spy-aborted? spy) (seen n) (after-101 sh))))
 
     ;; A write's done that tells a failure: the client has gone.  No read
@@ -627,7 +627,7 @@
         (list sent (seen n))))
 
     (let* ((n (make-notes))
-           (sh (connect (accepting (echoing n)) (concat (list handshake (client-close 1001 "bye"))))))
+           (sh (connect (accepting (echoing n)) (bv-concat (list handshake (client-close 1001 "bye"))))))
       (test-equal "a client's close is answered with a close echoing its code, and receive raises &websocket-closed with its code and reason, cleanly"
         (list (list 101 (server-close 1001 "")) '((closed 1001 "bye" #t)))
         (list (after-101 sh) (seen n))))
@@ -669,7 +669,7 @@
            (told (until-told (receiving-all n)))
            (sh (connect (accepting (car told)) handshake)))
       ;; A frame a read: the second read begins 11 bytes into what was fed.
-      (fake-shell-feed-input! sh (concat (list rfc-masked-hello (client-frame #x81 (b "again"))))
+      (fake-shell-feed-input! sh (bv-concat (list rfc-masked-hello (client-frame #x81 (b "again"))))
                               (bytevector-length rfc-masked-hello))
       (fake-shell-deliver! sh '(eof))
       ((cadr told))
@@ -730,7 +730,7 @@
       (fake-shell-feed-input! shb rfc-masked-hello 4096)
       (fake-shell-settle! shb)
       (test-equal "a procedure waiting to send to another connection's WebSocket, whose own client leaves, is told &client-closed, and the other connection goes on: it receives, and its client reads what was sent and the echo"
-        (list '(client-closed) '("Hello") (list 101 (concat (list rfc-hello rfc-hello rfc-hello))))
+        (list '(client-closed) '("Hello") (list 101 (bv-concat (list rfc-hello rfc-hello rfc-hello))))
         (list (seen na) (seen nb) (after-101 shb))))
 
     ;; Three procedures, A's, C's and D's, send to B's WebSocket, B's client
@@ -766,7 +766,7 @@
           (turns (+ k 1))))
       (test-equal "procedures sending to one WebSocket whose client is behind wait before they write, so it holds what one would; once its client has read down to the low water, all go on"
         (list '(() () () 14) '(sent) '(sent) '(sent)
-              (list 101 (concat (list rfc-hello rfc-hello rfc-hello rfc-hello))))
+              (list 101 (bv-concat (list rfc-hello rfc-hello rfc-hello rfc-hello))))
         (list waiting (seen na) (seen nc) (seen nd) (after-101 shb))))
 
     ;; B's procedure waits to receive; A's procedure asks to receive from B's
@@ -788,7 +788,7 @@
     ;; B's client has closed; A's procedure receives from B's WebSocket, and
     ;; lets B's &websocket-closed out.  That is not A's end: any other raise.
     (let* ((b-ws #f)
-           (shb (connect (accepting (lambda (ws) (set! b-ws ws))) (concat (list handshake (client-close 1000 "")))))
+           (shb (connect (accepting (lambda (ws) (set! b-ws ws))) (bv-concat (list handshake (client-close 1000 "")))))
            (b-closed (guard (e (#t e)) (websocket-receive b-ws)))
            (run (logged (lambda ()
                           (after-101 (connect (accepting (lambda (ws) (websocket-receive b-ws))) handshake))))))
@@ -894,7 +894,7 @@
            (ws-sh (connect (accepting (receiving-all (make-notes)) (make-handshake-settings '())
                                       (limits '((write-high-water . 7) (write-low-water . 0))))
                            handshake))
-           (pinged (unread! ws-sh (concat (vector->list (make-vector 4 (client-frame #x89 nothing)))))))
+           (pinged (unread! ws-sh (bv-concat (vector->list (make-vector 4 (client-frame #x89 nothing)))))))
       (go-base #t)
       (fake-shell-schedule! base)
       (test-equal "a write's done the core answers by re-arming the write timeout allocates nothing in the binding: no more than a taker whose done re-arms its deadline"
@@ -920,7 +920,7 @@
 
     (let* ((run (logged (lambda ()
                           (let ((sh (connect (accepting (lambda (ws) (websocket-receive ws)))
-                                             (concat (list handshake (client-close 1000 ""))))))
+                                             (bv-concat (list handshake (client-close 1000 ""))))))
                             (list (after-101 sh) (fake-shell-taker-failures sh)))))))
       (test-equal "a procedure that lets &websocket-closed out has nothing more done: no close but the answer, nothing logged, no taker failure"
         (list (list (list 101 (server-close 1000 "")) '()) "")
@@ -975,7 +975,7 @@
                            (list armed quiet pinged waiting (after-101 sh))))))))))
       (test-equal "a client silent after the 101 is pinged at 20 s, not before, and failed with 1011 20 s later, not before, logged"
         (list (list 25000 (list 101 nothing) (list 101 ping) (list 101 ping)
-                    (list 101 (concat (list ping (server-close 1011 "")))))
+                    (list 101 (bv-concat (list ping (server-close 1011 "")))))
               (server-logged 'websocket-failed '(1011 ping-timeout)))
         run))
 
@@ -991,14 +991,14 @@
                        (fake-shell-settle! sh)
                        (list armed pong (after-101 sh))))))))
       (test-equal "a handler's own ping interval and timeout, 30 s and 5 s, are the times armed: pinged at 30 s, failed 5 s later"
-        (list 35000 40000 (list 101 (concat (list ping (server-close 1011 "")))))
+        (list 35000 40000 (list 101 (bv-concat (list ping (server-close 1011 "")))))
         (car run)))
 
     ;; --- a failure, logged ---
 
     (let* ((run (logged (lambda ()
                           (after-101 (connect (accepting (receiving-all (make-notes)))
-                                              (concat (list handshake rfc-hello))))))))
+                                              (bv-concat (list handshake rfc-hello))))))))
       (test-equal "an unmasked frame fails the connection with 1002, logged with its code"
         (list (list 101 (server-close 1002 "")) "websocket-failed 1002 ")
         (list (car run) (let ((log (cadr run))) (if (>= (string-length log) 22) (substring log 0 22) log)))))
