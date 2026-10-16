@@ -2497,3 +2497,22 @@ MERGED to main on 2026-10-16, on the owner's "Run the closing ritual for PR 84, 
 `make test` green on bee5618, whose tree is 6baa7b4's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: before going public, chez-http-server's own visibility. AGENTS.md still ships in archives, and the echo image's Docker context (`.dockerignore`) still takes `.plans/` and `.superpowers/`; neither was asked. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
+
+MERGED to main on 2026-10-16, on the owner's "Yes, run the closing ritual on PR #85": **Examples: an echo, a chat room and a clock**, #85. The owner asked for an `examples/` folder of small, runnable servers, was offered six candidates, and picked three: echo with a page, chat, and a clock that pushes.
+- **What it added.**
+  - `examples/echo.sps`, `chat.sps` and `clock.sps`, each one program of 49 to 69 lines, run with `make run PROGRAM=examples/<name>.sps`, and each serving a page at `/` that opens its WebSocket from the page's own host. Echo sends each message back. Chat tells a newcomer how many are in the room (`here: 3`) and sends each message to every other client's WebSocket, passing over one that closed before it left the room. Clock sends `tick n` a second apart, reading under `with-deadline` between ticks, and closes with 1000 "stopped" on `stop`.
+  - `tests/test-examples.sps`, ten checks: each program read with Chez's reader, `serve` captured, its handler played on the server's fake shell.
+  - `examples/README.org`, an Examples section in README.org, `make help`'s `run` line naming `examples/echo.sps`, and a CHANGELOG entry under Unreleased.
+- **#85**, at 6ee664b, was squashed as 392a181 (tree c5968f1, the tested head's; parent 805d699), with `--match-head-commit` on the full SHA.
+- **CI did not run.** The PR's runs, 38963592637 (d6c0c2c) and 38965080082 (6ee664b), and main's on the squash, 38965960863, each ended with `linux` and `autobahn` not started (0 steps). `make test` on 6ee664b stood in, and each example was run with `make run` and driven from the in-app browser.
+- **Branches.** `feat/examples` was deleted, local and remote, and its worktree, `.claude/worktrees/examples`, removed. The main checkout is fast-forwarded to 392a181. #86 (docs as Markdown) is open and still mergeable.
+
+**Reflect.**
+- **An example is tried the way its reader tries it.** The first push gave only echo a page. The owner opened clock in a browser and got the 404 meant for other paths. A browser is the client everyone has (websocat was not even installed here), so every example now answers `/` with a page, and one check holds all three to it.
+- **What a program does to shared state is checked by making it visible.** A chat room that never shrinks behaves like a correct one until memory runs out. The newcomer's `here: N` made leaving observable, and the check that drops Bob counts two. `fake-shell-hold!` kept Bob's scheduler undrained, so his WebSocket closed before his procedure could leave. That is the only way the per-send guard shows: without it, Alice's procedure dies 1011 and Carol hears nothing.
+- **Each check was watched red against a program wrong in its own way.** Thirteen mutations, each turning only the checks it should: a page opening the wrong socket or served off `/`, origins `'any`, another path 200, the sender told its own message, no leave, no per-send guard, the count without the newcomer, a deadline per message, `stop` just returning, and half-second ticks.
+- **Two `make run`s started at once in a fresh worktree race on `git submodule update`**, and one fails on the submodule's config lock. Start servers one at a time. A worktree's pins clone in seconds with `--reference` to the main checkout's; `git worktree remove` needs `--force` once submodules are in it.
+
+`make test` green on 6ee664b, whose tree is 392a181's (Darwin arm64): sixteen suites, 408 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: #86 (docs as Markdown). Before going public, chez-http-server's own visibility; AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
