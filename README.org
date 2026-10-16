@@ -109,6 +109,12 @@ How a handler takes a WebSocket, what the handshake refuses, how to read, write
 and close, what each close means, and how to choose subprotocols, origins and
 limits of its own — see [[file:docs/handlers.org][docs/handlers.org]].
 
+** Examples
+
+[[file:examples/README.org][examples/]] holds small servers to run and talk to from your browser: an
+echo, a chat room, and a clock that sends a tick each second. Start one with
+~make run PROGRAM=examples/echo.sps~ and open http://127.0.0.1:8080/.
+
 ** License
 
 © [[https://kiyomicomputation.systems/][Kiyomi Computation Systems LLC]]. Licensed under BSD 3-Clause — see
