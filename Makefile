@@ -149,7 +149,7 @@ build: deps ## Build dependencies and assemble the one library path
 dev: build ## Start a REPL with everything on the library path
 	CHEZSCHEMELIBDIRS=$(LIBDIRS) $(CHEZ)
 
-run: build ## Run a program on the library path: make run PROGRAM=echo.sps
+run: build ## Run a program on the library path: make run PROGRAM=examples/echo.sps
 	@test -n "$(PROGRAM)" || { echo "run: set PROGRAM=path/to/program.sps" >&2; exit 2; }
 	CHEZSCHEMELIBDIRS=$(LIBDIRS) $(CHEZ) --program $(PROGRAM)
 

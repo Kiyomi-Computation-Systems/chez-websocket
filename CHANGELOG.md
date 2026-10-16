@@ -6,6 +6,13 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Examples**, in `examples/`: an echo server, a chat room, and a clock that sends a
+  tick each second while it still reads. Each runs with
+  `make run PROGRAM=examples/<name>.sps` and serves a page at `/` to try it from a
+  browser, and `tests/test-examples.sps` plays each one as a client would.
+
 ### Changed
 
 - **Pinned at chez-http-server v0.7.0**, from v0.5.0 by way of v0.6.0. The pins under
