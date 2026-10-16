@@ -1,0 +1,22 @@
+* Examples
+
+Small servers that show how a handler uses a WebSocket. Each is one program.
+Run one from the repository's root, after ~make build~:
+
+#+begin_src sh
+make run PROGRAM=examples/echo.sps
+#+end_src
+
+It listens on 127.0.0.1:8080; ~CHEZ_HTTP_PORT~ changes the port. Talk to it
+from your browser, or with a WebSocket client such as ~websocat~.
+
+- [[file:echo.sps][echo.sps]] — an echo at ~/echo~, and a page at ~/~ that talks to it. Open
+  http://127.0.0.1:8080/ and type a line.
+- [[file:chat.sps][chat.sps]] — a chat room: many connections, and a message goes to every
+  other client. Run ~websocat ws://127.0.0.1:8080/chat~ in two terminals.
+- [[file:clock.sps][clock.sps]] — the server sends a tick each second, on its own schedule, and
+  still reads between ticks. Run ~websocat ws://127.0.0.1:8080/clock~, then
+  type ~stop~.
+
+~make test~ runs [[file:../tests/test-examples.sps][tests/test-examples.sps]], which plays each one as a client
+would, so they keep working.
