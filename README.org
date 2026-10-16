@@ -1,67 +1,115 @@
-* chez-websocket
+* Chez WebSocket
 
 [[https://github.com/Kiyomi-Computation-Systems/chez-websocket/actions/workflows/ci.yml][https://github.com/Kiyomi-Computation-Systems/chez-websocket/actions/workflows/ci.yml/badge.svg]]
 
-WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-http-server][chez-http-server]], in Chez Scheme.
+WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-http-server][chez-http-server]], the HTTP/1.1 server for Chez Scheme.
 
 #+begin_quote
 ✨ *AI Disclosure:* LLMs are used extensively in the planning and development of this project.
 #+end_quote
 
-** What it does
+** Features
 
-The rules are pure libraries. SHA-1, base64 and a UTF-8 checker that takes a
-text in pieces. The frame codec: it reads a client's frames in pieces of any
-size, refusing what no client may send, and builds the server's. The protocol:
-one connection's rules, as steps that read no clock and do no I/O. It delivers
-whole messages, caps their size, checks text as it comes, stops reading while
-its queue is full, closes as RFC 6455 asks, and pings a client gone quiet. The
-opening handshake's check: it answers a client's handshake with the 101's
-fields or a refusal, and refuses a browser's page from another host unless the
-handler names it.
+- *WebSockets from a handler.* A chez-http-server handler takes a WebSocket by
+  answering what ~websocket-accept~ returns. Its procedure reads with
+  ~websocket-receive~, which waits, and writes with ~websocket-send!~ and
+  ~websocket-close!~.
+- *Whole messages.* A message arrives whole, a string for text and a
+  bytevector for binary, however the client split it into frames. Text is
+  checked as UTF-8 as it comes.
+- *Checked handshakes.* A bad handshake is refused before your procedure runs,
+  and a browser's page from another site is refused ~403~ unless you name its
+  origin. A subprotocol is chosen from your list.
+- *Bounded by default.* The message size, the queue of messages waiting, the
+  ping and close timeouts and the unsent bytes each have a default and an
+  environment override (see [[file:docs/configuration.org][docs/configuration.org]]).
+- *Slow and silent clients.* A send waits while the client is behind, and a
+  client that stops reading is cut off after a timeout. Pings are answered for
+  you, and a quiet client is pinged, then closed with ~1011~ if no pong comes.
+- *A pure core.* SHA-1, base64, UTF-8, the frame codec, the protocol and the
+  handshake are pure libraries: steps that read no clock and do no I/O. A
+  binding runs them over the server's transport. An idle connection costs the
+  server about 5.3 KB.
+- *Tested against the real thing.* [[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]]'s 301 cases, without
+  compression, run in CI against an echo server built from the library, and
+  each case's verdict is held. RFC test vectors, Chrome's handshakes, and
+  values computed by Python, Node, Perl, OpenSSL and ws check each part.
 
-The binding runs them over the server's transport: a handler answers what
-=websocket-accept= returns, and its code reads each message with a call that
-waits, sends, and closes. A client that stops reading is cut off after a
-timeout, unless pinging is off or the handler has stopped taking its messages.
-An idle connection costs the server about 5.3 KB.
+No compression and no client: this library is for servers. The API may change
+in any release before 1.0. [[file:CHANGELOG.md][CHANGELOG.md]] lists what each release changes.
 
-Each part is held to its RFC's test vectors and examples, and the binding on a
-real socket too. [[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]]
-holds it to the RFC in CI: an echo server built from it meets all 301 of its
-cases without compression, and a ratchet holds each case's verdict.
-[[file:CHANGELOG.md][CHANGELOG.md]] says what is in each release. No
-compression and no client.
+** Quick start
 
-** Using it
+#+begin_src scheme
+(import (rnrs) (http-server) (websocket))
 
-A chez-http-server handler takes a WebSocket by answering what
-=websocket-accept= returns, and its procedure reads and writes with
-=websocket-receive= and =websocket-send!=. [[file:docs/handlers.org][docs/handlers.org]] shows how, and
-[[file:docs/configuration.org][docs/configuration.org]] lists the =CHEZ_WS_= variables that set its limits.
-
-** Building
-
-You need Chez Scheme 10.4.1 or later, built with threads, and libuv 1.48 or
-later, Ubuntu 24.04's. With none, or an older one such as Debian 12's 1.44,
-chez-libuv builds its own, which needs CMake 3.10 or later. The one dependency,
-chez-http-server, is a submodule pinned at a release tag, and it brings its own
-pinned dependencies. chez-http-server is private; the pins it carries are
-public.
-
-#+begin_src sh
-make submodules   # clone chez-http-server v0.7.0 and the pins it carries
-make test         # build chez-libuv's shim, check every pin, run the suites
-make autobahn     # Autobahn's 301 cases against an echo server, in Docker
-make help         # every target
+(serve
+ (lambda (request)
+   (if (string=? (request-path request) "/echo")
+       (websocket-accept request
+         (lambda (ws)
+           (let loop ()
+             (websocket-send! ws (websocket-receive ws))
+             (loop))))
+       (make-response 404 #f '() (string->utf8 "not found\n")))))
 #+end_src
 
-=make autobahn= needs Docker. Autobahn's image is built for amd64, so Docker
-emulates it on other machines. On Linux the echo server runs on your machine.
-On macOS and Windows, whose Docker Desktop has no host network, it runs in a
-Linux container beside Autobahn: =make echo-image= builds it, the first time
-in about four minutes, and =make docker-smoke= checks it starts and stops.
+Save it as ~echo.sps~, start it with ~make run PROGRAM=echo.sps~, and connect
+a client such as ~websocat ws://127.0.0.1:8080/echo~: each line you send comes
+back. How a handler reads, writes and closes is in [[file:docs/handlers.org][docs/handlers.org]].
+
+** Build and test
+
+Prerequisites:
+
+- *Chez Scheme* 10.4.1 or later, threaded build (the binary is ~chez~)
+- *libuv* 1.48 or later that ~pkg-config~ can see (~brew install libuv~, or
+  ~apt install libuv1-dev~ on Ubuntu 24.04 or later), plus a C compiler — the
+  chez-libuv shim is built from source. With no libuv, or an older one such as
+  Debian 12's 1.44, chez-libuv builds its own, which needs CMake 3.10 or later
+- For ~make autobahn~, *Docker*
+
+The one dependency, chez-http-server, is a git submodule under ~vendor/~,
+pinned at a release tag. It carries its own pins: chez-libuv, chez-httparse
+(with byte-machine), uriparse, and chez-srfi for the tests. chez-http-server
+is private; the pins it carries are public.
+
+#+begin_src sh
+git clone https://github.com/Kiyomi-Computation-Systems/chez-websocket.git
+cd chez-websocket
+make build   # clones the pins, builds the chez-libuv shim, assembles the library path
+make test    # runs every tests/test-*.sps
+#+end_src
+
+Clone without ~--recursive~: ~make submodules~, which ~make build~ runs, clones
+what the build needs and not the server's own test clients. ~make help~ lists
+every target; ~make check-pins~ verifies the server sits at its pin, and each
+pin it carries where the server records it.
+
+** Autobahn
+
+~make autobahn~ runs Autobahn|Testsuite's fuzzing client in Docker against
+[[file:tests/autobahn/echo.sps][tests/autobahn/echo.sps]], and fails if any case's verdict differs from
+[[file:tests/autobahn/verdicts.txt][tests/autobahn/verdicts.txt]], better or worse. Autobahn's image is built for
+amd64, so Docker emulates it on other machines. On Linux the echo server runs
+on your machine. On macOS and Windows, whose Docker Desktop has no host
+network, it runs in a Linux container beside Autobahn: ~make echo-image~ builds
+it, the first time in about four minutes, and ~make docker-smoke~ checks it
+starts and stops.
+
+** Configuration
+
+Every limit has a default and a ~CHEZ_WS_~ environment override, read once as
+your program starts — see [[file:docs/configuration.org][docs/configuration.org]]. The server's own ~CHEZ_HTTP_~
+variables still apply.
+
+** Handlers
+
+How a handler takes a WebSocket, what the handshake refuses, how to read, write
+and close, what each close means, and how to choose subprotocols, origins and
+limits of its own — see [[file:docs/handlers.org][docs/handlers.org]].
 
 ** License
 
-BSD 3-Clause; see [[file:LICENSE][LICENSE]].
+© [[https://kiyomicomputation.systems/][Kiyomi Computation Systems LLC]]. Licensed under BSD 3-Clause — see
+[[file:LICENSE][LICENSE]].
