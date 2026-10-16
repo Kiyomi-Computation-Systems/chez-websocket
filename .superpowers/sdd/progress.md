@@ -2391,3 +2391,17 @@ NEXT: the server's release that carries chez-libuv v0.10.0 (chez-http-server#185
 - `make test` green before the commit (Darwin arm64): fifteen suites, 397 expected passes, each suite's count main's, every pin ok; `make check-help` passes. Linux aarch64 with io_uring allowed (`chez-libuv-noble-scratch:10.4.1`, dash, libuv 1.48.0): fifteen suites and 397, each suite's count Darwin's.
 
 NEXT: the PR; the closing ritual when the owner asks. The server's release that carries chez-libuv v0.10.0 or v0.11.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.
+
+MERGED to main on 2026-10-16, on the owner's "do closing ritual": **The second review's rest** (the entry above), #80.
+- **#80**, at 03c2e67, was squashed as 08d295e (tree 7dfbba0, the tested head's; parent 6caf10b), with `--match-head-commit` on the full SHA. Its message is the commit's.
+- **CI did not run.** The PR's run, 38885401295 (03c2e67), and main's on the squash, 38916054854, each ended with `linux` and `autobahn` not started (0 steps). The entry's local runs stood in: macOS and Linux aarch64. It merged past the red check on the owner's word.
+- **Branches.** `fix/docs-suite-review` was deleted, local and remote. The main checkout is fast-forwarded, its submodules at the gitlinks. This reflect is committed from the fix's worktree, detached at 08d295e, which is removed after the push. No PR is open.
+
+**Reflect.**
+- **A reader stricter than its format errs both ways.** The old block reader skipped blocks org reads, the holes the review named, and also went red on pages org reads as written: a tab-indented `#+end_src`, a tab after `#+name:` (DR-4, DR-5). Reading as org does closed both.
+- **Count from the review's own report.** The ledger's "seven" came from a summary line; the review's findings, as reported, left six. The report is the record to count from.
+- **A runner kept in a scratchpad does not last.** M6's mutation runner was gone from the scratchpad, rebuilt from this session's transcript, and trusted because its mutants hashed to the recorded `ffda1147`. A record of each mutant set's hash is what made the rebuild checkable.
+
+`make test` green on main (08d295e, Darwin arm64): fifteen suites, 397 expected passes, each suite's count as before, every pin ok, the server at v0.6.0 (47c787d).
+
+NEXT: the server's release that carries chez-libuv v0.10.0 or v0.11.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.
