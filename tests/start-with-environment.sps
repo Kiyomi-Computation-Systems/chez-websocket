@@ -1,10 +1,10 @@
 #!r6rs
-;;; A program the binding suite runs as a child (design §7).  It imports the
-;;; facade, takes a connection on the server's fake shell through each of
-;;; websocket-accept's forms that leave the limits out, and exits with the sum
-;;; of the seconds each arms its first deadline for: the ping interval the
-;;; binding read from the environment as the program started.  A malformed
-;;; value stops it before its first line, Chez exiting 255.
+;;; A program the binding suite runs as a child.  It imports the facade, takes
+;;; a connection on the server's fake shell through each of websocket-accept's
+;;; forms that leave the limits out, and exits with the sum of the seconds
+;;; each arms its first deadline for: the ping interval the binding read from
+;;; the environment as the program started.  A malformed value stops it before
+;;; its first line, Chez exiting 255.
 (import (rnrs) (websocket) (http-server) (fake-shell) (only (http-server limits) default-limits))
 
 ;; RFC 6455 §1.3's opening handshake.

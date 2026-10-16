@@ -2,25 +2,24 @@
 ;;; (websocket frame) — the frame codec (RFC 6455 §5.2): an incremental
 ;;; decoder of the frames a client sends, and the encoder of the server's.
 ;;;
-;;; A frame arrives in pieces of any size, and its header can straddle two
-;;; (design §4).  The decoder reads a header's bytes as they come, and
-;;; answers the header once it is whole: its FIN, its kind and its payload's
-;;; length, so the protocol can judge the frame before any of its payload is
-;;; held.  Then it unmasks the payload as it arrives (§5.3), into a
-;;; destination the caller gives it, and reads the next header once the
-;;; payload is done.
+;;; A frame arrives in pieces of any size, and its header can straddle two.
+;;; The decoder reads a header's bytes as they come, and answers the header
+;;; once it is whole: its FIN, its kind and its payload's length, so the
+;;; protocol can judge the frame before any of its payload is held.  Then it
+;;; unmasks the payload as it arrives (§5.3), into a destination the caller
+;;; gives it, and reads the next header once the payload is done.
 ;;;
-;;; It refuses, with 1002, what no client may send (design §4): a reserved
-;;; bit set, since no extension is ever negotiated; an unknown opcode; an
-;;; unmasked frame (§5.1); a length not in its shortest form, or a 64-bit
-;;; length with its top bit set (§5.2); and a control frame over 125 bytes,
-;;; or not final (§5.5).  Like the UTF-8 checker, it refuses at the first
-;;; byte that shows the fault: the first with which no frame a client may
-;;; send begins.  A 64-bit length whose first six bytes are zero is under
-;;; 65,536, so it is refused at the sixth.  A refusal is final.
+;;; It refuses, with 1002, what no client may send: a reserved bit set,
+;;; since no extension is ever negotiated; an unknown opcode; an unmasked
+;;; frame (§5.1); a length not in its shortest form, or a 64-bit length with
+;;; its top bit set (§5.2); and a control frame over 125 bytes, or not final
+;;; (§5.5).  Like the UTF-8 checker, it refuses at the first byte that shows
+;;; the fault: the first with which no frame a client may send begins.  A
+;;; 64-bit length whose first six bytes are zero is under 65,536, so it is
+;;; refused at the sixth.  A refusal is final.
 ;;;
-;;; What a message may be is the protocol's to judge (M3): a continuation
-;;; with no message begun, a message past its cap, text that is not UTF-8.
+;;; What a message may be is the protocol's to judge: a continuation with no
+;;; message begun, a message past its cap, text that is not UTF-8.
 ;;;
 ;;; A length is an exact integer: a fixnum below 2^60, and a bignum only past
 ;;; any cap the protocol could set.  A decoder's state is fixnums in a
@@ -28,13 +27,13 @@
 ;;; A payload is unmasked four bytes at a time, read as one word: a fixnum
 ;;; on any 64-bit Chez.  Chez 10.4.1 calls its 32-bit bytevector accessors
 ;;; out of line, and still a word at a time took 1.85 ns a byte, where a
-;;; byte at a time took 4.6 (measured in M2.1).
+;;; byte at a time took 4.6.
 ;;;
 ;;; The encoder makes each of the server's frames whole, in a bytevector of
-;;; its own: final, since each message is one frame (design §4), unmasked
-;;; (§5.1), and its length in its shortest form (§5.2).  So a frame is one
-;;; write, where a header and a payload apart would be two: the server's
-;;; transport makes each write a libuv write of its own, copied at the call.
+;;; its own: final, since each message is one frame, unmasked (§5.1), and
+;;; its length in its shortest form (§5.2).  So a frame is one write, where
+;;; a header and a payload apart would be two: the server's transport makes
+;;; each write a libuv write of its own, copied at the call.
 (library (websocket frame)
   (export make-frame-decoder frame-read-header! frame-read-payload!
           frame-fin? frame-kind frame-control? frame-length frame-left frame-refusal

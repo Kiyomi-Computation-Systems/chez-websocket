@@ -1,13 +1,11 @@
 #!r6rs
-;;; The user docs (M6): what docs/ tells a user, held to what the library
-;;; does.
+;;; The user docs: what docs/ tells a user, held to what the library does.
 ;;;
 ;;; The oracles:
 ;;; - (websocket limits): the variables it reads, in its order, and its
-;;;   defaults, which the limits suite holds to the design's §7.  The docs
-;;;   agree with the library, and the library with the design.
-;;; - The design's §7: durations given in whole seconds, sizes and counts in
-;;;   their own unit; and the limits' fields, in make-websocket-limits' order.
+;;;   defaults, which the limits suite holds; the docs agree with the library.
+;;; - Durations given in whole seconds, sizes and counts in their own unit;
+;;;   and the limits' fields, in make-websocket-limits' order.
 ;;; - (websocket): the names it exports, the names a handler may call, as
 ;;;   Chez's library-exports lists them.
 ;;; - websocket-limits-with: the fields it takes, each setting the limit of
@@ -25,15 +23,15 @@
 ;;; ~code~ or in a block; the fields the handlers page lists.  Each block is
 ;;; read once, as the page is split into blocks.  A block that
 ;;; begins with an import is a program: it is run with `serve` captured, and
-;;; its handler played on the server's fake shell (decision 0004), as the
-;;; binding suite plays its own.  Any other block is a fragment, and the
-;;; suite knows each by its name: where it runs, a handler or a WebSocket's
-;;; procedure, how it is played, and what that must give, from the page's
-;;; words about it (`fragment-plays`).  A fragment the suite does not know,
-;;; or one it knows that the page lost, is red.  The names a fragment takes
-;;; from around it are `request`, `ws`, and the procedures `chat` and
-;;; `upload`; the suite gives each one.  A body is a top-level program's:
-;;; definitions and expressions in any order (R6RS §8.1).
+;;; its handler played on the server's fake shell, as the binding suite plays
+;;; its own.  Any other block is a fragment, and the suite knows each by its
+;;; name: where it runs, a handler or a WebSocket's procedure, how it is
+;;; played, and what that must give, from the page's words about it
+;;; (`fragment-plays`).  A fragment the suite does not know, or one it knows
+;;; that the page lost, is red.  The names a fragment takes from around it are
+;;; `request`, `ws`, and the procedures `chat` and `upload`; the suite gives
+;;; each one.  A body is a top-level program's: definitions and expressions in
+;;; any order (R6RS §8.1).
 (import (rnrs) (rnrs eval) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
         (only (chezscheme) getenv library-exports)
         (only (http-server limits) default-limits)
@@ -189,7 +187,7 @@
 
 ;; --- the defaults ----------------------------------------------------------------
 
-;; The design's §7: these are given in whole seconds; the rest in their own unit.
+;; These are given in whole seconds; the rest in their own unit.
 (define in-seconds
   '("CHEZ_WS_PING_INTERVAL" "CHEZ_WS_PING_TIMEOUT" "CHEZ_WS_CLOSE_TIMEOUT" "CHEZ_WS_WRITE_TIMEOUT"))
 
@@ -214,7 +212,7 @@
              websocket-limits-close-timeout-ms websocket-limits-write-high-water
              websocket-limits-write-low-water websocket-limits-write-timeout-ms)))
 
-;; The fields' names, in make-websocket-limits' order: the design's §7.
+;; The fields' names, in make-websocket-limits' order.
 (define field-names
   '(max-message-bytes max-queue ping-interval-ms ping-timeout-ms
     close-timeout-ms write-high-water write-low-water write-timeout-ms))
@@ -420,8 +418,7 @@
 
 ;; A client's binary frame announcing 2,000,000 bytes, its header and masking
 ;; key alone (§5.2): past the default cap, 1 MiB, which fails it 1009 before
-;; its payload is held (decision 0001), and short of the 16 MiB the limits
-;; fragment gives.
+;; its payload is held, and short of the 16 MiB the limits fragment gives.
 (define big-header (bv (append (list #x82) (length-bytes 2000000 128) '(#x37 #xFA #x21 #x3D))))
 
 ;; fragment-handler : Block Symbol -> (-> (Request -> Answer))

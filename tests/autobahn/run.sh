@@ -1,5 +1,5 @@
 #!/bin/sh
-# The Autobahn lane (M5, decision 0008), run by `make autobahn`.
+# The Autobahn lane, run by `make autobahn`.
 #
 # Starts the echo server, tests/autobahn/echo.sps, runs Autobahn|Testsuite's
 # fuzzing client from $IMAGE against it, stops the server, and gates the run's
@@ -13,8 +13,7 @@
 #   container  in ECHO_IMAGE, the image tests/autobahn/echo.Dockerfile builds
 #              (`make echo-image`), on a Docker network of its own beside the
 #              fuzzing client: Docker Desktop's (macOS, Windows), which has no
-#              host network (0008's review, by form: "Container on Docker
-#              Desktop").
+#              host network.
 #
 # Environment, from the Makefile: CHEZ, LIBDIRS, IMAGE, OUT, ECHO_AT, and for
 # the container ECHO_IMAGE.
@@ -28,9 +27,8 @@ spec=tests/autobahn/fuzzingclient.json
 # Its wait reads this run's echo server's log alone, never the last run's,
 # which says `listening`, so the log is emptied here, before either path
 # starts its server.  On the host path the server's own `>` is done by the
-# child that runs it, which can come after the wait's first read (R-TWO
-# under load, 2026-10-11).  Emptied, not removed: the wait's first read then
-# finds a file.
+# child that runs it, which under load can come after the wait's first read.
+# Emptied, not removed: the wait's first read then finds a file.
 mkdir -p "$OUT/config" "$OUT/reports" &&
   out=$(cd "$OUT" && pwd) &&
   rm -f "$out/reports/index.json" &&
@@ -81,9 +79,8 @@ case "$ECHO_AT" in
     # not even a zombie: this shell reaps its own at its next wait, the
     # sleep's.  On Linux the server can show as a zombie while libuv's
     # io_uring thread still runs, and cannot be reaped until that thread
-    # ends; a run that exited then left it behind (R-TERM's probe,
-    # 2026-10-11).  Once gone, its pid is forgotten, so nothing signals a
-    # process that may have reused it.
+    # ends; a run that exited then left it behind.  Once gone, its pid is
+    # forgotten, so nothing signals a process that may have reused it.
     echo_stop() {
       [ -n "$echo_pid" ] || return 0
       kill -TERM "$echo_pid" 2>/dev/null

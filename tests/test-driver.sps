@@ -1,13 +1,12 @@
 #!r6rs
-;;; The binding's test driver: the server's fake shell (decision 0004).
+;;; The binding's test driver: the server's fake shell.
 ;;;
-;;; The binding's waits need a coroutine, which only the server's shells run
-;;; (design §8).  The server keeps a fake shell in its tests/, which is on
-;;; this project's library path: the server's own core, parser and 101, the
+;;; The binding's waits need a coroutine, which only the server's shells
+;;; run.  The server keeps a fake shell in its tests/, which is on this
+;;; project's library path: the server's own core, parser and 101, the
 ;;; hand-off, coroutines, and a clock the test moves.  This suite holds,
-;;; through the pin, that the fake drives a taker shaped as the binding will
-;;; be (design §6) as the binding needs, and as the server documents its
-;;; libuv shell doing (its decisions 0016, 0023 and 0024):
+;;; through the pin, that the fake drives a taker shaped as the binding is,
+;;; as the binding needs and as the server documents its libuv shell doing:
 ;;;   - the bytes handed over with the take-over, its reads, read-stop and
 ;;;     read-start, its deadline on the fake clock, and the drain;
 ;;;   - a client that reads nothing: a close waits behind the write it has
@@ -108,11 +107,10 @@
     "vendor/chez-http-server/vendor/chez-libuv/tests"))
 (define ours '("src" "tests"))
 
-;; A taker shaped as the binding will be (design §6).  Its take-over keeps
-;; the bytes handed over, registers its drain and close calls, reads into a
-;; queue, and answers (awaiting thunk); the thunk takes the queue's pieces,
-;; parking on `await` when it is empty.  `log` is what the taker saw, in
-;; order.
+;; A taker shaped as the binding is.  Its take-over keeps the bytes handed
+;; over, registers its drain and close calls, reads into a queue, and
+;; answers (awaiting thunk); the thunk takes the queue's pieces, parking on
+;; `await` when it is empty.  `log` is what the taker saw, in order.
 (define-record-type taker
   (fields (mutable pieces) (mutable resume) (mutable ended) (mutable log) (mutable transport))
   (protocol (lambda (new) (lambda () (new '() #f #f '() #f)))))
@@ -158,7 +156,7 @@
 ;; bounded : Taker -> (-> Any)
 ;; At the end, the stream's close, and then the close timeout's bound: a
 ;; deadline of 10,000 ms that aborts, as the binding closes a client that
-;; does not read (decision 0004).
+;; does not read.
 (define (bounded t)
   (echo-closing t (lambda (tr)
                     (transport-close! tr)
@@ -232,8 +230,8 @@
               (list 0 (bytevector-length hello) 101 hello) (cons* stopped started read))))))
 
     ;; The binding stops reading from inside its read, once its queue is
-    ;; full (0001): three frames sent one a read, and the taker stops after
-    ;; the second.
+    ;; full: three frames sent one a read, and the taker stops after the
+    ;; second.
     (let* ((t (make-taker))
            (sh (connect t none echo handshake))
            (reads 0))
@@ -369,7 +367,7 @@
 
     ;; The socket suite drives the server's libuv shell as the server's own
     ;; socket lane does: what it needs of the server's code, held through
-    ;; the pin, as the fake's is above (decision 0004).
+    ;; the pin, as the fake's is above.
     (let* ((loop (make-uv-loop))
            (logged '())
            (sh (make-shell loop (lambda (request) (make-response 200 #f '() (b "ok")))

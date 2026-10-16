@@ -1,6 +1,5 @@
 #!r6rs
-;;; (websocket frame)'s decoder and encoder against their oracles (M2.1,
-;;; M2.2).
+;;; (websocket frame)'s decoder and encoder against their oracles.
 ;;;
 ;;; The oracles are RFC 6455's, read from its raw text: §5.2's framing,
 ;;; §5.3's masking, §5.1's rules that a client masks every frame and a
@@ -10,14 +9,14 @@
 ;;; provenance failure unless they are §5.7's bytes and the length forms'
 ;;; written out by hand.  Node's ws 7.5.10, a server's decoder, was fed
 ;;; every case in its pieces, and its encoder was given every payload the
-;;; suite encodes (m2-mutations.md).
+;;; suite encodes.
 ;;;
 ;;; - §5.7's examples: the masked ones decode, the unmasked ones are refused.
 ;;; - Headers of every kind at each length form's edges, whole and a byte at
 ;;;   a time, split at every byte and every pair of bytes, and with an empty
 ;;;   piece inside.
-;;; - Each refusal of design §4 at its index, with its 1002: whole, a byte at
-;;;   a time, split at every byte, and after a whole frame in the same piece.
+;;; - Each refusal at its index, with its 1002: whole, a byte at a time,
+;;;   split at every byte, and after a whole frame in the same piece.
 ;;;   A refusal is final.
 ;;; - Payloads unmasked at every offset and into any place of a destination;
 ;;;   frames back to back split at every byte; §5.7's 256-byte and 64 KiB
@@ -339,8 +338,8 @@
   (list (list 'header (cadr (car h)) (caddr (car h)) (cadr h))
         (if (= (cadr h) 0) 'between (list 'left (cadr h)))))
 
-;; The refusals of design §4, each case the index of the byte that shows it,
-;; then the bytes: the reason, then the cases.
+;; The refusals, each case the index of the byte that shows it, then the
+;; bytes: the reason, then the cases.
 (define refusals
   `(("a reserved bit set is refused at the first byte, with 1002"
      reserved-bit
@@ -397,7 +396,7 @@
 (define rfc-64k (list #x82 #t 'binary (pattern 65536)))
 
 ;; Each kind of frame a server sends, as `kinds` has it: final, since each
-;; message is one frame (design §4), so never a continuation.
+;; message is one frame, so never a continuation.
 (define sent-kinds
   (filter (lambda (k) (and (cadr k) (not (eq? (caddr k) 'continuation)))) kinds))
 
@@ -689,8 +688,8 @@
           (list answer answer 0 0))
         (list (whole) (one-by-one) (allocated whole) (allocated one-by-one))))
 
-    ;; The encoder (M2.2).  §5.7's fragmented message is the one unmasked
-    ;; example a server never sends: each of its messages is one frame.
+    ;; The encoder.  §5.7's fragmented message is the one unmasked example a
+    ;; server never sends: each of its messages is one frame.
     (test-equal "RFC 6455's unmasked frames a server sends are encoded byte for byte: Hello as text and as a ping, and the 256-byte and 64 KiB binary messages"
       (list (list-ref rfc-unmasked 0) (list-ref rfc-unmasked 3)
             (append (list-ref rfc-unmasked 4) (pattern 256))

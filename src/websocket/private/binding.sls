@@ -1,15 +1,15 @@
 #!r6rs
-;;; (websocket private binding) — the shell (design §6): the core over the
-;;; server's transport, the waits, and the environment.
+;;; (websocket private binding) — the shell: the core over the server's
+;;; transport, the waits, and the environment.
 ;;;
 ;;; `websocket-accept` checks the handshake ((websocket handshake)), reading
-;;; every line of a field, joined with commas (RFC 9110 §5.3; decision 0004),
-;;; and answers the server's door: a refusal, or `(switch-protocols headers
-;;; take-over)`.  The take-over runs in place, inside the server's callbacks,
-;;; and cannot wait: it makes the core's state, arms the deadline the state
-;;; names, starts reading, feeds the core the bytes the server read past the
-;;; request, and answers `(awaiting thunk)`, whose thunk runs the handler's
-;;; procedure with the WebSocket, on the coroutine the server gives it.
+;;; every line of a field, joined with commas (RFC 9110 §5.3), and answers the
+;;; server's door: a refusal, or `(switch-protocols headers take-over)`.  The
+;;; take-over runs in place, inside the server's callbacks, and cannot wait:
+;;; it makes the core's state, arms the deadline the state names, starts
+;;; reading, feeds the core the bytes the server read past the request, and
+;;; answers `(awaiting thunk)`, whose thunk runs the handler's procedure with
+;;; the WebSocket, on the coroutine the server gives it.
 ;;;
 ;;; Every event the core is told, a read, its end, a deadline passing, a
 ;;; take, a write's done, a send, a close, is stepped at once, and the
@@ -17,8 +17,6 @@
 ;;;   write            transport-write!, in writes of 64 KiB at most, each
 ;;;                    done stepped as written, whatever it says, and one
 ;;;                    that tells a failure as the stream's end too
-;;;                    (decision 0006, and its amendment by form: "In 64 KiB
-;;;                    writes")
 ;;;   deliver          the message queued for websocket-receive, which is
 ;;;                    woken if it waits
 ;;;   read-stop, read-start   the transport's verbs
@@ -30,8 +28,7 @@
 ;;;   close-stream     the deadline armed for the close timeout, its call
 ;;;                    transport-abort!, then transport-close!: a client that
 ;;;                    has not read what was written by then is aborted
-;;;                    (0006; timed from here, as peers time a close, by
-;;;                    form: "From queueing, as peers do")
+;;;                    (timed from here, as peers time a close)
 ;;;   abort-stream     transport-abort!: the close timeout, or the write
 ;;;                    timeout, has passed
 ;;;   closed           the WebSocket's end, &websocket-closed, kept; a
@@ -39,31 +36,28 @@
 ;;;   log              a line on the current output port, as the server
 ;;;                    logs: its name prefixed websocket-, then each detail
 ;;;
-;;; The waits (decision 0005).  A receive or a send waits on `await`, its
-;;; waiter kept on the WebSocket, with the WebSocket whose procedure runs on
-;;; the coroutine that waits, if any (`current-websocket`, set around each
-;;; procedure).  Any number of coroutines may wait to send while the core
-;;; says the client is behind (ws-behind?, 0006): a send waits before it
-;;; writes, and after a write that puts the client behind (by form: "Wait
-;;; before writing too"), so what one client makes the server hold is the
-;;; high water and the one frame that passed it, however many send.  All
-;;; that wait are woken at the done that ends it, and each goes on in turn
-;;; while the client is not behind.  One receive may wait, and a second
-;;; while it does is refused, as websockets refuses it.  Waking lets the
-;;; waiter go.
+;;; The waits.  A receive or a send waits on `await`, its waiter kept on the
+;;; WebSocket, with the WebSocket whose procedure runs on the coroutine that
+;;; waits, if any (`current-websocket`, set around each procedure).  Any
+;;; number of coroutines may wait to send while the core says the client is
+;;; behind (ws-behind?): a send waits before it writes, and after a write that
+;;; puts the client behind, so what one client makes the server hold is the
+;;; high water and the one frame that passed it, however many send.  All that
+;;; wait are woken at the done that ends it, and each goes on in turn while
+;;; the client is not behind.  One receive may wait, and a second while it
+;;; does is refused, as websockets refuses it.  Waking lets the waiter go.
 ;;;
-;;; The stream's close, whoever closed it (decision 0023).  The server tells
-;;; the wait the procedure is in, or else its next, raising &client-closed
-;;; there, and then runs the transport's close call: both of its shells, in
-;;; that order.  The close call marks the wait the WebSocket's procedure is
-;;; in, wherever it waits, as ended, so nothing wakes it, which would be a
-;;; late resume; then steps the stream's end, `(end closed)`, so the core
-;;; reads what waits for the queue and ends the connection, 1006, unless it
-;;; has ended, waking whatever else waits.  A wait's &client-closed is its
-;;; own coroutine's stream's: on its own WebSocket it ends the wait, and the
-;;; receive or send sees the end; on another's it goes on out, to the
-;;; procedure whose stream closed.  The server's drain closes with 1001,
-;;; "going away".
+;;; The stream's close, whoever closed it.  The server tells the wait the
+;;; procedure is in, or else its next, raising &client-closed there, and then
+;;; runs the transport's close call: both of its shells, in that order.  The
+;;; close call marks the wait the WebSocket's procedure is in, wherever it
+;;; waits, as ended, so nothing wakes it, which would be a late resume; then
+;;; steps the stream's end, `(end closed)`, so the core reads what waits for
+;;; the queue and ends the connection, 1006, unless it has ended, waking
+;;; whatever else waits.  A wait's &client-closed is its own coroutine's
+;;; stream's: on its own WebSocket it ends the wait, and the receive or send
+;;; sees the end; on another's it goes on out, to the procedure whose stream
+;;; closed.  The server's drain closes with 1001, "going away".
 ;;;
 ;;; The procedure's end: its return closes with 1000; its own WebSocket's
 ;;; &websocket-closed let out does nothing more, nor a &client-closed, which
@@ -72,8 +66,8 @@
 ;;; thunk lets nothing out, so the server logs nothing for it.
 ;;;
 ;;; The limits are read from the environment once, as a program that
-;;; imports the binding starts, so a malformed value stops it there (design
-;;; §7): Chez runs a library's body before the program's.
+;;; imports the binding starts, so a malformed value stops it there: Chez
+;;; runs a library's body before the program's.
 (library (websocket private binding)
   (export websocket-accept websocket-receive websocket-send! websocket-close!
           websocket-subprotocol websocket?
@@ -109,7 +103,7 @@
   ;; `senders` the waiters of the sends that wait; `parked` the waiter its
   ;; own procedure last waited in, on this WebSocket or another, or #f;
   ;; `ended` the &websocket-closed once the connection has ended, or #f.
-  ;; What is unsent is the core's to count (0006).  The core's callbacks are
+  ;; What is unsent is the core's to count.  The core's callbacks are
   ;; made once, here, and its read, take and done events too, each filled in
   ;; before it is stepped, so none allocates (the core keeps no event).
   ;;   websocket? : Any -> Boolean
@@ -134,7 +128,7 @@
   (define current-websocket (make-parameter #f))
 
   ;; default-settings : HandshakeSettings — no subprotocols, the request's
-  ;; own host as the one origin (decision 0003).
+  ;; own host as the one origin.
   (define default-settings (make-handshake-settings '()))
 
   ;; websocket-accept : Request (WebSocket -> Any) [HandshakeSettings [WebsocketLimits]] -> Answer
@@ -271,7 +265,7 @@
 
   ;; close-stream! : WebSocket -> Void
   ;; The stream closed once what is written has gone, unless the client has
-  ;; not read it within the close timeout: then aborted (0006).  The deadline
+  ;; not read it within the close timeout: then aborted.  The deadline
   ;; goes first: a close that begins at once, nothing unsent, disarms it, in
   ;; both of the server's shells.
   (define (close-stream! ws)
@@ -342,13 +336,9 @@
   ;; WebSocket is its stream's close, which the close call has stepped, so
   ;; the wait ends; anything else goes on out, another stream's close, or a
   ;; deadline the handler set.  The way back out of the wait is a full
-  ;; continuation: while the server parked its coroutines on one-shot ones
-  ;; (its v0.4.0), a one-shot one here, call/1cc, held a stack segment of
-  ;; its own for as long as the procedure waited, 2.8 to 4.3 KB a connection
-  ;; on a real socket (decision 0005's amendment, by form: "call/cc").  From
-  ;; its v0.4.1, whose park is a full continuation, a call/1cc here held 453
-  ;; to 490 B over a bare `await`, and this 303 to 340 (0005's second
-  ;; amendment).
+  ;; continuation, as the server's own park is: on a real socket it holds
+  ;; 303 to 340 B a connection over a bare `await`, where a one-shot one,
+  ;; call/1cc, holds 453 to 490 B.
   (define (park! ws send?)
     (let* ((owner (current-websocket))
            (w (make-waiter #f owner #f)))
@@ -373,11 +363,11 @@
     (unless (websocket? ws) (assertion-violation who "not a WebSocket" ws)))
 
   ;; websocket-receive : WebSocket -> (U String Bytevector)
-  ;; The oldest message delivered and not yet received: a text's string, or
-  ;; a binary's bytevector.  It waits until one comes; a receive while
-  ;; another waits on the WebSocket is refused (decision 0005).  Once the
-  ;; connection has ended, the messages still queued are received first;
-  ;; then it raises &websocket-closed, and again at every later call.
+  ;; The oldest message delivered and not yet received: a text's string, or a
+  ;; binary's bytevector.  It waits until one comes; a receive while another
+  ;; waits on the WebSocket is refused.  Once the connection has ended, the
+  ;; messages still queued are received first; then it raises
+  ;; &websocket-closed, and again at every later call.
   (define (websocket-receive ws)
     (check ws 'websocket-receive)
     (let loop ()
@@ -392,14 +382,13 @@
             (else (park! ws #f) (loop)))))
 
   ;; websocket-send! : WebSocket (U String Bytevector) -> Void
-  ;; Sends a text of the string, or a binary of the bytevector, as one
-  ;; frame.  While the client is behind, more than the high water unsent, it
-  ;; waits until a done brings that to the low water, beside any other send
-  ;; that waits (decisions 0005 and 0006): before it writes, and after a
-  ;; write that puts the client behind.  Once the connection has ended it
-  ;; raises &websocket-closed; while the server's close is under way it
-  ;; sends nothing, waits for the end, and then raises it, as websockets
-  ;; does.
+  ;; Sends a text of the string, or a binary of the bytevector, as one frame.
+  ;; While the client is behind, more than the high water unsent, it waits
+  ;; until a done brings that to the low water, beside any other send that
+  ;; waits: before it writes, and after a write that puts the client behind.
+  ;; Once the connection has ended it raises &websocket-closed; while the
+  ;; server's close is under way it sends nothing, waits for the end, and then
+  ;; raises it, as websockets does.
   (define (websocket-send! ws payload)
     (check ws 'websocket-send!)
     (let ((kind (cond ((string? payload) 'text)
@@ -440,8 +429,7 @@
 
   ;; decode : Bytevector -> String
   ;; Checked UTF-8 as its string, a leading U+FEFF kept: Chez 10.4.1's
-  ;; utf8->string drops one leading byte-order mark (the design's §6), so
-  ;; it is put back.
+  ;; utf8->string drops one leading byte-order mark, so it is put back.
   (define (decode bv)
     (if (and (fx>=? (bytevector-length bv) 3)
              (fx=? (bytevector-u8-ref bv 0) #xEF)

@@ -1,18 +1,17 @@
 #!r6rs
-;;; (ws-autobahn): the Autobahn lane's gate (M5, decision 0008).
+;;; (ws-autobahn): the Autobahn lane's gate.
 ;;;
 ;;; Autobahn's fuzzing client exits 0 whatever its cases show, and when a
 ;;; connection fails it ends its run there, still 0 (its fuzzing.py).  So the
 ;;; lane is gated on the index.json it writes, read against the ratchet,
 ;;; tests/autobahn/verdicts.txt: every case's behavior, behaviorClose and the
 ;;; close code the server sent, held both ways, as chez-http-server's ratchet
-;;; holds its corpora (its decision 0008): a verdict that changes either way
-;;; is a difference, and so is a case only one side has.  A case whose
-;;; verdict was measured to vary with how the client's bytes fall into reads
-;;; lists each whole verdict seen, " | " between them (decision 0008, by form:
-;;; "List what was measured"), and passes with any one of them, not with a
-;;; pairing of their fields never seen.  This suite holds the gate on texts of
-;;; its own, so it runs without Docker.
+;;; holds its corpora: a verdict that changes either way is a difference, and
+;;; so is a case only one side has.  A case whose verdict was measured to vary
+;;; with how the client's bytes fall into reads lists each whole verdict seen,
+;;; " | " between them, and passes with any one of them, not with a pairing of
+;;; their fields never seen.  This suite holds the gate on texts of its own, so
+;;; it runs without Docker.
 ;;;
 ;;; The oracles are RFC 8259's grammar and its examples (§7, §13), and the
 ;;; index as Autobahn 25.10.1 writes it: an object holding the agent the spec

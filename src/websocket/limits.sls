@@ -1,6 +1,6 @@
 #!r6rs
 ;;; (websocket limits) — a connection's limits, and their reading from an
-;;; environment's strings (design §7).
+;;; environment's strings.
 ;;;
 ;;; Pure: reading the process's environment is I/O, so this library is given
 ;;; a lookup, String -> (U String #f), as the server's (http-server limits)
@@ -8,14 +8,14 @@
 ;;; starts, so a malformed value stops the program there; a test hands it a
 ;;; table.
 ;;;
-;;; The defaults, each with its source:
-;;;   max-message-bytes  1 MiB: the largest message; past it, 1009 (0001)
-;;;   max-queue          16 messages (0001's amendment of 2026-10-05): reading
+;;; The defaults:
+;;;   max-message-bytes  1 MiB: the largest message; past it, 1009
+;;;   max-queue          16 messages: reading
 ;;;                      stops once the queue holds a cap's worth of bytes or
 ;;;                      this many messages, websockets' max_queue
-;;;   ping-interval-ms   20 s of quiet before a ping; 0 turns pinging off (0001)
-;;;   ping-timeout-ms    20 s for its pong; past it, 1011 (0001).  Timed from
-;;;                      the ping's queueing (0001's amendment of 2026-10-09):
+;;;   ping-interval-ms   20 s of quiet before a ping; 0 turns pinging off
+;;;   ping-timeout-ms    20 s for its pong; past it, 1011.  Timed from the
+;;;                      ping's queueing:
 ;;;                      what was sent before it waits in the kernel's
 ;;;                      buffers, so a live client reading a large backlog
 ;;;                      slowly is failed, 96 KiB/s after 4 MiB on Linux
@@ -23,7 +23,7 @@
 ;;;   close-timeout-ms   10 s for the client's close, after the server's
 ;;;                      (websockets' close_timeout), and for a client to read
 ;;;                      what was unsent when a close was asked for; past it,
-;;;                      the stream aborted (decision 0006): at a close, a
+;;;                      the stream aborted: at a close, a
 ;;;                      client reads the high water within it, 25.6 KiB/s
 ;;;                      by default
 ;;;   write-high-water   256 KiB unsent before a send waits, and reading
@@ -31,7 +31,7 @@
 ;;;   write-low-water    64 KiB unsent when both go on: the server's own
 ;;;   write-timeout-ms   60 s for a write's done while past the high water;
 ;;;                      past it, the stream aborted: the server's own
-;;;                      CHEZ_HTTP_WRITE_TIMEOUT (decision 0006)
+;;;                      CHEZ_HTTP_WRITE_TIMEOUT
 ;;; Durations are given in whole seconds and kept in milliseconds, the unit
 ;;; the server's transport arms a deadline in; sizes and counts are given and
 ;;; kept in their own unit.  A variable absent or empty is its default.  A
@@ -45,9 +45,9 @@
 ;;; 1 ms, since one of 0 would pass as its ping went; read in whole seconds,
 ;;; that is at least 1 s.  So is a write's timeout, since one of 0 would
 ;;; pass as reading stopped, and a close's, since one of 0 would abort a
-;;; close before the client could read it (0006's amendment, by form).  The
-;;; rest are at least 0.  Each is a fixnum at
-;;; most: the server's transport arms a deadline only for a fixnum of ms
+;;; close before the client could read it.  The rest are at least 0.  Each
+;;; is a fixnum at most: the server's transport arms a deadline only for a
+;;; fixnum of ms
 ;;; (transport-deadline!), and the step counts in fixnums, so a value past
 ;;; one is refused here, as the program starts, not where it is used.  A low
 ;;; water above the high water is refused too: a send would go on before it

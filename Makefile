@@ -1,14 +1,13 @@
 # chez-websocket — canonical entry points.
 #
 # One dependency, pinned by gitlink at a release tag: chez-http-server, under
-# vendor/ (global-constraints).  It carries its own pins, and this project
-# uses them through it: chez-libuv, chez-httparse with byte-machine under it,
-# uriparse, and chez-srfi for the SRFI-64 test framework.  `make submodules`
-# clones those, and not the server's test clients.  `make check-pins` holds
-# the server at SERVER_PIN, and each pin it carries at the commit its parent
-# records, so a server pin that moves brings them along; it refuses a
-# checkout with local edits.  `make build` builds chez-libuv's shim and
-# assembles one library path.
+# vendor/.  It carries its own pins, and this project uses them through it:
+# chez-libuv, chez-httparse with byte-machine under it, uriparse, and chez-srfi
+# for the SRFI-64 test framework.  `make submodules` clones those, and not the
+# server's test clients.  `make check-pins` holds the server at SERVER_PIN, and
+# each pin it carries at the commit its parent records, so a server pin that
+# moves brings them along; it refuses a checkout with local edits.  `make
+# build` builds chez-libuv's shim and assembles one library path.
 
 CHEZ ?= chez
 
@@ -44,12 +43,12 @@ LIBDIRS := $(subst $(SPACE),:,$(strip $(LIBDIR_LIST)))
 # The suites run on LIBDIRS and then the test code they borrow, last, so the
 # directories before it win any name it shares with them (the driver suite
 # checks that none does): the server's tests/, whose (fake-shell) is the
-# binding's test driver (decision 0004) and whose (shell-testing) runs clients
-# on the libuv shell's loop for the socket suite; chez-httparse's test
-# harness, on which the server's (response-reader) reads a response as a
-# client would; and chez-libuv's tests/, whose (uv-testing) (shell-testing)
-# is built on.  Test code stays off LIBDIRS, the path `make run` and `make
-# dev` use, and `make test` refuses to run if it is there.
+# binding's test driver and whose (shell-testing) runs clients on the libuv
+# shell's loop for the socket suite; chez-httparse's test harness, on which
+# the server's (response-reader) reads a response as a client would; and
+# chez-libuv's tests/, whose (uv-testing) (shell-testing) is built on.  Test
+# code stays off LIBDIRS, the path `make run` and `make dev` use, and `make
+# test` refuses to run if it is there.
 TEST_ONLY_DIRS := $(SERVER_DIR)/tests $(HTTPARSE_DIR)/test/support/harness $(LIBUV_DIR)/tests
 TEST_LIBDIRS := $(LIBDIRS):$(subst $(SPACE),:,$(strip $(TEST_ONLY_DIRS)))
 
@@ -57,9 +56,9 @@ TEST_LIBDIRS := $(LIBDIRS):$(subst $(SPACE),:,$(strip $(TEST_ONLY_DIRS)))
 TESTS := $(wildcard tests/test-*.sps)
 
 # The suites run with none of the binding's variables set: it reads them as a
-# program starts, and the suites' numbers are the defaults' (design §7).  The
-# binding suite refuses to run if one is set, so a variable added to (websocket
-# limits) and not here stops it.
+# program starts, and the suites' numbers are the defaults'.  The binding suite
+# refuses to run if one is set, so a variable added to (websocket limits) and
+# not here stops it.
 WS_ENV_VARS := CHEZ_WS_MAX_MESSAGE_BYTES CHEZ_WS_MAX_QUEUE CHEZ_WS_PING_INTERVAL \
   CHEZ_WS_PING_TIMEOUT CHEZ_WS_CLOSE_TIMEOUT CHEZ_WS_WRITE_HIGH_WATER CHEZ_WS_WRITE_LOW_WATER \
   CHEZ_WS_WRITE_TIMEOUT
@@ -69,7 +68,7 @@ WS_ENV_VARS := CHEZ_WS_MAX_MESSAGE_BYTES CHEZ_WS_MAX_QUEUE CHEZ_WS_PING_INTERVAL
 TIMEOUT_BIN := $(shell command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null)
 SUITE_TIMEOUT ?= 120
 
-# --- the Autobahn lane (M5, decision 0008) -----------------------------------
+# --- the Autobahn lane -------------------------------------------------------
 # Autobahn|Testsuite's fuzzing client, from its image pinned by digest (built
 # for linux/amd64 alone, so Docker emulates it elsewhere), against
 # tests/autobahn/echo.sps, gated on tests/autobahn/verdicts.txt.  The echo
@@ -128,9 +127,8 @@ check-pins: ## Verify the server sits at its pin, and each pin it carries where 
 	exit $$fail
 
 # The import audit is a suite, tests/test-imports.sps, which `make test` runs
-# with the others: it reads each library under src/ with Chez's own reader
-# and holds its imports to the pure ones (design §2).  This target runs it
-# alone.
+# with the others: it reads each library under src/ with Chez's own reader and
+# holds its imports to the pure ones.  This target runs it alone.
 check-imports: build ## Check each library under src/ imports only (rnrs ...) and pure (websocket ...) ones
 	CHEZSCHEMELIBDIRS=$(LIBDIRS) $(CHEZ) --program tests/test-imports.sps
 
@@ -160,7 +158,7 @@ test: build check-pins ## Run every tests/test-*.sps (status 0/1/2/3, keep-going
 	@test -n "$(TIMEOUT_BIN)" || echo "note: no timeout(1) on PATH; a hung suite will not be capped"
 	@for d in $(TEST_ONLY_DIRS); do \
 	  case ":$(LIBDIRS):" in *":$$d:"*) \
-	    echo "test: $$d is test code on LIBDIRS, the path make run and make dev use; it belongs on TEST_LIBDIRS alone (decision 0004)" >&2; exit 2;; \
+	    echo "test: $$d is test code on LIBDIRS, the path make run and make dev use; it belongs on TEST_LIBDIRS alone" >&2; exit 2;; \
 	  esac; \
 	done
 	@fail=0; \

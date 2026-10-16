@@ -1,13 +1,12 @@
 name: CI
 
 # Linux only, deliberately (AGENTS.md: do NOT set up macOS runners). macOS is
-# the development platform and is exercised by `make test` on the laptop. Each
-# job builds chez-libuv's shim against system libuv and resolves the pinned
-# chez-http-server and the pins it carries onto one library path, by the
-# setup action beside this file (.github/actions/setup). `linux` then runs the
-# suite: chez-http-server's job without that project's test clients.
-# `autobahn` runs the Autobahn lane, `make autobahn` (M5, decision 0008, by
-# form: "Every PR and push"), beside it.
+# the development platform and is exercised by `make test` locally. Each job
+# builds chez-libuv's shim against system libuv and resolves the pinned
+# chez-http-server and the pins it carries onto one library path, by the setup
+# action beside this file (.github/actions/setup). `linux` then runs the suite:
+# chez-http-server's job without that project's test clients. `autobahn` runs
+# the Autobahn lane, `make autobahn`, beside it, on every PR and push.
 
 on:
   push:
@@ -15,10 +14,9 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      # A run by hand with a salt misses the Chez cache, so the setup
-      # action's build-and-save path runs: proven now, not at the next floor or
-      # image bump (M5's review). A push or a PR has none, and the key is the
-      # cache's usual one.
+      # A run by hand with a salt misses the Chez cache, so the setup action's
+      # build-and-save path runs: proven now, not at the next floor or image
+      # bump. A push or a PR has none, and the key is the cache's usual one.
       chez-cache-salt:
         description: "Appended to the Chez cache key, to run its miss path"
         required: false
@@ -28,8 +26,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# The Chez floor (global-constraints). Each job asserts the Chez it ends up
-# with actually meets this rather than trusting the resolution step.
+# The Chez floor. Each job asserts the Chez it ends up with actually meets
+# this rather than trusting the resolution step.
 env:
   CHEZ_FLOOR_VERSION: "10.4.1"
 

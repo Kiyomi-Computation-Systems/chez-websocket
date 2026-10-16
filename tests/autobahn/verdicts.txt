@@ -1,6 +1,6 @@
 # verdicts.txt -- every Autobahn|Testsuite case's verdict for the lane's echo
-# server, tests/autobahn/echo.sps (M5, decision 0008): the ratchet `make
-# autobahn` gates on, both ways.
+# server, tests/autobahn/echo.sps: the ratchet `make autobahn` gates on, both
+# ways.
 #
 # Format: <case> <behavior> <behaviorClose> <close code the server sent, or
 # none>, and for a case that varies, each further verdict after a " | ".
@@ -9,9 +9,9 @@
 # verdict changes by a reviewed diff of this file.
 #
 # The cases are 1.* to 10.*, 301 of them: 12.* and 13.* are permessage-
-# deflate's, which v1 declines, and there is no 11.*.  The echo server's cap is
-# 16 MiB, the largest message the cases send.  Measured on Linux (arm64, libuv
-# 1.48.0) on 2026-10-09, three runs alike; CI gates on it, Linux amd64.
+# deflate's, which the handshake declines, and there is no 11.*.  The echo
+# server's cap is 16 MiB, the largest message the cases send.  Measured on
+# Linux (arm64, libuv 1.48.0), three runs alike; CI gates on it, Linux amd64.
 #
 #   NON-STRICT, 7: 3.2, 3.3, 4.1.3, 4.1.4, 4.2.3, 4.2.4 and 5.15 send a
 #     message, then a frame the server fails with 1002, back to back.  The core
@@ -21,16 +21,13 @@
 #   Either, 3: 3.4, 4.1.5 and 4.2.5 send the same a few bytes at a time.
 #     When one read holds the message's end and the bad frame's start, the
 #     core fails before the echo, NON-STRICT; otherwise OK.  Each lists the
-#     whole verdicts measured, " | " between them, by form ("List what was
-#     measured"): on Linux, 30 runs of the three alone gave NON-STRICT 12, 11
-#     and 14 times, and 16 full runs never; on macOS 3, 2 and 2 times in 30,
-#     and one or more in 4 of 11 full runs.
-#     The server at v0.4.1 closed its socket with the client's bytes unread,
-#     and the kernel reset the connection: in 3 of those 90 Linux tries (3.4
-#     twice, 4.2.5 once) the 1002 never reached the client, NON-STRICT OK
-#     none.  Since its v0.5.0 the server half-closes and lingers (its decision
-#     0026), and none is gone, by form ("Drop none"): 0 of 720 tries on
-#     Linux, 2026-10-11, where v0.4.1 lost the 1002 in 1 of 720 the same day.
+#     whole verdicts measured, " | " between them: on Linux, 30 runs of the
+#     three alone gave NON-STRICT 12, 11 and 14 times, and 16 full runs never;
+#     on macOS 3, 2 and 2 times in 30, and one or more in 4 of 11 full runs.
+#     The server half-closes and lingers, so the kernel never resets the
+#     connection over the client's unread bytes, a reset that could lose the
+#     1002 and give NON-STRICT OK none.  That verdict is not listed: 0 of 720
+#     tries on Linux gave it.
 #   INFORMATIONAL, 3: 7.1.6, 7.13.1 and 7.13.2, as the cases themselves say.
 1.1.1 OK OK 1000
 1.1.2 OK OK 1000

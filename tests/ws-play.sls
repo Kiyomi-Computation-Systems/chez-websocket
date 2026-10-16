@@ -3,9 +3,9 @@
 ;;; 6455 §5.2 and §5.3, the bytevectors they are made of and read from
 ;;; (`b`, `bv`, `bv-concat`, `bv-slice`), and a handler that answers
 ;;; websocket-accept's switch.  The binding and docs suites play them on the
-;;; server's fake shell, and the socket suite on its libuv shell (M4.3 step 3's
-;;; review).  Its bytevector names begin `bv` so a suite's own names, or
-;;; another library's, cannot meet them.
+;;; server's fake shell, and the socket suite on its libuv shell.  Its
+;;; bytevector names begin `bv` so a suite's own names, or another library's,
+;;; cannot meet them.
 ;;;
 ;;; NOT pure: `logged` takes the current output port for its thunk.
 (library (ws-play)

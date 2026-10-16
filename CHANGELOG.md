@@ -13,10 +13,9 @@ All notable changes to chez-websocket are recorded here. The format follows
   byte-machine v0.7.0, and uriparse v0.6.2.
   - Once the binding closes a connection's stream, the server bounds each write the
     close waits for by its write timeout, `CHEZ_HTTP_WRITE_TIMEOUT` (60 s), and aborts
-    the connection past it (its decision 0027). The binding arms its close timeout, 10 s
-    by default, as it closes, so with the defaults a close ends as before. A close
-    timeout set above the server's write timeout can now end sooner for a client that
-    reads nothing.
+    the connection past it. The binding arms its close timeout, 10 s by default, as it
+    closes, so with the defaults a close ends as before. A close timeout set above the
+    server's write timeout can now end sooner for a client that reads nothing.
   - A SIGTERM or SIGINT sent the moment the server logs `listening` drains it.
   - The server's test fake, which the binding and driver suites load, now keeps what a
     client sends while the binding has stopped reading, its end too, until it reads
@@ -43,11 +42,11 @@ uriparse v0.6.2.
 - **`websocket-accept`** checks a client's opening handshake (RFC 6455 §4.2.1). It
   answers `101`, or refuses with `400`: a method other than `GET`, no `Upgrade:
   websocket`, no `Connection: upgrade`, a key that is not sixteen bytes in base64, or a
-  version other than 13, answered with `Sec-WebSocket-Version: 13` (decision 0003).
-  Every line of a field is read, joined with commas (RFC 9110 §5.3; decision 0004).
+  version other than 13, answered with `Sec-WebSocket-Version: 13`. Every line of a
+  field is read, joined with commas (RFC 9110 §5.3).
 - **Origins.** A browser's page from another host is refused `403`, unless the
   handler names that origin or accepts any. A request with no `Origin` is not a
-  browser's, and is accepted (decision 0003 and its amendments).
+  browser's, and is accepted.
 - **Subprotocols.** The first the handler lists that the client offered is chosen, and
   the `101` names it.
 - **A handler's own settings and limits.** `make-handshake-settings` names a
@@ -58,29 +57,27 @@ uriparse v0.6.2.
 - **Whole messages.** `websocket-receive` waits for the next message and gives a
   string for text or a bytevector for binary, however the client split it into
   frames. `websocket-send!` sends one as a frame. One receive may wait at a time; any
-  number of coroutines may send (decisions 0001 and 0005).
+  number of coroutines may send.
 - **Limits, each with a default and an environment variable,** the eight `CHEZ_WS_`
-  variables, read as the program starts (`docs/configuration.org`; decision 0001). A
+  variables, read as the program starts (`docs/configuration.org`). A
   message over the cap, 1 MiB by default, closes with `1009` before its payload is
   held. Text is checked as UTF-8 as it comes, and closes with `1007` at its first bad
   byte. A text that begins with U+FEFF keeps it.
 - **Reading on.** While the handler is busy the server reads on, keeping up to 16
-  messages or a cap's worth of bytes, then stops reading until the handler receives
-  (decision 0001's amendment).
+  messages or a cap's worth of bytes, then stops reading until the handler receives.
 - **The ping clock.** Pings are answered. A client quiet for 20 s is pinged, and one
-  that sends no pong in 20 s more is closed with `1011` (decision 0001).
+  that sends no pong in 20 s more is closed with `1011`.
 - **The closing handshake** (RFC 6455 §7). `websocket-close!` closes with a code and
   a reason; a client's close is answered with its code. `&websocket-closed` gives the
   code, the reason, and whether a close went each way: `1005` for a close with no
   code, `1006` when none came, neither ever sent. A procedure that returns closes with
   `1000`, one that raises anything but the connection's end with `1011`, logged, and
   the server's shutdown with `1001`. The close half-closes and lingers, so a client
-  still sending reads the close frame, not a reset (chez-http-server v0.5.0's
-  decision 0026, asked for by Autobahn's lane).
+  still sending reads the close frame, not a reset (chez-http-server v0.5.0).
 - **A client that does not read.** Past 256 KiB unsent, a send waits and reading
   stops, until the client reads down to 64 KiB. A client past that mark that takes
   longer than the write timeout, 60 s, over a write is cut off, and so is one that has
-  not read the server's close within the close timeout, 10 s (decision 0006).
+  not read the server's close within the close timeout, 10 s.
 - **No compression and no client.** `permessage-deflate` is declined (RFC 7692 §5).
 - **User docs.** `docs/handlers.org` shows a handler taking a WebSocket, reading,
   sending and closing, and what each close means. `docs/configuration.org` lists the
@@ -90,8 +87,7 @@ uriparse v0.6.2.
   handshakes, and the values peers computed alike (Python, Node, Perl, OpenSSL, ws).
   [Autobahn|Testsuite](https://github.com/crossbario/autobahn-testsuite)'s fuzzing
   client runs against an echo server built from the library, and a ratchet holds each
-  case's verdict, both ways (decision 0008). `make test` runs fifteen suites and 394
-  checks.
+  case's verdict, both ways. `make test` runs fifteen suites and 394 checks.
 
 ### Measured
 
@@ -105,11 +101,11 @@ against chez-http-server v0.5.0.
   autobahn` runs them on macOS. None failed. Two runs: 291 OK, 7 NON-STRICT and 3
   INFORMATIONAL; then 290, 8 and 3, case 3.4 NON-STRICT. Cases 3.4, 4.1.5 and 4.2.5
   are OK or NON-STRICT with how the client's bytes fall into reads, and the ratchet
-  lists both (decision 0008).
+  lists both.
 - **Memory**, on macOS, Chez Scheme 10.4.1 `tarm64osx` and libuv 1.52.1. By the
   server's own method (a python child holds the connections; the heap after two full
   collections; a connection's cost is the heap with 500 less the heap with 100, over
-  400), five holds each, `.plans/research/spike/ws-cost.sps`:
+  400), five holds each:
 
   | an idle connection | heap |
   |---|---|

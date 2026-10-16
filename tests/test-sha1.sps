@@ -1,5 +1,5 @@
 #!r6rs
-;;; (websocket sha1) against its oracles (M1.1, and its review).
+;;; (websocket sha1) against its oracles.
 ;;;
 ;;; - RFC 3174 §7.3's four test cases, each pattern repeated as its driver
 ;;;   repeats it.
@@ -9,7 +9,7 @@
 ;;;   one block holds with its padding, 56 the fewest that need two, and 63,
 ;;;   64 and 65 sit at a block's end.  Byte i of each is i x 37 mod 256, so
 ;;;   low and high bytes both appear.  Their digests are two peers', Perl's
-;;;   Digest::SHA and OpenSSL, which agreed (m1-mutations.md).
+;;;   Digest::SHA and OpenSSL, which agreed.
 ;;; - 4 MiB less a byte, whose length in bits sets every bit of the length
 ;;;   field from 3 to 24; the other inputs set only some.  Its digest is three
 ;;;   peers', which agreed.
