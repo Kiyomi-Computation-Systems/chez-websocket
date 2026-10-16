@@ -384,3 +384,48 @@ run). Each is about 64 KB less the step's fall.
   README's "about 5.3 KB" stands.
 - **The floor is still the fall.** A big message, then a small one, reads as two small
   ones do, on both pins. S-LETGO's bound, 8,004 B, is above it.
+
+## At the server's v0.7.0 pin (2026-10-16)
+
+A connection's cost and S-LETGO's floor, measured again for the pin. The server's v0.7.0
+brings chez-libuv v0.11.0, the test fake's door made closer to its libuv shell, and a
+waiting taker's thunk that may end with no values. None was expected to move either
+measure: the probes run the libuv shell, not the fake.
+
+**Where.** Darwin 25.6.0 arm64, Chez 10.4.1, libuv 1.52.1. The tree is
+`chore/pin-server-v0.7.0` on main's 9be5265, the server's checkout at v0.7.0 (a9f0ef5,
+chez-libuv v0.11.0) and, the same hour, a copy of the server's v0.6.0 tree (47c787d,
+chez-libuv v0.9.0, its `src/` and `tests/` checked equal to the tag's).
+
+**How.** As at v0.6.0: the committed probes, with none of the `CHEZ_WS_` variables set,
+[`spike/ws-cost.sps`](spike/ws-cost.sps), five holds of each kind, and
+[`spike/s-letgo-floor.sps`](spike/s-letgo-floor.sps), three readings of each difference
+after two rounds' warm-up. Every hold ended cleanly.
+
+| an idle connection, five holds each | v0.6.0 | v0.7.0 |
+|---|---|---|
+| a WebSocket, its procedure in `websocket-receive` after the 101 | 5,179 to 5,477 B | 5,332 to 5,344 B |
+| the same, after 10 echoes of a 2-byte text | 5,339 to 5,502 B | 5,325 to 5,494 B |
+| the server's own connection, idle after a GET | 1,963 to 1,974 B | 1,809 to 1,974 B |
+
+| S-LETGO's setting | v0.6.0 | v0.7.0 |
+|---|---|---|
+| one connection, 4,000 and 16,000 bytes: a big message, then a small one | 2,880 to 2,984 B | 2,880 to 2,960 B |
+| the same: two 1-byte messages | 2,848 to 2,896 B | 2,872 to 2,904 B |
+| ten connections, 4,000 bytes: a big message, then a small one | 9,456 to 9,552 B | 9,216 B |
+| the same: two 1-byte messages | 9,120 to 9,552 B | 8,848 to 9,536 B |
+
+Seven readings came where Chez gave the thread a fresh stack segment, and are left out of
+the ranges: −61,456, −61,536, −55,184 and −54,944 B on v0.7.0; −61,472, −61,488 and
+−54,816 B on v0.6.0. One more is left out: −13,528 B, v0.7.0's third reading of two
+1-byte messages at one connection and 4,000 bytes. It is not a stack segment's step, and
+its cause was not found. Three more runs of that setting on each pin, the same hour, read
+2,864 to 2,904 B on v0.7.0 and 2,864 to 3,008 B on v0.6.0, beside each run's one
+stack-segment step.
+
+- **Nothing moved.** A connection's cost overlaps v0.6.0's in each kind, measured the
+  same hour. The README's "about 5.3 KB" stands.
+- **The floor is still the fall.** A big message, then a small one, reads as two small
+  ones do on each pin. At ten connections v0.7.0's two readings, 9,216 B, sit below
+  v0.6.0's, and inside v0.7.0's own two-small range. S-LETGO's bound, 8,004 B at one
+  connection, is above the floor.

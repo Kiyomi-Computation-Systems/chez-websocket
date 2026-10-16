@@ -8,8 +8,9 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ### Changed
 
-- **Pinned at chez-http-server v0.6.0**, from v0.5.0. The pins under it are v0.5.0's:
-  chez-libuv v0.9.0, chez-httparse v0.4.5 with byte-machine v0.7.0, and uriparse v0.6.2.
+- **Pinned at chez-http-server v0.7.0**, from v0.5.0 by way of v0.6.0. The pins under
+  it: chez-libuv v0.11.0 (still libuv 1.48 or later), chez-httparse v0.4.5 with
+  byte-machine v0.7.0, and uriparse v0.6.2.
   - Once the binding closes a connection's stream, the server bounds each write the
     close waits for by its write timeout, `CHEZ_HTTP_WRITE_TIMEOUT` (60 s), and aborts
     the connection past it (its decision 0027). The binding arms its close timeout, 10 s
@@ -17,7 +18,13 @@ All notable changes to chez-websocket are recorded here. The format follows
     timeout set above the server's write timeout can now end sooner for a client that
     reads nothing.
   - A SIGTERM or SIGINT sent the moment the server logs `listening` drains it.
-  - Every suite passes as on v0.5.0, and a connection still costs about 5.3 KB.
+  - The server's test fake, which the binding and driver suites load, now keeps what a
+    client sends while the binding has stopped reading, its end too, until it reads
+    again, as the server does. One binding check had a client's end wake a send that
+    waited past the high water at once; the server never tells it then. The check now
+    holds what the server does: the send goes on once the client reads, the end read
+    after it, or the write timeout ends it.
+  - Every other check passes as on v0.6.0, and a connection still costs about 5.3 KB.
 
 ## [0.1.0] - 2026-10-11
 

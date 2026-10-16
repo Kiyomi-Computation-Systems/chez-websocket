@@ -2405,3 +2405,34 @@ MERGED to main on 2026-10-16, on the owner's "do closing ritual": **The second r
 `make test` green on main (08d295e, Darwin arm64): fifteen suites, 397 expected passes, each suite's count as before, every pin ok, the server at v0.6.0 (47c787d).
 
 NEXT: the server's release that carries chez-libuv v0.10.0 or v0.11.0, pinned here alone and reported back to the chez-libuv session. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.
+
+---
+
+**The server's v0.7.0, pinned (2026-10-16),** on the owner's "pin v0.7.0 in chez-websocket". Branch `chore/pin-server-v0.7.0`, cut from main at 9be5265 in its own worktree; one PR, one commit. Unlike v0.6.0's, it carries one check's rewrite beside the pin, by the server's form of 2026-10-16 ("Land it; fix ws's check at its next pin (Recommended)"): the check leaned on a fake the server has since made faithful, so no fit could pass on both pins and stay true.
+- **The pin:** chez-http-server moves from v0.6.0 (47c787d) to v0.7.0 (a9f0ef5, the tag signed, a good signature). The pins it carries: chez-libuv afe79a5 (v0.11.0, from v0.9.0), chez-httparse 0b7058e, byte-machine c338a57, uriparse 5ecd88f and chez-srfi 7879b52.
+- **Measured first** (Darwin arm64): main's suites unchanged, the server's checkout at v0.7.0 and `SERVER_PIN` not, run with `make -o check-pins test`. Three runs: fifteen suites, 396 of 397, each run the same one red, the binding's "a send waiting when the connection ends is woken at once, before the client reads"; main's baseline the same hour, on v0.6.0, 397.
+- **What reaches here** (the server's CHANGELOG `[0.7.0]`, read against `src/` and `tests/`):
+  - **The test fake keeps what a taker's client sends while the taker reads nothing**, its end too, and reads it on the turn after reading starts again (the server's #187). The binding stops reading past the high water, so a client's end then waited, where v0.6.0's fake told it at once. The server's libuv shell does the same: it reads nothing then (probed for #187, three runs).
+  - **The test fake bounds a taker's close by the write timeout** (#188), as the server has since v0.6.0. No suite here moved for it.
+  - **A waiting taker's thunk may end with no values** (#189). The binding's thunk runs the procedure and closes; no suite here moved.
+  - **chez-libuv v0.11.0.** `src/` imports nothing of chez-libuv; the socket suite and the two probes import `(libuv)`, and none calls what v0.10.0 changed (`uv-kill!`, `uv-write*!`'s segment count, `addrinfo-chain->list`).
+- **The check, rewritten to what the server does,** as two (`m6-mutations.md`, "At the server's v0.7.0 pin"): a send waiting when the client's end comes is not told it while reading is stopped; it goes on once the client reads down to the low water, the end read after it raising 1006 in the receive that follows (W-END); and, to a client that reads nothing, the write timeout ends it, not a millisecond before (W-END-TIMEOUT). Probed first on v0.7.0's fake, both ways. The end's arrival is now seen by a receive after the second send, which the old check did not have.
+  - **Test first:** on the server's v0.6.0 tree both were red by value, the end told at once, as predicted; the suite's other 54 green.
+  - **Mutants:** nine rows of the binding, BASE and eight, predictions hashed before the run (`d12650a9`), **0 mismatches**, each red by the value named. K-49, the end that wakes no send, is killed now by W-END-TIMEOUT, the write timeout's own check and C-SENDCLOSING.
+  - **The fake's delivery, described again:** the driver suite's and the binding suite's headers, and the design's §8, said `fake-shell-deliver!` hands over an event "whatever the read state". Each now says an event given while the taker has stopped reading waits until it reads again, as the server's does.
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` answered the predicted lines (hashed before the run, cc82df1a): `PIN MISMATCH: vendor/chez-http-server at a9f0ef5…, expected 47c787d…`, the five carried pins ok, chez-libuv now afe79a5, exit 2.
+- **Measured again** (Darwin arm64; the research record's section "At the server's v0.7.0 pin"; v0.6.0 beside it the same hour, from a copy of its tree):
+  - a connection's cost, by `ws-cost.sps`: an idle WebSocket in a receive 5,332 to 5,344 B on v0.7.0, 5,179 to 5,477 B on v0.6.0. The README's "about 5.3 KB" stands.
+  - S-LETGO's floor, by `s-letgo-floor.sps`: a big message, then a small one, reads as two small ones on both. One reading, −13,528 B on v0.7.0, is neither a stack segment's step nor seen again in three more runs of its setting on each pin; it is left out of the ranges, its cause not found.
+- **Autobahn** (`make autobahn`, the container path on Docker Desktop, the echo image rebuilt from this tree, its server v0.7.0's): two runs, each `301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`, exit 0.
+- **Records:** the Makefile's pin; the README's `make submodules` line; `docs/configuration.org`'s link to the server's configuration page, now at v0.7.0; CHANGELOG.md's Unreleased, v0.6.0's pin entry now v0.7.0's; the design's "What a connection costs" and §8; the research record's new section; `m6-mutations.md`'s new section.
+- `make prod` green: fifteen suites and 398 on the prod shim, each suite's count Darwin's, and both check-prod runs a prod build.
+- **CI is billing-blocked,** so Linux ran in containers on this tree, io_uring allowed (`--security-opt seccomp=unconfined`):
+  - aarch64 (`chez-libuv-noble-scratch:10.4.1`, libuv 1.48.0): fifteen suites, 398, each suite's count Darwin's;
+  - x86_64 under emulation (`chez-websocket-ci-amd64:10.4.1`, libuv 1.48.0): fifteen suites, 398, each suite's count Darwin's.
+
+  The pins are checked on the host.
+- **For the chez-libuv session:** chez-libuv v0.11.0 reaches here through the server's v0.7.0. Each suite's count, `make prod`, Autobahn, and the cost moved only where this entry says, and no chez-libuv condition was met. The report goes back to that session.
+- `make test` green before the commit (Darwin arm64), three runs: fifteen suites, 398 expected passes, every pin ok; `make check-help` passes.
+
+NEXT: the PR; the closing ritual when the owner asks. When CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI.
