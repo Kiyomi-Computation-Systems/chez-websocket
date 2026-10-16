@@ -22,7 +22,7 @@ WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-ht
   origin. A subprotocol is chosen from your list.
 - *Bounded by default.* The message size, the queue of messages waiting, the
   ping and close timeouts and the unsent bytes each have a default and an
-  environment override (see [[file:docs/configuration.org][docs/configuration.org]]).
+  environment override (see [[file:docs/configuration.md][docs/configuration.md]]).
 - *Slow and silent clients.* A send waits while the client is behind, and a
   client that stops reading is cut off after a timeout. Pings are answered for
   you, and a quiet client is pinged, then closed with ~1011~ if no pong comes.
@@ -56,7 +56,8 @@ in any release before 1.0. [[file:CHANGELOG.md][CHANGELOG.md]] lists what each r
 
 Save it as ~echo.sps~, start it with ~make run PROGRAM=echo.sps~, and connect
 a client such as ~websocat ws://127.0.0.1:8080/echo~: each line you send comes
-back. How a handler reads, writes and closes is in [[file:docs/handlers.org][docs/handlers.org]].
+back. How a handler reads, writes and closes is in [[file:docs/handlers.md][docs/handlers.md]], and
+the rest of the documentation starts at [[file:docs/README.md][docs/README.md]].
 
 ** Build and test
 
@@ -100,14 +101,14 @@ starts and stops.
 ** Configuration
 
 Every limit has a default and a ~CHEZ_WS_~ environment override, read once as
-your program starts — see [[file:docs/configuration.org][docs/configuration.org]]. The server's own ~CHEZ_HTTP_~
+your program starts — see [[file:docs/configuration.md][docs/configuration.md]]. The server's own ~CHEZ_HTTP_~
 variables still apply.
 
 ** Handlers
 
 How a handler takes a WebSocket, what the handshake refuses, how to read, write
 and close, what each close means, and how to choose subprotocols, origins and
-limits of its own — see [[file:docs/handlers.org][docs/handlers.org]].
+limits of its own — see [[file:docs/handlers.md][docs/handlers.md]].
 
 ** License
 

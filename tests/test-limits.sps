@@ -2,7 +2,7 @@
 ;;; (websocket limits): the defaults, and their reading from an environment's
 ;;; strings.
 ;;;
-;;; The oracles are docs/configuration.org's table (each variable, its default
+;;; The oracles are docs/configuration.md's table (each variable, its default
 ;;; and its unit), the 1 MiB cap, the ping clock's 20 s and 20 s, and reading
 ;;; stopped at 16 queued messages, which CHEZ_WS_MAX_QUEUE overrides.  The
 ;;; conventions are the server's (its (http-server limits)): durations are
@@ -38,7 +38,7 @@
   (lambda (name) (let ((p (assoc name pairs))) (and p (cdr p)))))
 
 ;; Each field: its name, its accessor, its variable, and its default, from
-;; docs/configuration.org's table, in make-websocket-limits' order.
+;; docs/configuration.md's table, in make-websocket-limits' order.
 (define named-fields
   (list (list 'max-message-bytes websocket-limits-max-message-bytes "CHEZ_WS_MAX_MESSAGE_BYTES" 1048576)
         (list 'max-queue websocket-limits-max-queue "CHEZ_WS_MAX_QUEUE" 16)
