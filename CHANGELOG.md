@@ -8,10 +8,10 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ### Added
 
-- **Examples**, in `examples/`: an echo server with a page for the browser, a chat
-  room, and a clock that sends a tick each second while it still reads. Each runs
-  with `make run PROGRAM=examples/<name>.sps`, and `tests/test-examples.sps` plays
-  each one as a client would.
+- **Examples**, in `examples/`: an echo server, a chat room, and a clock that sends a
+  tick each second while it still reads. Each runs with
+  `make run PROGRAM=examples/<name>.sps` and serves a page at `/` to try it from a
+  browser, and `tests/test-examples.sps` plays each one as a client would.
 
 ### Changed
 

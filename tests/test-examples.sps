@@ -8,8 +8,9 @@
 ;;;   close that echoes its code; §7.1.5, a connection that ends with no close
 ;;;   is closed.
 ;;; - What each example is for:
-;;;   echo.sps answers / with a page whose script opens a WebSocket to /echo
-;;;   on the page's own host, which /echo lets in, and sends each message back;
+;;;   each answers / with a page whose script opens a WebSocket to the
+;;;   example's own path on the page's own host, so a browser can try it;
+;;;   echo.sps lets that page in at /echo, and sends each message back;
 ;;;   chat.sps tells a newcomer how many are in the room, itself counted, and
 ;;;   sends each message to everyone else in it;
 ;;;   clock.sps sends "tick 1", "tick 2", ... a second apart, a client's
@@ -146,18 +147,34 @@
             ((string=? (substring s i (+ i k)) part) #t)
             (else (scan (+ i 1)))))))
 
+;; served-page : (Request -> Answer) String -> (List Nat Datum (U String #f) Boolean Boolean)
+;; What GET / gives: its status, how its read ended, its Content-Type, and
+;; whether its page's script opens a WebSocket on the page's own host, and to
+;; `socket`.
+(define (served-page handler socket)
+  (let* ((r (read-response (bv-concat (fake-shell-writes (connect handler (get "/")))) #f #f))
+         (page (list-ref r 3)))
+    (list (car r) (list-ref r 4) (field (list-ref r 2) "Content-Type")
+          (contains? page "location.host") (contains? page socket))))
+
+;; Each example, and the path of its WebSocket.
+(define examples '(("examples/echo.sps" "/echo") ("examples/chat.sps" "/chat") ("examples/clock.sps" "/clock")))
+
 (run-suite "examples"
   (lambda ()
+    ;; --- every example ---
+
+    (test-equal "each example answers / 200 with an HTML page whose script opens a WebSocket to the example's own path on the page's own host, so a browser can try it"
+      (map (lambda (x) (list (car x) '(200 complete "text/html; charset=utf-8" #t #t))) examples)
+      (map (lambda (x) (list (car x) (served-page (program-handler (car x)) (cadr x)))) examples))
+
+    (test-equal "each example answers any other path 404"
+      (map (lambda (x) (list (car x) 404)) examples)
+      (map (lambda (x) (list (car x) (status (connect (program-handler (car x)) (get "/other"))))) examples))
+
     ;; --- echo.sps ---
 
     (let ((echo (program-handler "examples/echo.sps")))
-      (test-equal "echo.sps answers / 200 with an HTML page whose script opens a WebSocket to /echo on the page's own host"
-        '(200 complete "text/html; charset=utf-8" #t #t)
-        (let* ((r (read-response (bv-concat (fake-shell-writes (connect echo (get "/")))) #f #f))
-               (page (list-ref r 3)))
-          (list (car r) (list-ref r 4) (field (list-ref r 2) "Content-Type")
-                (contains? page "location.host") (contains? page "/echo"))))
-
       (test-equal "echo.sps takes RFC 6455's handshake to /echo with §1.3's accept, sends a masked Hello back as §5.7's frame, and answers the client's close 1000 with 1000"
         (list 101 rfc-accept (bv-concat (list rfc-hello (server-close 1000 ""))))
         (let ((sh (connect echo (bv-concat (list (handshake "/echo") rfc-masked-hello)))))
@@ -167,10 +184,7 @@
       (test-equal "echo.sps lets /echo take a browser's page from its own host, and refuses one from another site 403"
         '(101 403)
         (list (status (connect echo (handshake "/echo" "Origin: http://server.example.com")))
-              (status (connect echo (handshake "/echo" "Origin: https://elsewhere.example")))))
-
-      (test-equal "echo.sps answers any other path 404"
-        404 (status (connect echo (get "/other")))))
+              (status (connect echo (handshake "/echo" "Origin: https://elsewhere.example"))))))
 
     ;; --- chat.sps ---
 

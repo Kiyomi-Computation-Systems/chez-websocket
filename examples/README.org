@@ -7,16 +7,16 @@ Run one from the repository's root, after ~make build~:
 make run PROGRAM=examples/echo.sps
 #+end_src
 
-It listens on 127.0.0.1:8080; ~CHEZ_HTTP_PORT~ changes the port. Talk to it
-from your browser, or with a WebSocket client such as ~websocat~.
+It listens on 127.0.0.1:8080; ~CHEZ_HTTP_PORT~ changes the port. Each one
+answers http://127.0.0.1:8080/ with a page that talks to it, so you can try it
+from your browser. Any WebSocket client works too, such as ~websocat~.
 
-- [[file:echo.sps][echo.sps]] — an echo at ~/echo~, and a page at ~/~ that talks to it. Open
-  http://127.0.0.1:8080/ and type a line.
-- [[file:chat.sps][chat.sps]] — a chat room: many connections, and a message goes to every
-  other client. Run ~websocat ws://127.0.0.1:8080/chat~ in two terminals.
-- [[file:clock.sps][clock.sps]] — the server sends a tick each second, on its own schedule, and
-  still reads between ticks. Run ~websocat ws://127.0.0.1:8080/clock~, then
-  type ~stop~.
+- [[file:echo.sps][echo.sps]] — an echo at ~/echo~. Type a line on the page and it comes
+  back.
+- [[file:chat.sps][chat.sps]] — a chat room at ~/chat~: many connections, and a message goes
+  to every other client. Open the page in two tabs.
+- [[file:clock.sps][clock.sps]] — a tick each second from ~/clock~, sent on the server's own
+  schedule, which still reads between ticks. The page's button says ~stop~.
 
 ~make test~ runs [[file:../tests/test-examples.sps][tests/test-examples.sps]], which plays each one as a client
 would, so they keep working.
