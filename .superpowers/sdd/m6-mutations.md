@@ -251,3 +251,53 @@ By value, `chat-settings`' and `upload-limits`' entries:
 round's pages, predictions hashed before (sha256 `b8faec1e`): each passed, status 0, as
 named. Its handler fragments answered 101 whatever their settings or limits, and it read
 no names.
+
+## The second review's rest (2026-10-16)
+
+Darwin 25.6.0 arm64, Chez 10.4.1, on main's 6caf10b, the server at v0.6.0. The six
+findings M6's second review left (the ledger said seven): its items 7 to 12. The suite is
+8 checks (blob 05d650c).
+
+### What changed
+
+| item | finding | the change |
+|---|---|---|
+| 7 | a block's lines read with spaces trimmed only, `#+begin_src scheme` with one space | a directive is read as org reads it: its words, any spaces or tabs around and between them, in any case |
+| 8 | `(ws-play)` exports the generic `copy` and `concat` | `bv-slice` and `bv-concat`, beside `b` and `bv`; its header says so |
+| 9 | the docs suite imports `(ws-autobahn)` for `text-lines` alone | `text-lines` and the `split` under it are `(ws-text)`'s, a library of `(rnrs)` alone, which the gate and the suites import |
+| 10 | `field?` tells a field by the refusal's `condition-who` | `field-set`: a name is a field when `websocket-limits-with` takes it, set to 100,000, and changes that field alone. A provenance guard holds the value to no default's |
+| 11 | each page split into blocks up to three times, each block read up to six | split once; each block read once, its data kept in its record |
+| 12 | DOC-NAMES evaluates names in `(rnrs)` and `(websocket)` | the names `library-exports` lists for `(websocket)`, as the check's title says |
+
+Item 12 changes no answer today. `(rnrs)` exports no name the suite's prefixes match,
+measured by `library-exports` the same day, so no page could tell the two apart. DOC-NAMES's
+mutants (M6-6, M6-13, M6-20, M6-21, M6-27) are red as before.
+
+### The mutants
+
+Predictions hashed before the runs, on main's suite and on the fixed one (sha256
+`1f95e61f`; the guard's, `5d0fa848`). **0 mismatches**, both ways.
+
+| ID | mutation | main's suite | the fixed suite |
+|---|---|---|---|
+| DR-1 | a tab-indented block that does not read, appended to configuration.org | none, 0 | DOC-READ, 1 |
+| DR-2 | the same written `#+begin_src  scheme`, two spaces | none, 0 | DOC-READ, 1 |
+| DR-3 | the same written `#+begin_src` and `scheme` a tab apart | none, 0 | DOC-READ, 1 |
+| DR-4 | `closed-code`'s `#+end_src` indented with a tab | DOC-READ, DOC-FRAGMENTS, 1 | none, 0 |
+| DR-5 | `closed-code`'s `#+name:` and its name a tab apart | DOC-FRAGMENTS, 1 | none, 0 |
+| DF-1 | the library renames `max-queue`, its refusal naming another who | none, 0 | DOC-FIELDS, 1 |
+| DF-2 | the library's `ping-interval-ms` and `ping-timeout-ms` names swapped | none, 0 | DOC-FIELDS, 1 |
+| DP-1 | the suite's `set-to` 16, the queue's default | | none, 3 |
+
+By value, on the fixed suite:
+- DR-1: `((unread "\t(websocket-accept request\n") read read read read)`. DR-2 and DR-3 alike.
+- DF-1: `(max-message-bytes (not-a-field max-queue) ping-interval-ms …)`.
+- DF-2: `(… (sets ping-interval-ms (ping-timeout-ms)) (sets ping-timeout-ms (ping-interval-ms)) …)`.
+- DP-1: `PROVENANCE-ERROR docs: the value the fields are set to is a default`.
+
+On main's suite, DR-4 and DR-5 were red where org reads the page as it is: the tab-indented
+end was not an end, so `closed-code` ran on into `chat-settings`, and the name kept its tab.
+
+**M6-1 to M6-42 again,** on the fixed suite, the runner rebuilt from the session's record
+(its mutants' sha256 `ffda1147`, as recorded): BASE and all 42 as named, 0 mismatches. On
+main's suite the same, before any change.

@@ -17,10 +17,10 @@
 ;;; whole verdict seen, " | " between them (decision 0008, by form: "List what
 ;;; was measured"), and passes with any one of them: a pairing of their
 ;;; fields never seen fails.  An index of no agent at all, `{}`, is what wstest
-;;; writes when no connection opened, and is read as a run of no case.
+;;; writes when no connection opened, and is read as a run of no case.  Its
+;;; lines are (ws-text)'s.
 ;;;
 ;;;   json-read : String -> Json
-;;;   text-lines : String -> (Listof String)
 ;;;   verdicts-parse : String -> (Listof Held)
 ;;;   spec-agent : Json -> String
 ;;;   index-verdicts : Json String -> (Listof Verdict)
@@ -35,9 +35,9 @@
 ;;; each verdict it lists, a list of those three.  Each procedure raises an
 ;;; &error with a message for a text it refuses.
 (library (ws-autobahn)
-  (export json-read text-lines verdicts-parse spec-agent index-verdicts verdict-differences
+  (export json-read verdicts-parse spec-agent index-verdicts verdict-differences
           autobahn-gate gate-main)
-  (import (rnrs))
+  (import (rnrs) (ws-text))
 
   ;; --- JSON (RFC 8259) --------------------------------------------------------
 
@@ -162,29 +162,7 @@
     (and (list? obj)
          (let ((m (assoc name obj))) (and m (cdr m)))))
 
-  ;; --- lines and the ratchet ---------------------------------------------------
-
-  ;; split : String Char -> (Listof String)
-  (define (split s c)
-    (let loop ((i 0) (start 0) (parts '()))
-      (cond ((= i (string-length s)) (reverse (cons (substring s start i) parts)))
-            ((char=? (string-ref s i) c) (loop (+ i 1) (+ i 1) (cons (substring s start i) parts)))
-            (else (loop (+ i 1) start parts)))))
-
-  ;; text-lines : String -> (Listof String)
-  ;; Its lines, each ended by a LF, a CR before it dropped, so a CRLF checkout
-  ;; reads as a LF one; text after the last LF is a line too.
-  (define (text-lines text)
-    (let ((parts (split text #\newline)))
-      (map (lambda (l)
-             (let ((n (string-length l)))
-               (if (and (> n 0) (char=? (string-ref l (- n 1)) #\return)) (substring l 0 (- n 1)) l)))
-           (if (string=? (car (last-pair parts)) "")
-               (reverse (cdr (reverse parts)))
-               parts))))
-
-  ;; last-pair : (Listof Any) -> (Listof Any) — its last pair; it is not empty.
-  (define (last-pair l) (if (null? (cdr l)) l (last-pair (cdr l))))
+  ;; --- the ratchet -------------------------------------------------------------
 
   ;; verdicts-parse : String -> (Listof Held)
   ;; The ratchet's verdicts in its order.  A line that is empty or begins
@@ -208,7 +186,7 @@
             ((or (string=? (car lines) "") (char=? (string-ref (car lines) 0) #\#))
              (loop (cdr lines) (+ k 1) held))
             (else
-             (let ((fields (split (car lines) #\space)))
+             (let ((fields (text-split (car lines) #\space)))
                (when (string=? (car fields) "") (refuse k "not a case and its verdicts"))
                (let ((vs (verdicts k (cdr fields))))
                  (unless (= (length vs) (length (unique vs))) (refuse k "a verdict is listed twice"))

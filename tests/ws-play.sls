@@ -1,12 +1,15 @@
 #!r6rs
 ;;; (ws-play) — what the binding's suites play: a client's frames, by RFC
-;;; 6455 §5.2 and §5.3, and a handler that answers websocket-accept's
-;;; switch.  The binding suite plays them on the server's fake shell, and the
-;;; socket suite on its libuv shell (M4.3 step 3's review).
+;;; 6455 §5.2 and §5.3, the bytevectors they are made of and read from
+;;; (`b`, `bv`, `bv-concat`, `bv-slice`), and a handler that answers
+;;; websocket-accept's switch.  The binding and docs suites play them on the
+;;; server's fake shell, and the socket suite on its libuv shell (M4.3 step 3's
+;;; review).  Its bytevector names begin `bv` so a suite's own names, or
+;;; another library's, cannot meet them.
 ;;;
 ;;; NOT pure: `logged` takes the current output port for its thunk.
 (library (ws-play)
-  (export b bv concat copy big-endian length-bytes client-frame server-frame close-body
+  (export b bv bv-concat bv-slice big-endian length-bytes client-frame server-frame close-body
           rfc-masked-hello rfc-hello
           accepting wrapping logged limits closed)
   (import (rnrs)
@@ -22,15 +25,15 @@
   ;; bv : (Listof Byte) -> Bytevector
   (define bv u8-list->bytevector)
 
-  ;; concat : (Listof Bytevector) -> Bytevector
-  (define (concat bvs)
+  ;; bv-concat : (Listof Bytevector) -> Bytevector
+  (define (bv-concat bvs)
     (let ((out (make-bytevector (fold-left (lambda (n bv) (+ n (bytevector-length bv))) 0 bvs))))
       (fold-left (lambda (at bv) (bytevector-copy! bv 0 out at (bytevector-length bv)) (+ at (bytevector-length bv)))
                  0 bvs)
       out))
 
-  ;; copy : Bytevector Nat Nat -> Bytevector — bv[from, to), copied.
-  (define (copy bv from to)
+  ;; bv-slice : Bytevector Nat Nat -> Bytevector — bv[from, to), copied.
+  (define (bv-slice bv from to)
     (let ((o (make-bytevector (- to from)))) (bytevector-copy! bv from o 0 (- to from)) o))
 
   ;; §5.7's masking key.
