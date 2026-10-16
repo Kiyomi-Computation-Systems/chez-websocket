@@ -1,7 +1,7 @@
 #!r6rs
-;;; The binding and the facade (M4.3, step 1) on the server's fake shell
-;;; (decision 0004): a handler answers what `websocket-accept` returns, and
-;;; its procedure reads, sends and closes as a client plays the other side.
+;;; The binding and the facade on the server's fake shell: a handler answers
+;;; what `websocket-accept` returns, and its procedure reads, sends and
+;;; closes as a client plays the other side.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §1.3's example handshake and its
@@ -13,38 +13,36 @@
 ;;;   received told 1006 and an empty reason; §7.1.4, clean once a close has
 ;;;   gone each way; §7.4.1's codes, 1001 for going away, 1011 for a
 ;;;   condition the server did not expect.
-;;; - RFC 9110 §5.3: a field's lines are one list, joined with commas, and
-;;;   decision 0004: the facade reads every line (request-header-values), so
-;;;   a split Connection is taken, and two keys or two versions refused 400,
-;;;   as websockets, coder and ws refuse them.
-;;; - Decision 0001: a queue of max-queue messages stops reading; the ping
-;;;   clock, 20 s quiet then a ping, 20 s for its pong, then 1011.
-;;; - The design's §6: each action performed; a send that waits while more
-;;;   than the high water is unsent, until no more than the low water is, as
-;;;   the server's own streams wait (its configuration.org); a message
+;;; - RFC 9110 §5.3: a field's lines are one list, joined with commas, so the
+;;;   facade reads every line (request-header-values): a split Connection is
+;;;   taken, and two keys or two versions refused 400, as websockets, coder
+;;;   and ws refuse them.
+;;; - The binding reads on while a handler is busy: a queue of max-queue
+;;;   messages stops reading; the ping clock, 20 s quiet then a ping, 20 s
+;;;   for its pong, then 1011, websockets' numbers.
+;;; - The binding's contract: each action performed; a send that waits while
+;;;   more than the high water is unsent, until no more than the low water
+;;;   is, as the server's own streams wait (its configuration.org); a message
 ;;;   delivered whole, a text's string keeping a leading U+FEFF; the drain's
 ;;;   1001 "going away"; the procedure's end: its return closes with 1000, a
 ;;;   &websocket-closed it lets out does nothing more, any other raise closes
-;;;   with 1011 and is logged.  Its §7: the limits read from the environment
-;;;   once, as the program starts, a malformed value stopping it there.
+;;;   with 1011 and is logged; the limits read from the environment once, as
+;;;   the program starts, a malformed value stopping it there.
 ;;; - websockets 17.2 (asyncio/connection.py, send_context): a send while the
 ;;;   closing handshake is under way waits for the connection to close, then
 ;;;   raises ConnectionClosed.
-;;; - Decision 0006 (M4.3 step 2): every close the binding asks for gives the
-;;;   client the close timeout to read what was written, then aborts; and by
-;;;   form, "Reading stops past the high water" and "60 s, its own
-;;;   variable": past the high water, reading stops and the write timeout,
-;;;   60 s, runs, re-armed by each done, its passing aborting the stream.
+;;; - A client that does not read: every close the binding asks for gives the
+;;;   client the close timeout to read what was written, then aborts; past
+;;;   the high water, reading stops and the write timeout, 60 s, runs,
+;;;   re-armed by each done, its passing aborting the stream.
 ;;;   The frames' sizes are RFC 6455 §5.2's: a client's ping of 125 bytes is
 ;;;   131, masked, and its pong 127; a 1 KiB binary's frame 1,028 bytes, a
 ;;;   16-bit length; one of 300,000 bytes 300,010, a 64-bit length.
-;;; - Decision 0006's amendments at step 2's review, by form: "Wait before
-;;;   writing too", a send waits while the client is behind before it
-;;;   writes, so many procedures sending make the server hold no more than
-;;;   one does; and "In 64 KiB writes", a frame written in pieces of 64 KiB
-;;;   at most, each done re-arming the write timeout, as nginx's
-;;;   send_timeout runs between two writes (its docs).  And the design's
-;;;   §6: a write's done that tells a failure is the stream's end.
+;;; - A send waits while the client is behind before it writes, so many
+;;;   procedures sending make the server hold no more than one does; a frame
+;;;   is written in pieces of 64 KiB at most, each done re-arming the write
+;;;   timeout, as nginx's send_timeout runs between two writes (its docs); a
+;;;   write's done that tells a failure is the stream's end.
 ;;;
 ;;; How a test plays the client is the driver suite's: `fake-shell-feed-input!`
 ;;; delivers only while the binding reads, `fake-shell-deliver!` hands over
@@ -182,7 +180,7 @@
     (guard (e ((websocket-closed? e) (note! n (closed e))))
       (let loop () (note! n (websocket-receive ws)) (loop)))))
 
-;; --- a client that reads nothing (0006) --------------------------------------
+;; --- a client that reads nothing ---------------------------------------------
 
 ;; A spy between the fake's transport and the binding: whether the binding
 ;; has asked for the close, and for the abort; what it has written whose
@@ -386,7 +384,7 @@
       (test-equal "a send of neither a string nor a bytevector is refused, naming websocket-send!"
         '(websocket-send!) (seen n)))
 
-    ;; --- the write bound: the server's own water marks (design §6) ---
+    ;; --- the write bound: the server's own water marks ---
 
     ;; Hello's frame is 7 bytes, "ab"'s 4: with the high water at 7 and the
     ;; low at 4, a send waits once more than 7 are unsent, until 4 or fewer are.
@@ -423,10 +421,10 @@
 
     ;; The client's end while a send waits: reading has stopped, the client
     ;; behind, and the server reads nothing then, so the end waits with the
-    ;; client's bytes until reading starts again (the server's v0.7.0, its
-    ;; fake as its libuv shell).  The send is not told it: it goes on once the
-    ;; client reads down to the low water, the end read after it; or, to a
-    ;; client that reads nothing, the write timeout ends it.
+    ;; client's bytes until reading starts again (the server's fake as its
+    ;; libuv shell).  The send is not told it: it goes on once the client
+    ;; reads down to the low water, the end read after it; or, to a client
+    ;; that reads nothing, the write timeout ends it.
     (let ((ending (lambda (n)
                     (connect (accepting (lambda (ws)
                                           (guard (e ((websocket-closed? e) (note! n (closed e))))
@@ -460,7 +458,7 @@
               (list '(1) '(1) (list '(1 (closed 1006 "" #f)) (server-logged 'websocket-failed '(#f write-timeout))))
               (list ended before run))))))
 
-    ;; --- a client that does not read (0006; M4.3 step 2) ---
+    ;; --- a client that does not read ---
 
     ;; An unmasked frame fails the connection with 1002: its close written,
     ;; the stream's close asked for.  The client reads none of it.
@@ -605,7 +603,7 @@
       (test-equal "a write's done that tells a failure ends the connection at once: the stream's close asked for, and the receive that waits raises &websocket-closed, 1006, not clean"
         (list #t '((closed 1006 "" #f))) (list (spy-closed? spy) (seen n))))
 
-    ;; --- reading on (0001) ---
+    ;; --- reading on ---
 
     (let* ((n (make-notes))
            (told (until-told (lambda (ws) (note! n (websocket-receive ws)) (note! n (websocket-receive ws)))))
@@ -732,7 +730,7 @@
           (list '() '((closed 1000 "" #t)) (list 101 (server-close 4000 "")))
           (list before told (after-101 sh)))))
 
-    ;; --- one WebSocket reached from another's procedure (M4.3's review) ---
+    ;; --- one WebSocket reached from another's procedure ---
 
     ;; A's procedure sends to B's WebSocket until it waits there, B's client
     ;; reading nothing yet; then A's client leaves.  The &client-closed is
@@ -752,7 +750,7 @@
                          handshake)))
       (fake-shell-deliver! sha '(eof))
       (fake-shell-settle! sha)
-      ;; B's client reads what A sent, so B reads again (0006), then sends.
+      ;; B's client reads what A sent, so B reads again, then sends.
       (fake-shell-feed-input! shb rfc-masked-hello 4096)
       (fake-shell-settle! shb)
       (test-equal "a procedure waiting to send to another connection's WebSocket, whose own client leaves, is told &client-closed, and the other connection goes on: it receives, and its client reads what was sent and the echo"
@@ -763,7 +761,7 @@
     ;; reading nothing yet: A's second Hello takes what is unsent past the
     ;; high water, and C and D, coming while B's client is behind, wait
     ;; before they write, so B holds A's two Hellos alone.  Once B's client
-    ;; reads, all go on (decision 0005: many senders), each in turn while
+    ;; reads, all go on (a WebSocket takes many senders), each in turn while
     ;; the client is not behind, and it reads every Hello.
     (let* ((na (make-notes))
            (nc (make-notes))
@@ -796,7 +794,7 @@
         (list waiting (seen na) (seen nc) (seen nd) (after-101 shb))))
 
     ;; B's procedure waits to receive; A's procedure asks to receive from B's
-    ;; WebSocket too (decision 0005: one receive).
+    ;; WebSocket too (a WebSocket takes one receive at a time).
     (let* ((na (make-notes))
            (nb (make-notes))
            (b-ws #f)
@@ -842,7 +840,7 @@
         '(client-closed (closed 1006 "" #f) (closed 1006 "" #f)) (seen n)))
 
     ;; A handler's own deadline ends its receive: the wait lets go, so a
-    ;; later receive waits as before (decision 0005: one receive at a time).
+    ;; later receive waits as before (one receive at a time).
     (let* ((n (make-notes))
            (sh (connect (accepting (lambda (ws)
                                      (guard (e ((deadline-passed? e) (note! n 'timed-out)))
@@ -856,7 +854,7 @@
       (test-equal "a receive a handler's own deadline ends lets go of its wait: a later receive waits as before and gets the next message"
         '(timed-out "Hello") (seen n)))
 
-    ;; --- what a read costs the binding (M4.3's review) ---
+    ;; --- what a read costs the binding ---
 
     ;; A read the core answers with nothing but its clock: one byte of a
     ;; header whose 64-bit length is still to come.  Through the binding, and
@@ -981,7 +979,7 @@
         (list '(client-closed) (list (list 101 nothing) '()) "")
         (cons (seen n) run)))
 
-    ;; --- the ping clock (0001), armed by the binding as it starts ---
+    ;; --- the ping clock, armed by the binding as it starts ---
 
     (let* ((run (logged
                  (lambda ()
@@ -1029,7 +1027,7 @@
         (list (list 101 (server-close 1002 "")) "websocket-failed 1002 ")
         (list (car run) (let ((log (cadr run))) (if (>= (string-length log) 22) (substring log 0 22) log)))))
 
-    ;; --- the environment, read once, as the program starts (design §7) ---
+    ;; --- the environment, read once, as the program starts ---
 
     ;; The child runs on the Chez that runs the suites: CHEZ names it, as the
     ;; Makefile's CHEZ does, and make hands its recipes a CHEZ set in the

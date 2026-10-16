@@ -1,5 +1,5 @@
 #!r6rs
-;;; The Autobahn lane's gate (M5, decision 0008):
+;;; The Autobahn lane's gate:
 ;;;
 ;;;   gate.sps SPEC RATCHET INDEX
 ;;;

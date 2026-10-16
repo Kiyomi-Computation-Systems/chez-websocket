@@ -1,13 +1,12 @@
 #!r6rs
 ;;; (websocket handshake) — the opening handshake's check, and the 101's
-;;; fields (RFC 6455 §4.2; the design's §3).
+;;; fields (RFC 6455 §4.2).
 ;;;
 ;;; Pure: the request is the server's, so this library is given what it
 ;;; reads of it.  The method is the symbol llhttp names.  A reader answers a
 ;;; field's value from its name, without regard to ASCII case, or #f: the
-;;; facade gives every line of the field, joined with commas (decision
-;;; 0004).  The host is the request's, as its request-host reads it.  A test
-;;; gives it a table.
+;;; facade gives every line of the field, joined with commas.  The host is
+;;; the request's, as its request-host reads it.  A test gives it a table.
 ;;;
 ;;; A handler's settings, its subprotocols and its origins, are made once,
 ;;; with make-handshake-settings, and checked there, so a bad name stops the
@@ -25,8 +24,7 @@
 ;;;   Origin is one the handler accepts                   403
 ;;; A wrong version is refused 400, as §4.4's example is, not with §4.2.2's
 ;;; 426: RFC 9110 has a 426 carry Upgrade, and Upgrade a Connection of
-;;; upgrade, which the server lets no response but a 101 say (decision
-;;; 0003).
+;;; upgrade, which the server lets no response but a 101 say.
 ;;; A list is a field's comma-separated elements, the OWS around each passed
 ;;; over, and an empty one none (RFC 9110 §5.6.1).  A key's last digit may
 ;;; set bits past its data, as RFC 6455 §4.1's own example does (erratum
@@ -45,11 +43,10 @@
 ;;; and the handshake still succeeds (§4.2.2 /subprotocol/), as coder and
 ;;; gorilla do.
 ;;;
-;;; Origin (decision 0003, and its amendment of 2026-10-06).  A request with
-;;; no Origin is not a browser's (§4.2.1), and a client that is not a
-;;; browser may send any Origin it likes, so one with none is accepted.
-;;; Otherwise the handler's origins say, and a handler that names none gets
-;;; (same-host):
+;;; Origin.  A request with no Origin is not a browser's (§4.2.1), and a
+;;; client that is not a browser may send any Origin it likes, so one with
+;;; none is accepted.  Otherwise the handler's origins say, and a handler
+;;; that names none gets (same-host):
 ;;;   any        every Origin is accepted;
 ;;;   a list     an Origin equal to one listed, without regard to ASCII case,
 ;;;              is accepted; and if the list holds same-host, an Origin of
@@ -60,8 +57,7 @@
 ;;;              its client used, as Caddy writes it and no browser can, the
 ;;;              Origin's scheme must be that one too; otherwise the scheme
 ;;;              is not compared.  A list is read by its leftmost element,
-;;;              the client-facing hop's (RFC 7239 §4's order; 0003's
-;;;              amendment of 2026-10-09).
+;;;              the client-facing hop's (RFC 7239 §4's order).
 ;;; An empty Origin is no origin (RFC 6454 §7.1): it names no host, so
 ;;; same-host refuses it, as gorilla does.
 (library (websocket handshake)
@@ -80,10 +76,10 @@
   ;;   Origins = (U 'any (Listof (U String 'same-host)))
   ;; handshake-settings? : Any -> Boolean
   ;; A handler's subprotocols, in its order of preference, each a token
-  ;; (RFC 6455 §4.1), and its origins, (same-host) when left out (decision
-  ;; 0003), checked once, here.  The settings keep copies, so what the
-  ;; handler changes afterwards changes nothing.  Anything else is an
-  ;; assertion violation naming make-handshake-settings.
+  ;; (RFC 6455 §4.1), and its origins, (same-host) when left out, checked
+  ;; once, here.  The settings keep copies, so what the handler changes
+  ;; afterwards changes nothing.  Anything else is an assertion violation
+  ;; naming make-handshake-settings.
   (define make-handshake-settings
     (case-lambda
       ((subprotocols) (make-handshake-settings subprotocols '(same-host)))
@@ -231,7 +227,7 @@
   ;; leftmost : (U String #f) -> (U String #f)
   ;; The first element of a field's comma-separated list, the OWS around it
   ;; passed over: of X-Forwarded-Proto, the client-facing hop's, by RFC 7239
-  ;; §4's order (0003's amendment of 2026-10-09).  #f for a field absent.
+  ;; §4's order.  #f for a field absent.
   (define (leftmost s)
     (and s
          (let* ((comma (find-comma s 0 (string-length s)))

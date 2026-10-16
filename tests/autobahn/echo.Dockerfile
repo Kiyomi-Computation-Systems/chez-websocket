@@ -1,7 +1,6 @@
 # The Autobahn lane's echo server in a Linux container, for Docker Desktop
 # hosts (macOS, Windows), which have no host network for the fuzzing client to
-# reach a server on (decision 0008's review, by form: "Container on Docker
-# Desktop").  `make echo-image` builds it from the repository, whose
+# reach a server on.  `make echo-image` builds it from the repository, whose
 # .dockerignore keeps the host's own build outputs out.
 #
 # CHEZ_VERSION is CI's floor, which the Makefile reads from the workflow;

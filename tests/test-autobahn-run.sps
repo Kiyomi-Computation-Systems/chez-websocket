@@ -1,19 +1,19 @@
 #!r6rs
-;;; tests/autobahn/run.sh, the Autobahn lane's driver, held without Docker
-;;; (M5's review).  tests/autobahn/fake/docker stands in for docker and plays
-;;; the fuzzing client's run, so each check run.sh makes on its host path is
-;;; watched to fail on its own: the echo server it starts, on a port of its
-;;; own, in an environment of its own; an index no run wrote; a server that
-;;; ends before it listens, or without stopping; a docker that fails; a run
-;;; told to stop while its server has ended but cannot yet be reaped, which
-;;; tests/autobahn/fake/ps shows as Linux does (R-TERM's probe); a wait held
-;;; to its own server's log, never the one the last run left, though the
-;;; server opens it late, which a copy of run.sh holds open.  The
-;;; container path, on macOS and Windows, shares all of it but the echo
-;;; server's start and stop.  There the fake plays the echo server's container
-;;; too, so the wait is held to that container's own log, never the one the
-;;; last run left, and a run that ends as its container starts, by a failed
-;;; start or a signal, is held to remove the network it made.
+;;; tests/autobahn/run.sh, the Autobahn lane's driver, held without Docker.
+;;; tests/autobahn/fake/docker stands in for docker and plays the fuzzing
+;;; client's run, so each check run.sh makes on its host path is watched to
+;;; fail on its own: the echo server it starts, on a port of its own, in an
+;;; environment of its own; an index no run wrote; a server that ends before
+;;; it listens, or without stopping; a docker that fails; a run told to stop
+;;; while its server has ended but cannot yet be reaped, which
+;;; tests/autobahn/fake/ps shows as Linux does; a wait held to its own
+;;; server's log, never the one the last run left, though the server opens it
+;;; late, which a copy of run.sh holds open.  The container path, on macOS and
+;;; Windows, shares all of it but the echo server's start and stop.  There the
+;;; fake plays the echo server's container too, so the wait is held to that
+;;; container's own log, never the one the last run left, and a run that ends
+;;; as its container starts, by a failed start or a signal, is held to remove
+;;; the network it made.
 ;;;
 ;;; Each run is a process of its own, as `make autobahn` starts one, on the
 ;;; Chez that runs the suites: CHEZ names it, as the Makefile's CHEZ does
@@ -75,8 +75,7 @@
 (define (lane name mode extra) (run-lane "host" name mode extra))
 
 ;; The log a container run leaves, which the next run on its tree finds: its
-;; first line and its last two, as `make autobahn` left them (macOS,
-;; 2026-10-11).
+;; first line and its last two, as `make autobahn` leaves them on macOS.
 (define last-runs-log "listening 0.0.0.0 9001\ndraining 0\nstopped\n")
 
 ;; container-lane : String String (U String #f) -> (List Status (Listof String))
@@ -101,10 +100,9 @@
 ;; its pid in $FAKE_HELD and stops itself, and the fake ps continues it the
 ;; first time it is asked about it.  So the server's `> server.log` comes after
 ;; the run's wait has first read the log, as it can for a child that is late
-;; to run (R-TWO under load, R-TERM's probe).  No command run.sh calls runs in
-;; that window, so no fake on PATH can hold it open.  #f unless run.sh has
-;; exactly one background command, a line ending ` &` and the lines its `\`
-;; joins to it.
+;; to run under load.  No command run.sh calls runs in that window, so no fake
+;; on PATH can hold it open.  #f unless run.sh has exactly one background
+;; command, a line ending ` &` and the lines its `\` joins to it.
 (define (held-script text)
   (let* ((lines (list->vector (text-lines text)))
          (background (let find ((i (- (vector-length lines) 1)) (found '()))

@@ -13,8 +13,7 @@
 ;;; Three bytes make a group of 24 bits, a fixnum on any Chez, worked with
 ;;; R6RS's fixnum operations, which Chez 10.4.1 compiles inline where the
 ;;; generic shifts are calls.  Its `fxarithmetic-shift-left` is a call too,
-;;; so a group is put together with `fx*` by powers of two (measured in
-;;; M1.2's review).
+;;; so a group is put together with `fx*` by powers of two.
 (library (websocket base64)
   (export base64-encode base64-decode)
   (import (rnrs) (rnrs mutable-strings))

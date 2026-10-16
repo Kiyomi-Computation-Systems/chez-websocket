@@ -1,16 +1,15 @@
 #!r6rs
-;;; The binding on a real socket (M4.3, step 3): the server's libuv shell
-;;; listening on 127.0.0.1:0, its clients on the same loop, so one turn moves
-;;; both ends, and every wait capped by an iteration count, as the server's
-;;; own socket lane runs (its tests/shell-testing.sls).  Each check has a
-;;; server of its own, closed with its clients and its loop drained before
-;;; the next.  A wait that reaches the cap ends its check's waiting: the
-;;; check's later waits are not waited for, so a check that cannot finish
-;;; costs one cap, and is red by its value.
+;;; The binding on a real socket: the server's libuv shell listening on
+;;; 127.0.0.1:0, its clients on the same loop, so one turn moves both ends,
+;;; and every wait capped by an iteration count, as the server's own socket
+;;; lane runs (its tests/shell-testing.sls).  Each check has a server of its
+;;; own, closed with its clients and its loop drained before the next.  A
+;;; wait that reaches the cap ends its check's waiting: the check's later
+;;; waits are not waited for, so a check that cannot finish costs one cap,
+;;; and is red by its value.
 ;;;
-;;; What the fake shell cannot show is held here (the design's §8): the
-;;; server logs a resume called once its wait has ended, `late-resume`, where
-;;; the fake logs nothing.
+;;; What the fake shell cannot show is held here: the server logs a resume
+;;; called once its wait has ended, `late-resume`, where the fake logs nothing.
 ;;;
 ;;; The checks:
 ;;;   - the handshake answered 101, a masked text echoed, and the client's
@@ -29,11 +28,10 @@
 ;;;   - a read's bytevector let go after its step, held by the heap.
 ;;;
 ;;; Not checked here: what a procedure waiting in a receive holds over one at
-;;; a bare `await`.  The suite held it until the server's v0.4.1, whose full
-;;; park leaves no change to the binding's wait that reddens it: its way back
-;;; by call/1cc adds about 150 B, and a guard about 486 B (measured at v0.4.0).
-;;; A message kept is S-LETGO's to catch, and the server's own suite holds
-;;; what its park keeps (decision 0005's amendment of 2026-10-09).
+;;; a bare `await`.  The server's full park leaves no change to the
+;;; binding's wait that reddens it: its way back by call/1cc adds about
+;;; 150 B, and a guard about 486 B.  A message kept is the let-go check's to
+;;; catch, and the server's own suite holds what its park keeps.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.7's masked "Hello"; §5.5.1, a
@@ -41,20 +39,19 @@
 ;;;   away, and 1011, an unexpected condition; §7.1.5, 1006 for a connection
 ;;;   closed with no close received; §7.1.4, clean once a close went each
 ;;;   way.
-;;; - The server's waits (its waits.sls, R4): a resume called after its wait
-;;;   has ended is logged `late-resume`, naming the verb, and wakes nothing.
-;;;   Its drain (its M8.1): told to finish, it logs `draining`, then
-;;;   `drain-timeout` and `stopped` once its time is up.  Its deadlines are met
-;;;   at the first time its timer fires at or after them, never before, by the
-;;;   loop's clock, `uv_now`, brought up to date as one is armed (its
-;;;   shell.sls).  So timed by that clock from the take-over, read and not
-;;;   brought up to date, the ping comes at the interval or later, and the
-;;;   close at the timeout or later after the ping, to the millisecond.  The
-;;;   suite's own clock would not do: on Linux the loop's is
-;;;   CLOCK_MONOTONIC_COARSE wherever that ticks every millisecond, and its
-;;;   lag behind Chez's, CLOCK_MONOTONIC, varies, so a ping on time measured
-;;;   98 ms on CI (the research record of 2026-10-10).
-;;; - Decision 0001: a client quiet for the ping interval is pinged, and
+;;; - The server's waits (its waits.sls): a resume called after its wait has
+;;;   ended is logged `late-resume`, naming the verb, and wakes nothing.  Its
+;;;   drain: told to finish, it logs `draining`, then `drain-timeout` and
+;;;   `stopped` once its time is up.  Its deadlines are met at the first time
+;;;   its timer fires at or after them, never before, by the loop's clock,
+;;;   `uv_now`, brought up to date as one is armed (its shell.sls).  So timed
+;;;   by that clock from the take-over, read and not brought up to date, the
+;;;   ping comes at the interval or later, and the close at the timeout or
+;;;   later after the ping, to the millisecond.  The suite's own clock would
+;;;   not do: on Linux the loop's is CLOCK_MONOTONIC_COARSE wherever that
+;;;   ticks every millisecond, and its lag behind Chez's, CLOCK_MONOTONIC,
+;;;   varies, so a ping on time measured 98 ms on CI.
+;;; - The ping clock: a client quiet for the ping interval is pinged, and
 ;;;   failed with 1011 when no pong comes within the ping timeout.  Here the
 ;;;   interval is 100 ms and the timeout 300 ms, so either taken for the other
 ;;;   falls outside its window.
@@ -63,13 +60,11 @@
 ;;;   whole; kept, it held 16,088 to 18,968 B.  Should a frame come in pieces,
 ;;;   a kept read would hold only the last, the oracle has gone, and the suite
 ;;;   says so (status 3), as it did at 40,000 bytes.  Let go, the heap after
-;;;   it and after a 1-byte message measured 88 to 112 B apart on the server's
-;;;   v0.4.0, and 2,872 to 2,952 B on its v0.4.1, about as after a 4,000-,
-;;;   40,000- or 400,000-byte message (decision 0007).  Two 1-byte messages
-;;;   measure as far apart, 2,888 to 2,944 B on its v0.5.0, whose drain is
-;;;   v0.4.1's: the heap falls between the readings, as the full drain uses
-;;;   up the thread's stack, and nothing is kept (0007's amendment of
-;;;   2026-10-11).  The bound is half the frame.
+;;;   it and after a 1-byte message measured 2,872 to 2,952 B apart, about as
+;;;   after a 4,000-, 40,000- or 400,000-byte message.  Two 1-byte messages
+;;;   measure as far apart, 2,888 to 2,944 B: the heap falls between the
+;;;   readings, as the server's full drain uses up the thread's stack, and
+;;;   nothing is kept.  The bound is half the frame.
 ;;; - The cap, 4,000 turns: over ten times the most a wait here took, 366
 ;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
 ;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.

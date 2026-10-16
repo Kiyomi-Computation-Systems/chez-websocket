@@ -1,7 +1,7 @@
 #!r6rs
-;;; (websocket protocol)'s step against its oracles (M3.1 to M3.3): messages,
-;;; control frames, the cap, UTF-8, failing, a client's close, sending,
-;;; reading on, the closing handshake, and the ping clock.
+;;; (websocket protocol)'s step against its oracles: messages, control
+;;; frames, the cap, UTF-8, failing, a client's close, sending, reading on,
+;;; the closing handshake, and the ping clock.
 ;;;
 ;;; The oracles:
 ;;; - RFC 6455, read from its raw text: §5.4's fragments, §5.5's control
@@ -15,15 +15,12 @@
 ;;;   an endpoint may send, 1005 told for a close with no code; §7.4.2's
 ;;;   3000 to 4999; and §8.1, text not UTF-8 failed with 1007.
 ;;; - RFC 3629 §4's grammar, the rows at their edges and where a byte is
-;;;   refused, as M1.3's suite has them.
-;;; - Decision 0001: the cap, 1 MiB, a frame past it failed with 1009 before
-;;;   its payload is held; reading on, stopped once a cap's worth is queued.
-;;;   Its amendment of 2026-10-05, by form: reading stops at 16 queued
-;;;   messages too.  The same form moved a client's close from M3.2 to here
-;;;   (the milestone plan's amendment).
-;;; - The design's §5: the events and actions, a message's kind its first
-;;;   frame's, and the failures' codes.
-;;; - For the closing handshake (M3.2), RFC 6455's raw text again: §5.5.1, a
+;;;   refused, as the utf8 suite has them.
+;;; - The cap, 1 MiB, a frame past it failed with 1009 before its payload is
+;;;   held; reading on, stopped once a cap's worth or 16 messages are queued.
+;;; - The step's events and actions, a message's kind its first frame's, and
+;;;   the failures' codes.
+;;; - For the closing handshake, RFC 6455's raw text again: §5.5.1, a
 ;;;   close received answered unless one was sent, the stream closed at once
 ;;;   once a close has gone each way, and two closes that cross; §5.5.2, a
 ;;;   ping answered unless a close has been received; §5.5, a control
@@ -33,23 +30,20 @@
 ;;;   code and reason told are the first close received's, 1005 for one with
 ;;;   no code, 1006 when none came; §7.1.7, failing sends a close, so never
 ;;;   a second; §7.4.1, 1005, 1006 and 1015 never set in a close.  The
-;;;   design's §5: the close deadline named by its kind, and a close not
-;;;   answered in time ending the connection anyway, the stream aborted
-;;;   since decision 0006 (websockets' close_timeout, below).
-;;;   The form of 2026-10-05, "Deliver as before": messages that come after
-;;;   the server's close are delivered as before.
-;;; - For the ping clock (M3.3): decision 0001 item 2, a client that has
-;;;   sent nothing for the ping's interval pinged, the connection failed
-;;;   with 1011 if no pong comes in time, and the clock stopped while
-;;;   reading is, its interval of 0 turning pinging off; the design's §5,
-;;;   any bytes received re-arm ping, while the pong is awaited too (0001's
-;;;   amendment of 2026-10-06, by form: "Any bytes"), and a connection's one deadline named
-;;;   by its kind, ping, pong or close; RFC 6455's raw text, §5.5.2, a ping
-;;;   may carry no payload, so its frame is two bytes; §7.4.1, 1011; and
-;;;   websockets 17.2's keepalive, which fails with 1011 when its ping's pong
-;;;   does not come in time.
-;;; - For the write side (M4.3 step 2): decision 0006, by form ("Reading stops
-;;;   past the high water"): what is written and not yet done counted; past
+;;;   close deadline named by its kind, and a close not answered in time
+;;;   ending the connection anyway, the stream aborted (websockets'
+;;;   close_timeout, below).  Messages that come after the server's close
+;;;   are delivered as before.
+;;; - For the ping clock: a client that has sent nothing for the ping's
+;;;   interval pinged, the connection failed with 1011 if no pong comes in
+;;;   time, and the clock stopped while reading is, its interval of 0
+;;;   turning pinging off; any bytes received re-arm ping, while the pong is
+;;;   awaited too, and a connection's one deadline named by its kind, ping,
+;;;   pong or close; RFC 6455's raw text, §5.5.2, a ping may carry no
+;;;   payload, so its frame is two bytes; §7.4.1, 1011; and websockets
+;;;   17.2's keepalive, which fails with 1011 when its ping's pong does not
+;;;   come in time.
+;;; - For the write side: what is written and not yet done counted; past
 ;;;   the high water the client is behind, reading and the ping clock
 ;;;   stopped and the write timeout armed while open; each done re-arming
 ;;;   it, one at the low water or under ending it; its passing aborting the
@@ -57,11 +51,11 @@
 ;;;   passing aborts the stream: websockets 17.2's close_timeout ends in
 ;;;   transport.abort() (asyncio/connection.py:910-911, 942-957).  Falling
 ;;;   behind and catching up are a step's last actions, constants, as the
-;;;   clock's re-arming is (step 2's review).
+;;;   clock's re-arming is.
 ;;; The suite builds a client's frames by §5.2 and §5.3, and the server's by
 ;;; §5.2, and stops with a provenance failure unless they are §5.7's bytes.
 ;;; Node's ws 7.5.10 was fed every case in its pieces but the ping clock's,
-;;; since ws keeps no clock (m3-mutations.md).
+;;; since ws keeps no clock.
 ;;;
 ;;; A step is fed pieces of one bytevector, cut at points; a step that ends
 ;;; the connection ends the feeding, as the binding closes the stream.
@@ -169,8 +163,7 @@
     (list (cons 'max-message-bytes cap) (cons 'max-queue queue) (cons 'ping-interval-ms 0))))
 
 ;; pinging : Nat -> WebsocketLimits
-;; The default limits, pinging on as 0001 has it, with this many messages
-;; queued.
+;; The default limits, pinging on, with this many messages queued.
 (define (pinging queue)
   (websocket-limits-with default-websocket-limits (list (cons 'max-queue queue))))
 
@@ -269,8 +262,7 @@
 ;; big-endian, then the reason's UTF-8.
 (define (server-close code reason) (wrote #x88 (append (big-endian code 2) reason)))
 
-;; The close deadline armed, and disarmed: time is a deadline's kind
-;; (design §5).
+;; The close deadline armed, and disarmed: time is a deadline's kind.
 (define armed '(arm-deadline close))
 (define disarmed '(disarm-deadline))
 
@@ -278,9 +270,8 @@
 ;; not cleanly (§7.1.5, §7.1.6), and nothing written.
 (define lost (list '(close-stream) (list 'closed 1006 no-bytes #f)))
 
-;; The close timeout passed (0006): the stream aborted, nothing written, and
-;; 1006 told, not cleanly; websockets' close_timeout ends in
-;; transport.abort().
+;; The close timeout passed: the stream aborted, nothing written, and 1006
+;; told, not cleanly; websockets' close_timeout ends in transport.abort().
 (define timed-out (list '(abort-stream) (list 'closed 1006 no-bytes #f)))
 
 ;; failed-closing : Symbol -> (Listof Action)
@@ -290,14 +281,14 @@
 (define (failed-closing why)
   (list disarmed '(close-stream) (list 'log 'failed #f why) (list 'closed 1006 no-bytes #f)))
 
-;; The ping clock's actions (design §5): the quiet deadline armed afresh,
-;; the pong's deadline armed, and the ping written, §5.5.2's with no
-;; payload, two bytes.
+;; The ping clock's actions: the quiet deadline armed afresh, the pong's
+;; deadline armed, and the ping written, §5.5.2's with no payload, two
+;; bytes.
 (define quiet '(arm-deadline ping))
 (define awaiting '(arm-deadline pong))
 (define pinged (wrote #x89 '()))
 
-;; The write timeout armed (0006).
+;; The write timeout armed.
 (define writing '(arm-deadline write))
 
 ;; marks : Nat Nat -> WebsocketLimits
@@ -501,7 +492,7 @@
                 (list (pong '(1 2)) (deliver 'binary '(5 6)))
                 (run open (append (frame #x02 '(5)) (frame #x89 '(1 2)) (frame #x80 '(6))) '()))
 
-    ;; --- the cap (0001) ---
+    ;; --- the cap ---
     (let ((L (lim 1000 100000)))
       (test-equal "a message of the cap's bytes is delivered; a frame one byte past it fails 1009 at its header, before its payload comes"
                   (list (list (deliver 'binary (pattern 1000)) '(read-stop))
@@ -589,7 +580,7 @@
                       (run (lim 10 100) (append (frame #x82 (pattern 11)) (frame #x89 hello)) '())
                       (run open (append (frame #x81 '(#xFF)) (frame #x89 hello)) '())))
 
-    ;; --- a client's close (§5.5.1; 0001's amendment) ---
+    ;; --- a client's close (§5.5.1) ---
     (test-equal "a close is answered with a close of its code and the stream closed, and the code and reason are told, cleanly: each code an endpoint may send"
                 (map (lambda (code) (answered code (ascii "bye"))) sendable-codes)
                 (map (lambda (code) (run open (frame #x88 (append (big-endian code 2) (ascii "bye"))) '()))
@@ -615,7 +606,7 @@
                                   (frame #x89 hello) (frame #x80 (ascii "lo")))
                      '()))
 
-    ;; --- the server's close, and closes crossing (§5.5.1, §7.1.2; M3.2) ---
+    ;; --- the server's close, and closes crossing (§5.5.1, §7.1.2) ---
     (test-equal "the server's close is written with its code and reason, and arms the close deadline: each code an endpoint may send, a code alone, and the drain's 1001, going away"
                 (append (map (lambda (code) (list (list (server-close code (ascii "bye")) armed))) sendable-codes)
                         (list (list (list (server-close 1000 '()) armed))
@@ -701,7 +692,7 @@
                       (cadr (step* (make-ws-state (lim 10 100)) (list '(close 1000 "") (read-event (header #x82 11)))))
                       (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x81 '(#xFF))))))
                       (cadr (step* (make-ws-state open) (list '(close 1000 "") (read-event (frame #x80 '(1))))))))
-    (test-equal "after the server's close, a ping is answered, since no close has been received (§5.5.2), and messages are delivered as before (by form), one begun before the close among them"
+    (test-equal "after the server's close, a ping is answered, since no close has been received (§5.5.2), and messages are delivered as before, one begun before the close among them"
                 (list (list (list (server-close 1000 '()) armed) (list (pong '(1 2))))
                       (list (list (server-close 1000 '()) armed) (list (deliver 'text hello) (deliver 'binary '(1 2 3))))
                       (list '() (list (server-close 1000 '()) armed) (list (deliver 'text hello))))
@@ -723,7 +714,7 @@
                   (step* closing '((close 1000 "")))
                   (list (refusal (lambda () (ws-step closing '(send text "A"))))
                         (refusal (lambda () (ws-step (make-ws-state open) '(close 1000)))))))
-    (test-equal "the server's close while reading is stopped leaves it stopped (by form): the client's close waiting behind the queue is read at the take that makes room, and ends the handshake with nothing written; a take that makes room with nothing waiting starts reading again"
+    (test-equal "the server's close while reading is stopped leaves it stopped: the client's close waiting behind the queue is read at the take that makes room, and ends the handshake with nothing written; a take that makes room with nothing waiting starts reading again"
                 (list (list (list (deliver 'binary '(1)) '(read-stop))
                             (list (server-close 1000 '()) armed)
                             (list (deliver 'binary '(2)))
@@ -736,8 +727,8 @@
                                    '(close 1000 "") '(taken 1) '(taken 1)))
                       (step* (make-ws-state (lim 1048576 1))
                              (list (read-event (frame #x82 '(1))) '(close 1000 "") '(taken 1)))))
-    ;; --- the close timeout (design §5; M3.2) ---
-    (test-equal "the close timeout (design §5): a close sent and not answered by its deadline aborts the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written, a message unfinished or not; a close after it answers nothing"
+    ;; --- the close timeout ---
+    (test-equal "the close timeout: a close sent and not answered by its deadline aborts the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written, a message unfinished or not; a close after it answers nothing"
                 (list (list (list (server-close 1000 '()) armed) timed-out)
                       (list '() (list (server-close 1000 '()) armed) timed-out)
                       (list (list (server-close 1000 '()) armed) timed-out '()))
@@ -755,7 +746,7 @@
                         (refusal (lambda () (ws-step answered '(deadline-passed))))
                         (refusal (lambda () (ws-step passed '(deadline-passed))))
                         (refusal (lambda () (ws-step closing '(deadline-passed now)))))))
-    (test-equal "by default, with 16 messages queued and none taken, reading and the ping clock stopped, the client's close waits behind them until the close timeout (by form), which reads what waits whatever the queue holds: the 17th message is delivered, and the client's close told, cleanly; with no close among it, 1006, not cleanly"
+    (test-equal "by default, with 16 messages queued and none taken, reading and the ping clock stopped, the client's close waits behind them until the close timeout, which reads what waits whatever the queue holds: the 17th message is delivered, and the client's close told, cleanly; with no close among it, 1006, not cleanly"
                 (list (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
                             (list (server-close 1000 '()) armed)
                             (list (deliver 'binary '(2)) '(close-stream) (list 'closed 1001 no-bytes #t)))
@@ -770,7 +761,7 @@
                              (list (read-event (append (concat (repeat 16 (frame #x82 '(1)))) (frame #x82 '(2))))
                                    '(close 1000 "") '(deadline-passed)))))
 
-    ;; --- the stream's end (§7.1.5; M3.2) ---
+    ;; --- the stream's end (§7.1.5) ---
     (test-equal "the stream's end with no close received closes the stream, and 1006 is told, not cleanly (§7.1.5); nothing is written: at once, in a frame's header, in its payload, between fragments, and while reading is stopped, once what waits is read; at the end of file or an error"
                 (list (list lost) (list '() lost) (list '() lost) (list '() lost)
                       (list (list (deliver 'binary '(1)) '(read-stop)) (cons (deliver 'binary '(2)) lost)) (list lost))
@@ -821,7 +812,7 @@
                       (refusal (lambda () (ws-step (make-ws-state open) '(end eof))))
                       (refusal (lambda () (ws-step (make-ws-state open) '(end ECONNRESET))))))
 
-    ;; --- the ping clock (0001 item 2, design §5; M3.3) ---
+    ;; --- the ping clock ---
     (test-equal "a new connection's deadline is ping, which the binding arms as it starts: at the default interval, 20 s, and at 1 ms; none when pinging is off, an interval of 0"
                 '(ping ping #f)
                 (map (lambda (limits) (ws-deadline (make-ws-state limits)))
@@ -842,7 +833,7 @@
                 (list (step* (make-ws-state (pinging 16)) '((deadline-passed) (deadline-passed)))
                       (step* (make-ws-state (pinging 16))
                              (list (read-event (frame #x01 (ascii "Hel"))) '(deadline-passed) '(deadline-passed)))))
-    (test-equal "any bytes received re-arm the ping clock, after the read's own actions, in their order (design §5): a message, a fragment, a ping answered, a pong, one byte of a header, a ping answered and a message in one read; and each read of a message cut a byte at a time"
+    (test-equal "any bytes received re-arm the ping clock, after the read's own actions, in their order: a message, a fragment, a ping answered, a pong, one byte of a header, a ping answered and a message in one read; and each read of a message cut a byte at a time"
                 (list (list (list (deliver 'binary '(1 2 3)) quiet))
                       (list (list quiet))
                       (list (list (pong '(1)) quiet))
@@ -857,7 +848,7 @@
                       (step* (make-ws-state (pinging 16)) (list (read-event (take (frame #x82 '(1)) 1))))
                       (step* (make-ws-state (pinging 16)) (list (read-event (append (frame #x89 '(1)) (frame #x82 '(2))))))
                       (run (pinging 16) (frame #x81 hello) (bytewise (frame #x81 hello)))))
-    (test-equal "while the pong is awaited, a message re-arms ping in its place, as any bytes received do (by form, \"Any bytes\"): the next quiet deadline pings again, and fails nothing; an empty read, no bytes received, re-arms nothing, and the pong's deadline then fails 1011"
+    (test-equal "while the pong is awaited, a message re-arms ping in its place, as any bytes received do: the next quiet deadline pings again, and fails nothing; an empty read, no bytes received, re-arms nothing, and the pong's deadline then fails 1011"
                 (list (list (list pinged awaiting) (list (deliver 'binary '(5)) quiet) (list pinged awaiting))
                       (list (list pinged awaiting) '() (failed 1011 'ping-timeout)))
                 (list (step* (make-ws-state (pinging 16))
@@ -868,7 +859,7 @@
                 (list (list (wrote #x81 (ascii "A"))) (list (deliver 'binary '(1)) quiet) '() (list pinged awaiting))
                 (step* (make-ws-state (pinging 16))
                        (list '(send text "A") (read-event (frame #x82 '(1))) '(taken 1) '(deadline-passed))))
-    (test-equal "the ping clock stops while reading is (0001): the read that fills the queue disarms it after read-stop, ping or pong armed, and re-arms nothing; a take that starts reading again arms ping afresh, and one that leaves reading stopped arms nothing"
+    (test-equal "the ping clock stops while reading is: the read that fills the queue disarms it after read-stop, ping or pong armed, and re-arms nothing; a take that starts reading again arms ping afresh, and one that leaves reading stopped arms nothing"
                 (list (list (append (repeat 16 (deliver 'binary '(1))) (list '(read-stop) disarmed))
                             (list '(read-start) quiet)
                             (list pinged awaiting))
@@ -969,7 +960,7 @@
                   (append (map (lambda (bytes) (- (read-cost (pinging 16) bytes) (read-cost (lim 1048576 16) bytes)))
                                (list (take (frame #x82 '(1)) 1) (frame #x82 '(1 2 3)) (frame #x89 '(1))))
                           (list (- (take-cost (pinging 1)) (take-cost (lim 1048576 1)))))))
-    ;; --- the write side (0006, by form: "Reading stops past the high water"; M4.3 step 2) ---
+    ;; --- the write side ---
 
     ;; Hello's frame is 7 bytes, "ab"'s 4, a close of 1000's 4, a ping's 2.
     (test-equal "a send that takes what is unsent past the high water puts the client behind: reading stopped, the ping clock with it, and the write timeout armed in its place; one that leaves the high water unsent does not; ws-behind? says so"
@@ -1137,7 +1128,7 @@
                                    (step* s (list (read-event (frame #x88 '()))))
                                    (ws-step s '(send text "A")))))))
 
-    ;; --- reading on (0001, and its amendment) ---
+    ;; --- reading on ---
     (let ((L (lim 1000 100)))
       (test-equal "reading stops once a cap's worth is queued, and starts again once a take brings the queue under it; under the cap, it goes on, and a take answers nothing"
                   (list (list (list (deliver 'binary (pattern 600)) (deliver 'binary (pattern 400)) '(read-stop))
@@ -1297,13 +1288,13 @@
                                 (- (cost L (ones 1000)) (cost L (frame #x82 (repeat 1000 1))))))))
 
     ;; A message's buffer grows as its bytes arrive, never with what a header
-    ;; announces (the first review's finding): a header announcing 1 MiB,
-    ;; alone, allocates what one announcing a byte does.  In reads of
-    ;; 16 KiB, the server's read buffer, a message of 1 MiB in one frame
-    ;; allocates each size its buffer takes once, by the rule: double what
-    ;; it holds, or take what has arrived if more, and in a message's last
-    ;; frame take its whole end once a doubling would reach half of it.  The
-    ;; cap is 2 MiB, so that 1 MiB queued stops no reading.
+    ;; announces: a header announcing 1 MiB, alone, allocates what one
+    ;; announcing a byte does.  In reads of 16 KiB, the server's read buffer,
+    ;; a message of 1 MiB in one frame allocates each size its buffer takes
+    ;; once, by the rule: double what it holds, or take what has arrived if
+    ;; more, and in a message's last frame take its whole end once a doubling
+    ;; would reach half of it.  The cap is 2 MiB, so that 1 MiB queued stops
+    ;; no reading.
     (let* ((roomy (lim 2097152 100000))
            (cost (lambda (events)
                    (allocated (lambda ()

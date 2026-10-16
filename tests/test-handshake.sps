@@ -1,22 +1,20 @@
 #!r6rs
-;;; (websocket handshake) against its oracles (M4.1).
+;;; (websocket handshake) against its oracles.
 ;;;
 ;;; - RFC 6455's example handshake (§1.3, §4.2.2): its key's accept value,
 ;;;   s3pPLMBiTxaQ9kYGzzhZRbK+xOo=, and the subprotocol its server chose.
 ;;; - Chrome 152's handshakes, as a probe on the server measured them: one
 ;;;   from a page of the same origin, one from a page on another host.
 ;;; - Accept values of other keys, which three peers computed alike:
-;;;   Python's hashlib and base64, Node's crypto, and OpenSSL (the ledger).
-;;;   Among them RFC 6455 §4.1's example key as printed, whose last digit
-;;;   sets bits past its data (erratum 3150): the accept value is of the key
-;;;   as sent.
-;;; - The design's §3: its checks, in its order, each refusal's status and
-;;;   fields, a wrong version's 400 by decision 0003; the subprotocol chosen;
+;;;   Python's hashlib and base64, Node's crypto, and OpenSSL.  Among them
+;;;   RFC 6455 §4.1's example key as printed, whose last digit sets bits past
+;;;   its data (erratum 3150): the accept value is of the key as sent.
+;;; - The handshake's checks, in their order, each refusal's status and
+;;;   fields, a wrong version's 400; the subprotocol chosen;
 ;;;   Sec-WebSocket-Extensions never answered.
 ;;; - What a handler accepts of Origin, and what it gets when it names none:
-;;;   same-host, by decision 0003, as coder and gorilla do; the Origin's
-;;;   scheme, held to X-Forwarded-Proto when that names http or https, by
-;;;   0003's amendment (M4.1's review).
+;;;   same-host, as coder and gorilla do; the Origin's scheme, held to
+;;;   X-Forwarded-Proto when that names http or https.
 ;;; - A handler's settings, checked once where they are made, keep copies of
 ;;;   what they were made with; each answer's bytes and strings are its own.
 ;;;
@@ -189,7 +187,7 @@
       (answers-with "Connection"
         '(#f "" "keep-alive" "upgrades" "Upgrade2" "up grade" "close" "\"Upgrade\"" "degrade")))
 
-    (test-equal "a Sec-WebSocket-Version missing, or not 13, is refused 400 with Sec-WebSocket-Version: 13, for its version (0003)"
+    (test-equal "a Sec-WebSocket-Version missing, or not 13, is refused 400 with Sec-WebSocket-Version: 13, for its version"
       (map (lambda (v) '(refuse 400 (("Sec-WebSocket-Version" . "13")) version))
            '(1 2 3 4 5 6 7 8 9 10 11))
       (answers-with "Sec-WebSocket-Version"
@@ -204,7 +202,7 @@
 
     ;; Each request breaks one check and every check after it, so only the
     ;; order the checks are made in tells what it is refused for.
-    (test-equal "the checks are made in the design's order, the first that fails answering: method, Upgrade, Connection, Sec-WebSocket-Version, Sec-WebSocket-Key, Origin"
+    (test-equal "the checks are made in order, the first that fails answering: method, Upgrade, Connection, Sec-WebSocket-Version, Sec-WebSocket-Key, Origin"
       '((400 method) (400 upgrade) (400 connection) (400 version) (400 key) (403 origin))
       (let* ((origin (with rfc-request "Origin" "http://elsewhere.example"))
              (key (with origin "Sec-WebSocket-Key" "not a key"))
@@ -246,7 +244,7 @@
       '(#f ())
       (chosen "Chat, chatty, xchat, cha, \"chat\", ch at" '("chat")))
 
-    (test-equal "a handler that names no origins gets same-host (0003): Chrome's page of the same origin is accepted, its page on localhost refused 403, and a request with no Origin accepted"
+    (test-equal "a handler that names no origins gets same-host: Chrome's page of the same origin is accepted, its page on localhost refused 403, and a request with no Origin accepted"
       '(accept (403 origin) accept)
       (map (lambda (fields)
              (let ((a (readable (handshake-answer 'GET (reader fields) chrome-host
@@ -286,8 +284,8 @@
     ;; Caddy writes the scheme its client used in X-Forwarded-Proto, replacing
     ;; any a client sent, and a browser cannot set it on a handshake.  A list
     ;; is read by its leftmost element, the client-facing hop's, by RFC 7239
-    ;; §4's order (0003's amendment of 2026-10-09, by form).
-    (test-equal "same-host holds the Origin's scheme to X-Forwarded-Proto's leftmost element when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it (0003's amendments)"
+    ;; §4's order.
+    (test-equal "same-host holds the Origin's scheme to X-Forwarded-Proto's leftmost element when that names http or https, without regard to case; any other value, or none, is not compared; a listed origin and any are not held to it"
       '(accept (403 origin) (403 origin) accept (403 origin) accept accept accept (403 origin) accept accept
         accept accept (403 origin) accept accept)
       (list (scheme-answer "https://app.example.com" "https" '(same-host))

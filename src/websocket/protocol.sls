@@ -1,7 +1,6 @@
 #!r6rs
-;;; (websocket protocol) — a connection's state machine (design §5): its
-;;; messages, its control frames, its limits, its closing handshake, and
-;;; its ping clock.
+;;; (websocket protocol) — a connection's state machine: its messages, its
+;;; control frames, its limits, its closing handshake, and its ping clock.
 ;;;
 ;;; `ws-step : WsState Event -> (values WsState (Listof Action))` is pure by
 ;;; contract, as the server's conn-step is: it allocates only Scheme data,
@@ -28,15 +27,15 @@
 ;;;            (arm-deadline kind)  (disarm-deadline)  (close-stream)
 ;;;            (abort-stream)  (closed code reason clean?)  (log what . details)
 ;;;
-;;; A delivered message is whole (0001): a text's payload is its UTF-8
-;;; bytes, checked, which the binding decodes, and a binary's its bytes.  A
+;;; A delivered message is whole: a text's payload is its UTF-8 bytes,
+;;; checked, which the binding decodes, and a binary's its bytes.  A
 ;;; closed's reason is bytes too.
 ;;;
 ;;; - Messages (§5.4).  A data frame with FIN set is a message.  One with FIN
 ;;;   clear begins a fragmented message, of its kind, which continuations
 ;;;   go on with until FIN.  A continuation with no message begun, or a new
 ;;;   message begun before the last has ended, fails 1002.
-;;; - The cap (0001).  A data frame whose length would take its message
+;;; - The cap.  A data frame whose length would take its message
 ;;;   past the cap fails 1009 at its header, before any of its payload is
 ;;;   held.  A message's buffer grows as its bytes arrive, never with what a
 ;;;   header announces, doubling (room!); a message read whole in one frame
@@ -52,27 +51,25 @@
 ;;;   close it wrote, or #f if it wrote none, and tells 1006 and an empty
 ;;;   reason, since no close came (§7.1.5, §7.1.6).  The frame decoder's
 ;;;   refusals fail 1002 with its reason.
-;;; - A client's close (§5.5.1; 0001's amendment of 2026-10-05, by form) is
-;;;   answered with a close of its code, or with an empty close when it has
-;;;   none, unless the server's close was sent, and the stream is closed: a
-;;;   close has gone each way, so the close is clean, and the handler is
-;;;   told its code, or 1005 (§7.4.1), and its reason.  Its code must be one
-;;;   an endpoint may send, 1000 to 1003, 1007 to 1011 and 3000 to 4999
-;;;   (§7.4.1, §7.4.2), and its body is not one byte, or it fails 1002; its
-;;;   reason not UTF-8 fails 1007.
+;;; - A client's close (§5.5.1) is answered with a close of its code, or with
+;;;   an empty close when it has none, unless the server's close was sent, and
+;;;   the stream is closed: a close has gone each way, so the close is clean,
+;;;   and the handler is told its code, or 1005 (§7.4.1), and its reason.  Its
+;;;   code must be one an endpoint may send, 1000 to 1003, 1007 to 1011 and
+;;;   3000 to 4999 (§7.4.1, §7.4.2), and its body is not one byte, or it fails
+;;;   1002; its reason not UTF-8 fails 1007.
 ;;; - The server's close (§7.1.2) is written with its code and reason, and
 ;;;   arms the close deadline, from the close's queueing, as websockets, ws
-;;;   and coder time theirs (0006's amendment, by form: "From queueing, as
-;;;   peers do"): the client reads what was unsent before it, and the close,
-;;;   within the close timeout.  Its reason is measured in UTF-8, not
-;;;   encoded, until the close is written.  Reading goes on as before,
+;;;   and coder time theirs: the client reads what was unsent before it, and
+;;;   the close, within the close timeout.  Its reason is measured in UTF-8,
+;;;   not encoded, until the close is written.  Reading goes on as before,
 ;;;   unless the client is behind (below): a message that comes after it is
-;;;   delivered (decided by form, 2026-10-05), and a ping answered, since no
-;;;   close has been received (§5.5.2).  The client's close ends the
-;;;   handshake.  If its deadline passes first, the stream is aborted, what
-;;;   is unsent dropped, and 1006 told: websockets' close_timeout ends in
-;;;   transport.abort() (0006).  Once a close is sent, a send is the
-;;;   caller's mistake (§5.5.1), and another close answers nothing.
+;;;   delivered, and a ping answered, since no close has been received
+;;;   (§5.5.2).  The client's close ends the handshake.  If its deadline
+;;;   passes first, the stream is aborted, what is unsent dropped, and 1006
+;;;   told: websockets' close_timeout ends in transport.abort().  Once a
+;;;   close is sent, a send is the caller's mistake (§5.5.1), and another
+;;;   close answers nothing.
 ;;; - The stream's end with no close received closes the stream and tells
 ;;;   1006 (§7.1.5).  Nothing is written, since nothing reads it.
 ;;; - At the stream's end, or when the close's deadline passes, no more
@@ -85,45 +82,42 @@
 ;;;   connection's is ping, unless pinging is off: no step tells it, and
 ;;;   ws-deadline names it for the binding to arm as it starts.  A deadline
 ;;;   passing with none armed is the caller's mistake.
-;;; - The ping clock (0001 item 2, and its amendment of 2026-10-06).  Any
-;;;   bytes received re-arm ping, after the read's own actions, whether a
-;;;   pong is awaited or not; a read of no bytes changes nothing.  When ping
-;;;   passes, the client has sent nothing for its interval: a ping with no
-;;;   payload is written, and pong armed.  When pong passes, nothing has
-;;;   come since, and the connection fails with 1011, websockets'
-;;;   keepalive's code.  The clock stops while reading is, since a pong the
-;;;   server does not read is not the client's fault, and starts afresh, at
-;;;   ping, when reading starts again.  The server's close takes the one
-;;;   deadline for its own, and the clock does not run again.  A ping
+;;; - The ping clock.  Any bytes received re-arm ping, after the read's own
+;;;   actions, whether a pong is awaited or not; a read of no bytes changes
+;;;   nothing.  When ping passes, the client has sent nothing for its
+;;;   interval: a ping with no payload is written, and pong armed.  When pong
+;;;   passes, nothing has come since, and the connection fails with 1011,
+;;;   websockets' keepalive's code.  The clock stops while reading is, since a
+;;;   pong the server does not read is not the client's fault, and starts
+;;;   afresh, at ping, when reading starts again.  The server's close takes
+;;;   the one deadline for its own, and the clock does not run again.  A ping
 ;;;   interval of 0 turns it off.  Re-arming allocates nothing: a step ends
 ;;;   with a constant tail of actions.
 ;;; - Once the connection has ended, failed or closed, nothing more is read,
 ;;;   the rest of a read among it, and a ping is not answered (§5.5.2).  A
 ;;;   close or the stream's end then answers nothing, and a done only counts.
-;;; - The write side (0006, by form: "Reading stops past the high water").
-;;;   Each write the step answers counts its bytes unsent, and a done takes
-;;;   them off.  Once a step leaves more than the high water unsent, the
-;;;   client is behind: reading stops, a read at the frame that passed it,
-;;;   the rest waiting, and the ping clock with it; while open, the write
-;;;   deadline is armed, which the binding arms for the write timeout, and
-;;;   after the server's close the close deadline goes on.  While open,
+;;; - The write side.  Each write the step answers counts its bytes unsent,
+;;;   and a done takes them off.  Once a step leaves more than the high water
+;;;   unsent, the client is behind: reading stops, a read at the frame that
+;;;   passed it, the rest waiting, and the ping clock with it; while open, the
+;;;   write deadline is armed, which the binding arms for the write timeout,
+;;;   and after the server's close the close deadline goes on.  While open,
 ;;;   each done while behind re-arms the write deadline; after the server's
 ;;;   close, nothing is re-armed.  A done that leaves the low water or less
 ;;;   ends it: the write deadline disarmed, if armed, what waits read, and
 ;;;   reading started, the clock afresh, unless the queue is full.  Falling
-;;;   behind and catching up, nothing waiting, end a step with constant
-;;;   tails, as the clock does.  When the write deadline
-;;;   passes, the client has read nothing for its time: the stream is
-;;;   aborted, nothing written, `failed` logged with no code and
-;;;   write-timeout, what waits let go, and 1006 told.  ws-behind? tells the
-;;;   binding whether the client is behind, and a send waits while it is.
-;;; - Reading on (0001, and its amendment).  Each delivered message is
-;;;   queued for the handler until it is taken.  Once the queue holds a
-;;;   cap's worth of bytes, or max-queue messages, the step answers
-;;;   read-stop and reads no further: the rest of the read waits, kept,
-;;;   since the read's bytevector is the core's to keep.  A take that brings
-;;;   the queue under both reads what waits, a message at a time as the
-;;;   queue makes room, and then answers read-start.
+;;;   behind and catching up, nothing waiting, end a step with constant tails,
+;;;   as the clock does.  When the write deadline passes, the client has read
+;;;   nothing for its time: the stream is aborted, nothing written, `failed`
+;;;   logged with no code and write-timeout, what waits let go, and 1006 told.
+;;;   ws-behind? tells the binding whether the client is behind, and a send
+;;;   waits while it is.
+;;; - Reading on.  Each delivered message is queued for the handler until it
+;;;   is taken.  Once the queue holds a cap's worth of bytes, or max-queue
+;;;   messages, the step answers read-stop and reads no further: the rest of
+;;;   the read waits, kept, since the read's bytevector is the core's to keep.
+;;;   A take that brings the queue under both reads what waits, a message at a
+;;;   time as the queue makes room, and then answers read-start.
 (library (websocket protocol)
   (export make-ws-state ws-step ws-deadline ws-open? ws-behind? ws-sendable-close?)
   (import (rnrs) (websocket frame) (websocket utf8) (websocket limits))
@@ -143,7 +137,7 @@
   ;; whether the ping clock runs at all.  `unsent` is what the steps have
   ;; written and no done has taken off; `high` and `low` the write water
   ;; marks; `behind?` whether more than the high water was unsent and no done
-  ;; has brought it to the low water since (0006).
+  ;; has brought it to the low water since.
   (define-record-type (ws-state new-state ws-state?)
     (fields (immutable decoder) (immutable cap) (immutable max-queue)
             (immutable ping?)
@@ -189,7 +183,7 @@
     (eq? (ws-state-phase s) 'open))
 
   ;; ws-behind? : WsState -> Boolean
-  ;; Whether the client is behind (0006): more than the high water was
+  ;; Whether the client is behind: more than the high water was
   ;; unsent, and no done has brought it to the low water since.  A send
   ;; waits while it is.
   (define (ws-behind? s)
@@ -212,7 +206,7 @@
     (ws-state-deadline-set! s #f)
     (cons '(disarm-deadline) acts))
 
-  ;; The ping clock (0001 item 2).  A step's last actions, as constants, so
+  ;; The ping clock.  A step's last actions, as constants, so
   ;; that re-arming at every read allocates nothing.
   (define ping-armed '((arm-deadline ping)))
   (define reading-started '((read-start)))
@@ -239,7 +233,7 @@
   ;; timeout and the stream's end read what waits before they end it
   ;; (read-waiting!), and the pong's deadline cannot pass while anything
   ;; waits, since the clock stops whenever reading does; the write timeout
-  ;; ends it with what waits unread (0006).
+  ;; ends it with what waits unread.
   (define (end! s last acts)
     (let ((acts (if (ws-state-deadline s) (disarm! s acts) acts)))
       (ws-state-phase-set! s 'ended)
@@ -312,7 +306,7 @@
       ((pong) acts)
       (else (closing! s acts))))
 
-  ;; --- the write side (0006) ---
+  ;; --- the write side ---
 
   ;; write! : WsState Bytevector -> Action
   ;; `(write bv)`, its bytes counted unsent until a done takes them off.
@@ -661,7 +655,7 @@
   ;; connection fails with 1011.  Close: what waits read, then, if the close
   ;; sent was not answered there either, the stream aborted, and 1006 told.
   ;; Write: the client has read nothing for the write timeout: the stream
-  ;; aborted, failed logged, and 1006 told (0006).
+  ;; aborted, failed logged, and 1006 told.
   (define (passed! s)
     (let ((kind (ws-state-deadline s)))
       (unless kind

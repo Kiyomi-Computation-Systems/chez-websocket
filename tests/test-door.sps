@@ -1,20 +1,20 @@
 #!r6rs
-;;; The door this library builds on, through the pin (M0's smoke).
+;;; The door this library builds on, through the pin.
 ;;;
 ;;; chez-http-server's facade loads from the one library path, the pins it
-;;; carries under it, and the verbs the binding will call behave as its
-;;; v0.4.0 documents them ((http-server transport), (http-server private
-;;; waits)): a transport made of procedures hands each its verb's arguments
-;;; in one shape, the abort to its eighth (decision 0024), and `await`
-;;; refuses where no coroutine may park, before it calls `register`.  The
-;;; binding's driver suite holds the rest, on the server's fake shell.
+;;; carries under it, and the verbs the binding calls behave as the server
+;;; documents them ((http-server transport), (http-server private waits)): a
+;;; transport made of procedures hands each its verb's arguments in one
+;;; shape, the abort to its eighth, and `await` refuses where no coroutine
+;;; may park, before it calls `register`.  The binding's driver suite holds
+;;; the rest, on the server's fake shell.
 ;;;
 ;;; And what (websocket handshake) answers is what the server writes: a 101
 ;;; its switch-fault passes against the request's fields, a refusal its
 ;;; response-fault passes.  Those are the rules the server applies to what a
 ;;; handler answers, in (http-server serializer), a library its facade does
-;;; not export, so this suite is where they are named (M4.1's review: the
-;;; handshake's own suite needs no server).
+;;; not export, so this suite is where they are named: the handshake's own
+;;; suite needs no server.
 (import (rnrs) (srfi :64) (ws-testing) (http-server)
         (only (http-server serializer) switch-fault response-fault)
         (websocket handshake))

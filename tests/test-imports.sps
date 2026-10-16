@@ -1,11 +1,11 @@
 #!r6rs
-;;; The import audit (design §2), which `make check-imports` runs alone.
+;;; The import audit, which `make check-imports` runs alone.
 ;;;
 ;;; A pure library imports R6RS's own libraries, (rnrs ...), and this
 ;;; project's other pure libraries, and nothing else: not (chezscheme), not
 ;;; (http-server), not the facade (websocket), and not (websocket private
 ;;; ...), where the binding lives.  Not (rnrs eval) either: an environment
-;;; reaches any library.  Every library under src/ is pure but two (M4.3):
+;;; reaches any library.  Every library under src/ is pure but two:
 ;;;   src/websocket/private/binding.sls, the binding, which may import
 ;;;     (chezscheme) and (http-server) too, and is the only one that may;
 ;;;   src/websocket.sls, the facade, which may import the binding too, and

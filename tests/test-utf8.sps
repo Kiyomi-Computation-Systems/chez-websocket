@@ -1,12 +1,12 @@
 #!r6rs
-;;; (websocket utf8) against its oracles (M1.3).
+;;; (websocket utf8) against its oracles.
 ;;;
 ;;; The oracles are RFC 3629: §4's grammar, row by row, and §7's examples.  A
 ;;; refusal's index is the first byte at which no row can go on.  Two
 ;;; incremental decoders were fed every case below, a byte at a time and in
 ;;; its pieces.  Node's fatal TextDecoder agreed with every index.  Python's
 ;;; agreed with all but the surrogates', which it refuses a byte later, and
-;;; gave the boundaries of §7's text (m1-mutations.md).
+;;; gave the boundaries of §7's text.
 ;;;
 ;;; - Every row at its edges, and every refusal at its index, fed a byte at a
 ;;;   time and as one piece, and again after an "A" in the same piece.

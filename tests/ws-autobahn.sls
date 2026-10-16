@@ -1,5 +1,5 @@
 #!r6rs
-;;; (ws-autobahn) — the Autobahn lane's gate (M5, decision 0008).
+;;; (ws-autobahn) — the Autobahn lane's gate.
 ;;;
 ;;; Autobahn's fuzzing client writes each case's verdict to an index.json and
 ;;; exits 0 whatever they are; a connection that fails ends its run there,
@@ -10,12 +10,11 @@
 ;;;
 ;;; and holds it both ways: a verdict that differs either way is a difference,
 ;;; and so is a case only one of them has.  A promotion is a reviewed diff of
-;;; the ratchet, as chez-http-server's ratchet holds its corpora (its decision
-;;; 0008).  The close code is the one the server sent, which Autobahn reads as
-;;; remoteCloseCode; none where it sent none.  A case whose verdict was
-;;; measured to vary with how the client's bytes fall into reads lists each
-;;; whole verdict seen, " | " between them (decision 0008, by form: "List what
-;;; was measured"), and passes with any one of them: a pairing of their
+;;; the ratchet, as chez-http-server's ratchet holds its corpora.  The close
+;;; code is the one the server sent, which Autobahn reads as remoteCloseCode;
+;;; none where it sent none.  A case whose verdict was measured to vary with
+;;; how the client's bytes fall into reads lists each whole verdict seen,
+;;; " | " between them, and passes with any one of them: a pairing of their
 ;;; fields never seen fails.  An index of no agent at all, `{}`, is what wstest
 ;;; writes when no connection opened, and is read as a run of no case.  Its
 ;;; lines are (ws-text)'s.

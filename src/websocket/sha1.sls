@@ -10,9 +10,9 @@
 ;;; wrong.  Words are worked with R6RS's fixnum operations.  Chez 10.4.1
 ;;; compiles `fxand`, `fxior` and `fxxor` inline whatever their number of
 ;;; arguments, but `fx+`, like `+`, only with two: with three it calls out of
-;;; line, and with four it also allocates (measured in M1.1 and its review).
-;;; So each sum adds two at a time, and is masked back to 32 bits.  A hash
-;;; allocates its padded copy, its schedule and its digest, and nothing else.
+;;; line, and with four it also allocates.  So each sum adds two at a time,
+;;; and is masked back to 32 bits.  A hash allocates its padded copy, its
+;;; schedule and its digest, and nothing else.
 (library (websocket sha1)
   (export sha1)
   (import (rnrs))

@@ -1,5 +1,5 @@
 #!r6rs
-;;; (websocket) — the facade a handler imports (design §1, §2).
+;;; (websocket) — the facade a handler imports.
 ;;;
 ;;; A handler of chez-http-server's takes a WebSocket by answering what
 ;;; websocket-accept returns; its procedure then reads with

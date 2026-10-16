@@ -1,27 +1,25 @@
 #!r6rs
 ;;; (websocket limits): the defaults, and their reading from an environment's
-;;; strings (M3.1).
+;;; strings.
 ;;;
-;;; The oracles are the design's §7 table (each variable, its default and its
-;;; unit), decision 0001 (the 1 MiB cap, and the ping clock's 20 s and 20 s),
-;;; and its amendment of 2026-10-05, decided by form: reading also stops at 16
-;;; queued messages, which CHEZ_WS_MAX_QUEUE overrides.  The conventions are
-;;; the server's (its (http-server limits)): durations are given in whole
-;;; seconds and kept in milliseconds; sizes and counts are given and kept in
-;;; their own unit; a variable absent or empty is its default; and a write low
-;;; water above the high water is refused, whichever was set.  The bounds
-;;; are each field's least sensible value: a cap or a queue of at least one,
-;;; since reading stops once the queue holds a cap's worth, so a cap of 0
-;;; would stop it for good; a pong timeout of at least a second, since one of
-;;; 0 would pass as its ping went; a write timeout of at least a second,
-;;; since one of 0 would pass as reading stopped; a close timeout of at
-;;; least a second, since every close the binding asks for is aborted once
-;;; it passes, so one of 0 would abort a close before the client could read
-;;; it (decision 0006, and its amendment at step 2's review, by form: "From
-;;; queueing, as peers do"); and 0 for the rest, an interval of 0 turning
-;;; pinging off (0001).  Decision 0006, by form ("60 s, its own variable"):
-;;; CHEZ_WS_WRITE_TIMEOUT, 60 s, the server's own CHEZ_HTTP_WRITE_TIMEOUT.  A
-;;; value is a whole number, written in ASCII digits alone.
+;;; The oracles are docs/configuration.org's table (each variable, its default
+;;; and its unit), the 1 MiB cap, the ping clock's 20 s and 20 s, and reading
+;;; stopped at 16 queued messages, which CHEZ_WS_MAX_QUEUE overrides.  The
+;;; conventions are the server's (its (http-server limits)): durations are
+;;; given in whole seconds and kept in milliseconds; sizes and counts are
+;;; given and kept in their own unit; a variable absent or empty is its
+;;; default; and a write low water above the high water is refused, whichever
+;;; was set.  The bounds are each field's least sensible value: a cap or a
+;;; queue of at least one, since reading stops once the queue holds a cap's
+;;; worth, so a cap of 0 would stop it for good; a pong timeout of at least a
+;;; second, since one of 0 would pass as its ping went; a write timeout of at
+;;; least a second, since one of 0 would pass as reading stopped; a close
+;;; timeout of at least a second, since every close the binding asks for is
+;;; aborted once it passes, so one of 0 would abort a close before the client
+;;; could read it; and 0 for the rest, an interval of 0 turning pinging off.
+;;; CHEZ_WS_WRITE_TIMEOUT is its own variable, 60 s, as the server's own
+;;; CHEZ_HTTP_WRITE_TIMEOUT is.  A value is a whole number, written in ASCII
+;;; digits alone.
 ;;;
 ;;; - The defaults, field by field, and the variables, in field order.
 ;;; - Each variable moves its own field alone; absent or empty is the default.
@@ -39,9 +37,8 @@
 (define (env . pairs)
   (lambda (name) (let ((p (assoc name pairs))) (and p (cdr p)))))
 
-;; Each field: its name, its accessor, its variable, and its default, from the
-;; design's §7 table, 0001's amendment and 0006, in make-websocket-limits'
-;; order.
+;; Each field: its name, its accessor, its variable, and its default, from
+;; docs/configuration.org's table, in make-websocket-limits' order.
 (define named-fields
   (list (list 'max-message-bytes websocket-limits-max-message-bytes "CHEZ_WS_MAX_MESSAGE_BYTES" 1048576)
         (list 'max-queue websocket-limits-max-queue "CHEZ_WS_MAX_QUEUE" 16)
@@ -108,13 +105,13 @@
 
 (run-suite "limits"
   (lambda ()
-    ;; --- the defaults (design §7, 0001 and its amendment) ---
+    ;; --- the defaults ---
     (test-equal "the defaults: a 1 MiB cap, 16 messages queued, a ping after 20 s and its pong within 20 s, 10 s for a close, the water marks at 256 KiB and 64 KiB, and 60 s for a write"
                 defaults (values-of default-websocket-limits))
     (test-equal "the variables, in the fields' order"
                 (map field-variable named-fields) websocket-limits-environment-variables)
 
-    ;; --- each variable alone (design §7) ---
+    ;; --- each variable alone ---
     (test-equal "an empty environment, and every variable empty, give the defaults"
                 (list defaults defaults)
                 (list (read-env (env))

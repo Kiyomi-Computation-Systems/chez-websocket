@@ -8,30 +8,30 @@ WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-ht
 ✨ *AI Disclosure:* LLMs are used extensively in the planning and development of this project.
 #+end_quote
 
-** Status
+** What it does
 
-The primitives are done (M1): SHA-1, base64 and a UTF-8 checker that takes a
-text in pieces. So is the frame codec (M2): it reads a client's frames in
-pieces of any size, refusing what no client may send, and builds the
-server's. So is the protocol (M3): one connection's rules, as steps that read
-no clock and do no I/O. It delivers whole messages, caps their size, checks
-text as it comes, stops reading while its queue is full, closes as RFC 6455
-asks, and pings a client gone quiet. So is the opening handshake's check
-(M4.1): it answers a client's handshake with the 101's fields or a refusal,
-and refuses a browser's page from another host unless the handler names it.
-So is the binding (M4): a handler answers what =websocket-accept= returns, and
-its code reads each message with a call that waits, sends, and closes. A client
-that stops reading is cut off after a timeout, unless pinging is off or the
-handler has stopped taking its messages. An idle connection costs the server
-about 5.3 KB. Each part is held to its RFC's test vectors and examples, and the
-binding on a real socket too.
-[[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]] holds it
-to the RFC in CI (M5): an echo server built from it meets all 301 of its cases
-without compression, and a ratchet holds each case's verdict. v0.1.0 is the
-first release (M6): [[file:CHANGELOG.md][CHANGELOG.md]] says what is in it. No
-compression and no client. See [[file:.plans/2026-10-04-chez-websocket-project-brief.md][the project brief]],
-[[file:.plans/2026-10-04-chez-websocket-design.md][the design]] and
-[[file:.plans/2026-10-04-chez-websocket-milestone-plan.md][the milestone plan]].
+The rules are pure libraries. SHA-1, base64 and a UTF-8 checker that takes a
+text in pieces. The frame codec: it reads a client's frames in pieces of any
+size, refusing what no client may send, and builds the server's. The protocol:
+one connection's rules, as steps that read no clock and do no I/O. It delivers
+whole messages, caps their size, checks text as it comes, stops reading while
+its queue is full, closes as RFC 6455 asks, and pings a client gone quiet. The
+opening handshake's check: it answers a client's handshake with the 101's
+fields or a refusal, and refuses a browser's page from another host unless the
+handler names it.
+
+The binding runs them over the server's transport: a handler answers what
+=websocket-accept= returns, and its code reads each message with a call that
+waits, sends, and closes. A client that stops reading is cut off after a
+timeout, unless pinging is off or the handler has stopped taking its messages.
+An idle connection costs the server about 5.3 KB.
+
+Each part is held to its RFC's test vectors and examples, and the binding on a
+real socket too. [[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]]
+holds it to the RFC in CI: an echo server built from it meets all 301 of its
+cases without compression, and a ratchet holds each case's verdict.
+[[file:CHANGELOG.md][CHANGELOG.md]] says what is in each release. No
+compression and no client.
 
 ** Using it
 

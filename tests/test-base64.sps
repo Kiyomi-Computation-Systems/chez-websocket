@@ -1,16 +1,16 @@
 #!r6rs
-;;; (websocket base64) against its oracles (M1.2, and its review).
+;;; (websocket base64) against its oracles.
 ;;;
 ;;; - RFC 4648 §10's seven vectors, both ways.
 ;;; - The whole alphabet (§4's Table 1), both ways: the 48 bytes whose base64
 ;;;   is the 64 digits in order.  Those bytes are three peers', which agreed:
-;;;   Python's binascii, Perl's MIME::Base64 and OpenSSL (m1-mutations.md).
+;;;   Python's binascii, Perl's MIME::Base64 and OpenSSL.
 ;;; - RFC 6455's keys.  §1.3's example decodes to sixteen bytes, the peers'.
 ;;;   §4.1's, as printed, decodes to the bytes 1 to 16 it names: its last
 ;;;   digit sets bits a conforming encoder leaves clear (erratum 3150), and a
-;;;   decode ignores them, as four of five peers do (the ledger).  The same
-;;;   bytes encode as the erratum corrects the key.  A last digit before one
-;;;   "=" is read the same way: "Zm/=" decodes to "fo", the three peers'.
+;;;   decode ignores them, as four of five peers do.  The same bytes encode
+;;;   as the erratum corrects the key.  A last digit before one "=" is read
+;;;   the same way: "Zm/=" decodes to "fo", the three peers'.
 ;;; - RFC 6455 §4.2.2's accept value, of its example key.
 ;;; - A decode's refusals: a length that is not a multiple of four, a
 ;;;   character outside the alphabet, padding anywhere but the end, and more

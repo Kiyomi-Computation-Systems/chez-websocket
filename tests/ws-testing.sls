@@ -1,9 +1,8 @@
 #!r6rs
 ;;; (ws-testing) — the chez-websocket test-harness bridge.
 ;;;
-;;; Suites are SRFI-64 (global-constraints), but SRFI-64 sets no process
-;;; status.  `run-suite` runs a suite's assertions and then exits with the
-;;; project's status vocabulary:
+;;; Suites are SRFI-64, but SRFI-64 sets no process status.  `run-suite` runs
+;;; a suite's assertions and then exits with the project's status vocabulary:
 ;;;
 ;;;   0  every assertion passed and at least one ran
 ;;;   1  one or more assertions failed (or unexpectedly passed)
@@ -11,15 +10,15 @@
 ;;;      or the selection was empty (no assertion ran)
 ;;;   3  a provenance failure, raised by `provenance-failure`
 ;;;
-;;; "Empty selection is failure at every layer" (global-constraints): a suite
-;;; that registers no assertion exits 2, never 0.
+;;; An empty selection is a failure at every layer: a suite that registers no
+;;; assertion exits 2, never 0.
 ;;;
 ;;; The SRFI-64 footgun — an exception inside a test expression is silently
 ;;; turned into #f — is defended by discipline, not code: assertions compare
-;;; against a value only success can produce, never #f or bare truthiness
-;;; (global-constraints).  So that a red can be read from the log, a failed
-;;; assertion's line is followed by what it expected and what it got, and a
-;;; harness error names what was raised.
+;;; against a value only success can produce, never #f or bare truthiness.  So
+;;; that a red can be read from the log, a failed assertion's line is followed
+;;; by what it expected and what it got, and a harness error names what was
+;;; raised.
 ;;;
 ;;; `allocated` measures what a thunk allocates, for suites that hold a
 ;;; library to an allocation, and `keep!` keeps what a measured thunk
@@ -71,14 +70,12 @@
   ;; middle-counted : (-> Any) -> Nat
   ;; The middle of three calls' counts, made 100 frames apart: one count off
   ;; the other two, either way, is passed over.  A call from one depth paid
-  ;; for a new stack segment, 65,968 B, on the server's v0.4.0, where the
-  ;; others counted 448.  And a call through the server's fake shell counts
-  ;; 64 B more or less with what ran before it: a taker's first write's done
-  ;; counted 512 B and its next two 576, and in some layouts of the binding
-  ;; suite all three of the binding's counted 576.  The least of the three
-  ;; then read 64 B in 4 of 7 runs on v0.4.1; the middle, in none of 12, six
-  ;; on each server.  Two counts off the same way defeat it (decision
-  ;; 0007's amendment).
+  ;; for a new stack segment, 65,968 B, where the others counted 448.  And a
+  ;; call through the server's fake shell counts 64 B more or less with what
+  ;; ran before it: a taker's first write's done counted 512 B and its next
+  ;; two 576, and in some layouts of the binding suite all three of the
+  ;; binding's counted 576.  The least of the three then read 64 B in 4 of 7
+  ;; runs; the middle, in none of 12.  Two counts off the same way defeat it.
   (define (middle-counted thunk)
     (let* ((a (counted-at 0 thunk)) (b (counted-at 100 thunk)) (c (counted-at 200 thunk)))
       (max (min a b) (min (max a b) c))))

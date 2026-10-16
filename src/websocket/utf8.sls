@@ -15,8 +15,8 @@
 ;;; must fall in.  It is unpacked with fixnum shifts, and a later byte's
 ;;; next state is one of two constants: Chez 10.4.1 calls the generic
 ;;; bitwise-arithmetic-shift procedures out of line, which more than doubled
-;;; the cost of each byte past a character's first (measured in M1.3).  A
-;;; feed allocates nothing.
+;;; the cost of each byte past a character's first.  A feed allocates
+;;; nothing.
 (library (websocket utf8)
   (export utf8-start utf8-feed utf8-whole?)
   (import (rnrs))
