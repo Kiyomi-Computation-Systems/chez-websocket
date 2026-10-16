@@ -31,6 +31,14 @@ All notable changes to chez-websocket are recorded here. The format follows
     holds what the server does: the send goes on once the client reads, the end read
     after it, or the write timeout ends it.
   - Every other check passes as on v0.6.0, and a connection still costs about 5.3 KB.
+- **The user docs are Markdown**, ready to build into a static site, and laid out as
+  chez-libuv's are. `docs/README.md` is their home. `docs/handlers.md` and
+  `docs/configuration.md` replace the `.org` pages, and new pages cover installing,
+  how it works, every export (`docs/reference.md`), testing and performance. The docs
+  suite reads the Markdown: it runs each Scheme block, named on its fence (`scheme
+  name=echo`), and checks the reference's entries against what `(websocket)` exports,
+  each link, each `make` target, and that the measured pages give only numbers the
+  repository records.
 
 ## [0.1.0] - 2026-10-11
 

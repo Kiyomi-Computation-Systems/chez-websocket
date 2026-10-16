@@ -1,0 +1,148 @@
+# Handlers
+
+A WebSocket starts as an HTTP request. Your chez-http-server handler takes it
+by answering what `websocket-accept` returns. That checks the request is a
+WebSocket handshake, and then runs your procedure with the connection.
+
+```scheme name=echo
+(import (rnrs) (http-server) (websocket))
+
+(serve
+ (lambda (request)
+   (if (string=? (request-path request) "/echo")
+       (websocket-accept request
+         (lambda (ws)
+           (let loop ()
+             (websocket-send! ws (websocket-receive ws))
+             (loop))))
+       (make-response 404 #f '() (string->utf8 "not found\n")))))
+```
+
+This sends every message to `/echo` back; anything else gets `404`. The loop
+ends when the client goes: `websocket-receive` raises `&websocket-closed`, and
+letting it out of your procedure ends the connection quietly.
+
+Your procedure runs on a coroutine of its own, so it can wait without holding
+up anyone else.
+
+## The handshake
+
+`websocket-accept` refuses a request that is not a good handshake, and your
+procedure never runs:
+
+| What is wrong                                     | Answer                                  |
+|:--------------------------------------------------|:----------------------------------------|
+| the method is not `GET`                           | `400`                                   |
+| no `Upgrade: websocket`                           | `400`                                   |
+| no `Connection: upgrade`                          | `400`                                   |
+| `Sec-WebSocket-Version` is not 13                 | `400`, with `Sec-WebSocket-Version: 13` |
+| `Sec-WebSocket-Key` is not 16 bytes in base64     | `400`                                   |
+| a browser's page from another site (its `Origin`) | `403`                                   |
+
+Otherwise the server answers `101` and your procedure runs.
+
+## Reading and writing
+
+| Call                               | What it does                                                           |
+|:-----------------------------------|:-----------------------------------------------------------------------|
+| `(websocket-receive ws)`           | waits for the next message: a string for text, a bytevector for binary |
+| `(websocket-send! ws m)`           | sends a string as text, a bytevector as binary                         |
+| `(websocket-close! ws)`            | starts closing, with code `1000`                                       |
+| `(websocket-close! ws 4000 "bye")` | starts closing with your code and reason                               |
+| `(websocket-subprotocol ws)`       | the subprotocol chosen, or `#f`                                        |
+
+- A message arrives whole, however the client split it up.
+- A message over 1 MiB closes the connection with `1009`
+  ([Configuration](configuration.md)).
+- Text is checked as UTF-8 as it comes. Bad text closes with `1007`.
+- One receive at a time: a second while one waits is refused. Any number of
+  coroutines may send.
+- A send waits while the client is behind, more than 256 KiB unsent.
+- Pings are answered for you, and a quiet client is pinged for you.
+- A close code is `1000` to `1003`, `1007` to `1011`, or `3000` to `4999`, and
+  a reason at most 123 bytes of UTF-8.
+
+## Closing
+
+| When                                        | The server sends                     |
+|:--------------------------------------------|:-------------------------------------|
+| your procedure returns                      | a close, `1000`                      |
+| your procedure lets `&websocket-closed` out | nothing more: it has closed already  |
+| your procedure raises anything else         | a close, `1011`; the error is logged |
+| the server shuts down                       | a close, `1001` "going away"         |
+
+Once the connection has closed, `websocket-send!` raises `&websocket-closed`,
+and so does `websocket-receive`, after any messages still waiting. The
+condition says how it closed:
+
+| Call                          | Gives                                                                    |
+|:------------------------------|:-------------------------------------------------------------------------|
+| `(websocket-closed-code e)`   | the client's close code; `1005` if it gave none; `1006` if no close came |
+| `(websocket-closed-reason e)` | the client's reason, or `""`                                             |
+| `(websocket-closed-clean? e)` | whether a close went each way                                            |
+
+```scheme name=closed-code
+(guard (e ((websocket-closed? e)
+           (display (websocket-closed-code e))))
+  (let loop ()
+    (websocket-send! ws (websocket-receive ws))
+    (loop)))
+```
+
+## Subprotocols and origins
+
+Settings are the third argument. Make them once, as your program starts: a
+bad name stops it there.
+
+```scheme name=chat-settings
+(define settings
+  (make-handshake-settings '("chat.v2" "chat.v1")
+                           '(same-host "https://app.example.com")))
+
+(websocket-accept request chat settings)
+```
+
+- **Subprotocols.** The first in your list that the client offered is chosen.
+  If none is, the handshake still succeeds, with none.
+- **Origins.** A browser says which page opened the WebSocket. `same-host`
+  accepts a page from the request's own host, and is the default. A string
+  accepts that origin. `'any`, in place of the list, accepts every one. A
+  request with no `Origin` is not a browser's, and is always accepted.
+
+## Limits for one handler
+
+Limits come from the environment ([Configuration](configuration.md)). To give
+one handler its own, pass them as the fourth argument, after its settings:
+`(make-handshake-settings '())` are the defaults. Make them once too, as your
+program starts. Here, times are in milliseconds.
+
+```scheme name=upload-limits
+(define upload-settings (make-handshake-settings '()))
+
+(define upload-limits
+  (websocket-limits-with environment-websocket-limits
+                         '((max-message-bytes . 16777216))))
+
+(websocket-accept request upload upload-settings upload-limits)
+```
+
+The fields are `max-message-bytes`, `max-queue`, `ping-interval-ms`,
+`ping-timeout-ms`, `close-timeout-ms`, `write-high-water`, `write-low-water`
+and `write-timeout-ms`.
+
+## More examples
+
+[examples](../examples) holds whole servers, each with a page at `/` to try
+it from a browser:
+
+- [chat.sps](../examples/chat.sps): a chat room. A procedure may send to any
+  connection's WebSocket, not just its own, so each message goes to every
+  other client. A client that has just closed raises `&websocket-closed` at
+  the sender, which passes it over.
+- [clock.sps](../examples/clock.sps): the server speaks first, a tick each
+  second, and still reads what the client sends between ticks.
+
+## What it does not do
+
+No compression: a client that asks for it gets none. No client side: this
+library is for servers.
