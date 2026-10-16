@@ -2480,3 +2480,20 @@ MERGED to main on 2026-10-16, on the owner's "Run the closing ritual for PR 83, 
 `make test` green on 0c03760, whose tree is cb122ea's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: before going public, chez-http-server's own visibility, and whether `.plans/`, `.superpowers/` and AGENTS.md's pointers to them ship. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
+
+MERGED to main on 2026-10-16, on the owner's "Run the closing ritual for PR 84, merging past CI if billing still blocks it": **README in chez-http-server's shape; design records out of archives**, #84. The owner asked for README.org to come closer to chez-http-server's format, though not to copy it, with the copyright and license links at the bottom. They also asked that `.plans/` and `.superpowers/` stay in the repository as design artifacts but be left out of releases.
+- **What it changed.**
+  - README.org is now "Chez WebSocket". It has Features as bold-lead bullets, a Quick start (the `/echo` server, run with `make run`), and Build and test with its prerequisites. Then come short Autobahn, Configuration and Handlers sections pointing into `docs/`, and License: © Kiyomi Computation Systems LLC, linked to kiyomicomputation.systems, and BSD 3-Clause, linked to LICENSE.
+  - `.gitattributes` marks `/.plans` and `/.superpowers` `export-ignore`.
+- **#84**, at bee5618, was squashed as 6baa7b4 (tree 61c9e2f, the tested head's; parent 40519fb), with `--match-head-commit` on the full SHA.
+- **CI did not run.** The PR's run, 38960520431 (bee5618), and main's on the squash, 38960754149, each ended with `linux` and `autobahn` not started (the payments annotation). `make test` on bee5618 stood in, and it merged past the red check on the owner's word.
+- **Branches.** `docs/readme-format` was deleted, local and remote. The main checkout is fast-forwarded to 6baa7b4. No PR is open.
+
+**Reflect.**
+- **A README's example is run, not read.** The docs suite holds `docs/`, not README.org. So the Quick start's program was extracted from the README itself and run with `make run`, and a raw-socket client got its `101` and its echo. The `websocat` line it suggests was not run, since no websocat is installed here.
+- **`export-ignore` is read from the tree being archived.** Before the commit, only `git archive --worktree-attributes` could show the rule working. After the merge, a plain `git archive` of main lists no file under either directory.
+- **`git check-attr` on a file inside an ignored directory says `unspecified`.** `git archive` checks the directory itself and skips it whole, which `git check-attr export-ignore .plans` reports as `set`. Check the directory, not a file in it.
+
+`make test` green on bee5618, whose tree is 6baa7b4's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: before going public, chez-http-server's own visibility. AGENTS.md still ships in archives, and the echo image's Docker context (`.dockerignore`) still takes `.plans/` and `.superpowers/`; neither was asked. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
