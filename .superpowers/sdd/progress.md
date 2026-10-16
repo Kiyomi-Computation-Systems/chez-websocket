@@ -2451,3 +2451,18 @@ MERGED to main on 2026-10-16, on the owner's "Do closing ritual": **The server's
 `make test` green on main (04a68ba, Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: when CI is back, main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release pinned here when one comes.
+
+MERGED to main on 2026-10-16, on the owner's "do closing ritual": **Plan and timeline references dropped for public release**, #82. No slice entry came before it: the owner asked in one session for a sweep of the source, README.org and the reference docs, so that comments hold type and developer information alone.
+- **What it changed.** Comments, test descriptions, README.org and CHANGELOG.md lost every pointer into `.plans/` and `.superpowers/`: milestones and steps, reviews, decision numbers and their amendments, "by form" answers, design sections, probe labels (R-TERM, R-TWO), research records, `global-constraints`, and dates. Where a pointer carried a rule, a reason or a number, that stays, stated as the current fact. README.org's Status became What it does, without its three `.plans` links. CHANGELOG.md kept its release and measurement dates and versions. RFC citations, type signatures and peer comparisons are unchanged. Outside comments, the only changed lines are test descriptions, docs prose and one Makefile error message.
+- **#82**, at e999f48, was squashed as c2012ca (tree 3183d0c, the tested head's; parent 1e3bac3).
+- **CI did not run.** The PR's run, 38955879544 (e999f48), and main's on the squash, 38958882255, each ended with `linux` and `autobahn` not started (the payments annotation). `make test` on e999f48 stood in. It merged past the red check on the owner's word ("Merge anyway").
+- **Branches.** `docs/public-release-comments` was deleted, local and remote. The main checkout is fast-forwarded to c2012ca. No PR is open.
+
+**Reflect.**
+- **A citation in a comment carries a rule and its provenance; a public comment keeps only the rule.** Most "(0006)" and "(M4.3's review)" were provenance alone and dropped clean. The ones that carried history needed rewriting as the current fact: `park!`'s v0.4.0-to-v0.4.1 story, verdicts.txt's v0.4.1 resets, and the socket suite's heap ranges. Some of those numbers now stand without the server version they were measured on.
+- **File-scoped sweeps miss a cross-file label; a final union search catches it.** Three agents swept disjoint files in parallel, each with its own pattern. `(global-constraints)` in ws-testing.sls fell outside every pattern and was caught only by the last repo-wide search over the union of patterns.
+- **A wide prose change is checked by what changed outside comments.** Listing the diff's changed lines that are not comments showed only test descriptions, docs prose and one Makefile message, so no code moved.
+
+`make test` green on e999f48, whose tree is c2012ca's (Darwin arm64): fifteen suites, 398 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: before going public, the owner decides on what is still private. README.org's Building and `.github/actions/setup/action.yml` both say the pins are private, all but chez-srfi. `.plans/`, `.superpowers/` and AGENTS.md's pointers to them are tracked. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
