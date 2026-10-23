@@ -4,3 +4,6 @@
 # Chez compiled objects / whole-program optimization outputs
 *.so
 *.wpo
+
+# chez-cmark-gfm, when `akku install` fetched it for the docs site
+/.akku/

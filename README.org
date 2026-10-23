@@ -57,7 +57,8 @@ in any release before 1.0. [[file:CHANGELOG.md][CHANGELOG.md]] lists what each r
 Save it as ~echo.sps~, start it with ~make run PROGRAM=echo.sps~, and connect
 a client such as ~websocat ws://127.0.0.1:8080/echo~: each line you send comes
 back. How a handler reads, writes and closes is in [[file:docs/handlers.md][docs/handlers.md]], and
-the rest of the documentation starts at [[file:docs/README.md][docs/README.md]].
+the rest of the documentation starts at [[file:docs/README.md][docs/README.md]], also published at
+[[https://kiyomi-computation-systems.github.io/chez-websocket/][kiyomi-computation-systems.github.io/chez-websocket]].
 
 ** Build and test
 
@@ -86,6 +87,11 @@ Clone without ~--recursive~: ~make submodules~, which ~make build~ runs, clones
 what the build needs and not the server's own test clients. ~make help~ lists
 every target; ~make check-pins~ verifies the server sits at its pin, and each
 pin it carries where the server records it.
+
+~make site~ renders ~docs/~ into ~build/site/~, the pages GitHub Pages
+publishes for each release. It needs the system *cmark-gfm* library (~brew
+install cmark-gfm~ or ~apt install cmark-gfm~); ~make check-site~ fails on a
+broken link or anchor.
 
 ** Autobahn
 

@@ -12,6 +12,10 @@ All notable changes to chez-websocket are recorded here. The format follows
   tick each second while it still reads. Each runs with
   `make run PROGRAM=examples/<name>.sps` and serves a page at `/` to try it from a
   browser, and `tests/test-examples.sps` plays each one as a client would.
+- **A docs site.** `make site` renders `docs/` through chez-cmark-gfm, pinned by
+  `Akku.lock`, into `build/site/`, and `make check-site` fails on a page missing from
+  the nav, a broken link or anchor, or a heading GitHub anchors differently. CI runs
+  it on every push; the Pages workflow publishes the site on a release tag or by hand.
 
 ### Changed
 
