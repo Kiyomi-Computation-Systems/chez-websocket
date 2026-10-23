@@ -37,8 +37,6 @@ pinned at a release tag, v0.7.0. It carries its own pins: chez-libuv,
 chez-httparse, uriparse, and chez-srfi for the tests. You don't install any
 of them yourself: `make build` clones what the build needs.
 
-chez-http-server is private for now; the pins it carries are public.
-
 To check every checkout sits at its pin:
 
 ```sh

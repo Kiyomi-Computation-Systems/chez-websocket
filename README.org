@@ -72,8 +72,7 @@ Prerequisites:
 
 The one dependency, chez-http-server, is a git submodule under ~vendor/~,
 pinned at a release tag. It carries its own pins: chez-libuv, chez-httparse
-(with byte-machine), uriparse, and chez-srfi for the tests. chez-http-server
-is private; the pins it carries are public.
+(with byte-machine), uriparse, and chez-srfi for the tests.
 
 #+begin_src sh
 git clone https://github.com/Kiyomi-Computation-Systems/chez-websocket.git
