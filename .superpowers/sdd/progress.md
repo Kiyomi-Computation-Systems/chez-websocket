@@ -2579,3 +2579,22 @@ MERGED to main on 2026-10-23, on the owner's "Yes, run the closing ritual on PR 
 - **Pages ran before the reflect, not after,** so this entry records the deployment rather than promising it.
 
 NEXT: the owner can delete the now-unused `SUBMODULES_READ_TOKEN` secret. `probe/r-term`'s run, to confirm R-TERM's cause on CI, can go now that CI runs. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. The next `v*` tag republishes the site with links pinned to it.
+
+MERGED to main on 2026-10-24, on the owner's "do closing ritual": **a security policy** (#90) and **the v0.2.0 release** (#91). The owner had asked to "protect main, turn on private vulnerability reporting with a SECURITY.md, tidy probe/r-term and the wiki, then prepare v0.2.0 in a PR".
+- **Settings, on the owner's word, 2026-10-23.** Branch protection on main: pull requests required with no approvals, the `linux` and `autobahn` checks required (not strict), and no force pushes or deletion. Admins are not enforced, so reflects like this one still go straight to main, as a bypass. Private vulnerability reporting is on, and the wiki is off. Neither sibling repository protects its main.
+- **#90** adds SECURITY.md after chez-libuv's. It covers the latest release only, takes reports through Security → Report a vulnerability, names what a client's bytes reach, and sends problems outside the upgrade to chez-http-server. #90, at 072fa26, was squashed as 5207eca (parent 1ca526e). Its run 40048794378 was green, and so was main's on 5207eca, 40091242369.
+- **#91** moves Unreleased to `[0.2.0] - 2026-10-24`, which was dated 2026-10-23 until the day it merged. It also bumps Akku.manifest to 0.2.0, with the owner's synopsis "WebSocket (RFC 6455) support for chez-http-server R6RS". `akku lock` for the edited manifest writes the committed Akku.lock unchanged. `git diff v0.1.0 -- src/` changes no line outside a comment, so the release notes say the code is unchanged but for its comments. #91, at 21c903a, was squashed as 7639940 (parent 5207eca). Its head's run, 40091279192, was green, the first merge to wait on the new required checks. main's tree is #91's head plus SECURITY.md alone.
+- **R-TERM's cause, confirmed on CI.** The probe's three steps ran on today's main as a throwaway branch, `probe/r-term-ci`, run 40048850479.
+  - On the runner, `io_uring_disabled` is 0. The echo server has a `scheme` thread and an `iou-sqp-…` thread, and after SIGTERM `scheme` is `Z` while `iou-sqp` is still `R`, then the process exits 0. That is the zombie run.sh waits out.
+  - The probe's term scenario had drifted: today's fake docker stops the server and needs `FAKE_LINGERS` and the fake ps to resume it, and the probe sets neither. Every try waited run.sh's 30 s, and the job was cancelled at its 25 minutes. The real suite sets both, and passes in every CI run.
+  - `probe/r-term` and `probe/r-term-ci` are deleted, local and remote.
+- **Branches.** `docs/security-policy` and `release/v0.2.0` were deleted, local and remote. The main checkout is fast-forwarded to 7639940. No PR is open.
+
+**Reflect.**
+- **Required checks turn a last-minute edit into a wait.** #91's date change made a new head, and the merge waited on its CI before it could land. A release PR's date is best set when its merge is ready, or left to the merge itself.
+- **A stale probe answers the question it was built for, and little else.** Its first step, which reads only the kernel and the server, held up. Its second step called fakes that had changed since, so its failure said nothing about the library.
+- **A file someone else edited is asked about, not committed.** An Akku.manifest change appeared on the release branch's checkout. It went into #91 only on the owner's word, and only after `akku lock` showed the lock unchanged.
+
+`make test` green on 21c903a (Darwin arm64): sixteen suites, 417 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
+
+NEXT: tag 7639940 `v0.2.0` and push it, on the owner's word, which republishes the docs site with links pinned to v0.2.0. Then Akku, once chez-http-server is in its index. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`.
