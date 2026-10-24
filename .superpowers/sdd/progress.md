@@ -2608,3 +2608,13 @@ RELEASED v0.2.0 on 2026-10-24, on the owner's "Tag 7639940 as v0.2.0, push the t
 - **Switching Pages on makes an environment that only the default branch may deploy.** A workflow that deploys on tags needs a tag policy too. The manual run from `main` had worked, so nothing failed until the first release.
 
 NEXT: Akku, once chez-http-server is in its index. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-24, on the owner's "Run the closing ritual for PR 92 once its CI is green": **AGENTS.md out of release archives and Akku's scan**, #92. The owner asked to use .gitattributes and/or the Akku files to keep AGENTS.md and the plan files out of archives.
+- **What it changed.** `.gitattributes` marks `/AGENTS.md` `export-ignore` beside `/.plans` and `/.superpowers`, and `.akkuignore` names `AGENTS.md`. Akku's repository scanner (akku/lib/repo-scanner.scm) skips every dot-named entry and every name `.akkuignore` lists, files and directories alike, with no wildcards. So `.plans` and `.superpowers` were never in its scan.
+- **#92**, at 0f66a6e, was squashed as f2cb39a (tree 5934a56, the tested head's; parent e090370). Its run 40092831977 was green. A plain `git archive` of main now lists no file under `AGENTS.md`, `.plans/` or `.superpowers/`.
+- **Branches.** `chore/archive-dev-files` was deleted, local and remote. The main checkout is fast-forwarded to f2cb39a. No PR is open.
+
+**Reflect.**
+- **An archive's attributes come from the tree it is made from.** v0.2.0's tarball keeps AGENTS.md, and only a release from f2cb39a on leaves it out. Rules like these belong in place before the first public tag.
+
+NEXT: Akku, once chez-http-server is in its index. The echo image's Docker context still takes `.plans/` and `.superpowers/`; it is a build context, not a release archive.
