@@ -2598,3 +2598,13 @@ MERGED to main on 2026-10-24, on the owner's "do closing ritual": **a security p
 `make test` green on 21c903a (Darwin arm64): sixteen suites, 417 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: tag 7639940 `v0.2.0` and push it, on the owner's word, which republishes the docs site with links pinned to v0.2.0. Then Akku, once chez-http-server is in its index. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+RELEASED v0.2.0 on 2026-10-24, on the owner's "Tag 7639940 as v0.2.0, push the tag, and check the Pages run republishes the site".
+- **The tag.** `v0.2.0` is an annotated tag on 7639940, signed as v0.1.0 is (`tag.gpgSign`; `git tag -v` reports a good signature). Its message follows v0.1.0's.
+- **The first deploy was refused.** The tag's Pages run, 40092141094, built, but its deploy failed: "Tag "v0.2.0" is not allowed to deploy to github-pages due to environment protection rules." Switching Pages on had created the `github-pages` environment allowing the `main` branch alone. chez-libuv's allows `main` and the tag pattern `v*`, and the same `tag v*` policy was added here. The re-run of the failed job (attempt 2) deployed.
+- **Published.** The site's links out to the repository (`docs`, `examples`, `tests/autobahn/echo.sps`, `tests/autobahn/verdicts.txt`) now name `blob/v0.2.0/`, and each answers 200 on GitHub.
+
+**Reflect.**
+- **Switching Pages on makes an environment that only the default branch may deploy.** A workflow that deploys on tags needs a tag policy too. The manual run from `main` had worked, so nothing failed until the first release.
+
+NEXT: Akku, once chez-http-server is in its index. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`.
