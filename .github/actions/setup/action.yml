@@ -5,9 +5,6 @@ description: >-
   before its own steps. The repository must be checked out first.
 
 inputs:
-  token:
-    description: The submodule read token, the secret SUBMODULES_READ_TOKEN.
-    required: true
   chez-cache-salt:
     description: Appended to the Chez cache key; empty but for a run by hand that proves the miss path.
     required: false
@@ -16,21 +13,6 @@ inputs:
 runs:
   using: composite
   steps:
-    # chez-http-server is private, and the job's own token reads only this
-    # repository. `make submodules` reads it with this secret, which the
-    # owner adds; without it, every run stops here, by name. The pins it
-    # carries (chez-libuv, chez-httparse, its nested byte-machine, uriparse,
-    # chez-srfi) are public.
-    - name: Require the submodule read token
-      shell: bash
-      env:
-        SUBMODULES_READ_TOKEN: ${{ inputs.token }}
-      run: |
-        if [ -z "${SUBMODULES_READ_TOKEN}" ]; then
-          echo "::error::The Actions secret SUBMODULES_READ_TOKEN is not set: a token with Contents read-only on Kiyomi-Computation-Systems' chez-http-server."
-          exit 1
-        fi
-
     # libuv for the shim (pkg-config path); the X11/ncurses/uuid headers are
     # what Chez's from-source build needs.
     - name: Install toolchain
@@ -115,20 +97,13 @@ runs:
         echo "libuv: $(pkg-config --modversion libuv)"
 
     # Clone the server and the pins it carries, then verify each is where
-    # its parent records before building anything. The rewrite sends only
-    # the org's URLs through the read token, which reads chez-http-server
-    # and, as any token does, the org's public pins. It lives in this step's
-    # environment, not a config file: git hands GIT_CONFIG_* to every clone,
-    # a nested one included, and a clone never reads the superproject's
-    # .git/config. Later steps run `make submodules` again (deps needs it)
-    # without the token; every gitlink is at its pin by then, so git fetches
-    # nothing.
+    # its parent records before building anything. Every one is public, so
+    # no token is needed, and a pull request from a fork, which gets no
+    # secrets, builds as one from this repository does. Later steps run
+    # `make submodules` again (deps needs it); every gitlink is at its pin
+    # by then, so git fetches nothing.
     - name: Init submodules
       shell: bash
-      env:
-        GIT_CONFIG_COUNT: "1"
-        GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ inputs.token }}@github.com/Kiyomi-Computation-Systems/.insteadOf"
-        GIT_CONFIG_VALUE_0: "https://github.com/Kiyomi-Computation-Systems/"
       run: make submodules
 
     - name: Check dependency pins

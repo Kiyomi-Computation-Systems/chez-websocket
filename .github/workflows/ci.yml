@@ -46,7 +46,6 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          token: ${{ secrets.SUBMODULES_READ_TOKEN }}
           chez-cache-salt: ${{ inputs.chez-cache-salt }}
 
       - name: Test
@@ -66,7 +65,6 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          token: ${{ secrets.SUBMODULES_READ_TOKEN }}
           chez-cache-salt: ${{ inputs.chez-cache-salt }}
 
       # The fuzzing client's 301 cases against tests/autobahn/echo.sps, gated
