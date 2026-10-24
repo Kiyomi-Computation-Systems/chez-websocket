@@ -6,6 +6,11 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-24
+
+Examples and a published docs site, on chez-http-server v0.7.0. The library's code is
+unchanged from 0.1.0 but for its comments.
+
 ### Added
 
 - **Examples**, in `examples/`: an echo server, a chat room, and a clock that sends a
@@ -15,7 +20,8 @@ All notable changes to chez-websocket are recorded here. The format follows
 - **A docs site.** `make site` renders `docs/` through chez-cmark-gfm, pinned by
   `Akku.lock`, into `build/site/`, and `make check-site` fails on a page missing from
   the nav, a broken link or anchor, or a heading GitHub anchors differently. CI runs
-  it on every push; the Pages workflow publishes the site on a release tag or by hand.
+  it on every push; the Pages workflow publishes the site on a release tag or by hand,
+  at <https://kiyomi-computation-systems.github.io/chez-websocket/>.
 
 ### Changed
 
@@ -132,5 +138,6 @@ against chez-http-server v0.5.0.
   | the same, after 10 echoes | 5,353 to 5,477 B |
   | the server's own connection, idle after a GET, for scale | 1,900 to 2,055 B |
 
-[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/releases/tag/v0.1.0
