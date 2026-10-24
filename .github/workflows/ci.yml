@@ -42,7 +42,7 @@ jobs:
     steps:
       # This repository alone, with the job's own token; the setup action's
       # `make submodules` clones the submodules.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
         with:
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup
         with:
@@ -83,7 +83,7 @@ jobs:
       # A verdict that moved is read from the run's own reports.
       - name: Keep the run's reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: autobahn-reports
           path: build/autobahn
