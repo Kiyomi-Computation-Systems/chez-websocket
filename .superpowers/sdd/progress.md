@@ -2537,3 +2537,26 @@ MERGED to main on 2026-10-16, on the owner's "Run the closing ritual on PR #86":
 `make test` green on e71e3c8, whose tree is f066010's (Darwin arm64): sixteen suites, 417 expected passes, every pin ok, the server at v0.7.0 (a9f0ef5).
 
 NEXT: building the site itself (chez-libuv's `build-site.sps` and `site/`, over chez-cmark-gfm), when the owner wants it; the docs are ready for it. Before going public, chez-http-server's own visibility; AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. When CI is back: main's latest run, and `probe/r-term`'s run to confirm R-TERM's cause on CI. The next server release is pinned here when one comes.
+
+MERGED to main on 2026-10-23, on the owner's "Run the closing ritual for PR 87, then PR 88, then run the Pages workflow on main to publish the site": **CI without a read token** (#87) and **the docs site, published** (#88). The owner had made this repository public and fixed Actions billing. chez-http-server is public too: an unauthenticated request answers 200.
+- **#87** removed the `SUBMODULES_READ_TOKEN` requirement: the setup action's `token` input, the step that required it, and the `insteadOf` rewrite. It also dropped the "private" notes from README.org and docs/installing.md. A fork's pull request, which GitHub gives no secrets, would otherwise have failed at the token check. A fresh clone ran `make submodules` with every git credential source off (no system or global config, no askpass) and got every pin. #87, at d13f441, was squashed as ca36525 (tree 4ce7e81, the tested head's; parent 17de7ff).
+- **#88** ported chez-http-server's generator: `build-site.sps`, `site/*.sls`, `tests/site-unit.sps`, `tests/site-render-unit.sps`, `tests/site-check.sps`, `scripts/fetch-akku-lock` and its offline test.
+  - `Akku.lock` is `akku lock`'s output for a development-only `Akku.manifest`. It pins chez-cmark-gfm 2.0.0 by sha256 `bb647e07…8305159`, the sum chez-http-server's lock records.
+  - New make targets: `site-deps`, `site`, `check-site` and `check-site-deps`. CI's `linux` job runs the two checks, and the setup action installs apt's `cmark-gfm`.
+  - `pages.yml` deploys on a `v*` tag or by hand, reading the Chez floor from ci.yml's env as the Makefile does.
+  - Pages was switched on with `build_type=workflow` through the API.
+  - #88, at 66791d0, was squashed as 9578778 (parent ca36525). Its tree, 786ec29, is the one tested locally: #88's branch merged onto ca36525 before the squash, with `make test` (sixteen suites, 417 expected passes), `make check-site` and `make check-help` green.
+- **CI is back.** Main's dispatched run on 17de7ff, 40037321498, was green, the first since the billing failures. #87's PR run 40037730476 and #88's 40038872793 were green, and #88's run included the new Docs site step. Main's push run on 9578778, 40043193594, was green; the one on ca36525 was cancelled by the concurrency group.
+- **Published.** The Pages run 40043210848 on 9578778 built and deployed. https://kiyomi-computation-systems.github.io/chez-websocket/ answers 200 with the wordmark, and so do `handlers.html` and `style.css`.
+- **Branches.** `ci/no-read-token` and `docs/pages` were deleted, local and remote. The main checkout is fast-forwarded to 9578778. No PR is open.
+
+**Reflect.**
+- **A ported test can hold the source project's data, not its code.** site-render-unit's prev/next check builds its fixture from the real nav order. Ported unchanged, it failed for chez-http-server's page names, not for the generator. Pointing every test at this project's names first, and watching the five plus one fail, showed exactly what each library had to change.
+- **The second of two dependent PRs is tested merged onto the first.** #88 calls the setup action without a token, which only works after #87. Testing `docs/pages` merged onto the squashed #87 before squashing #88 tested the tree main then got, 786ec29.
+- **A value written once stays written once in a new workflow.** pages.yml reads the Chez floor from ci.yml instead of restating `10.4.1`, as the Makefile already does for the echo image.
+
+NEXT: the owner can delete the now-unused `SUBMODULES_READ_TOKEN` secret. The Pages run warned on two things:
+- `actions/checkout@v4` and `actions/cache/restore@v4` run on the deprecated Node 20; chez-libuv is on `checkout@v7`.
+- The deploy job's `ubuntu-latest` moves to Ubuntu 26.
+
+`probe/r-term`'s run, to confirm R-TERM's cause on CI, can go now that CI runs. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. The next `v*` tag republishes the site with links pinned to it.
