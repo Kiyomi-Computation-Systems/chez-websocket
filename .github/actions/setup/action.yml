@@ -40,7 +40,7 @@ runs:
     # must miss, not merge).
     - name: Restore cached Chez Scheme
       id: chez-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ~/.local/chez
         key: chez-${{ runner.os }}-${{ steps.os.outputs.release }}-${{ runner.arch }}-${{ env.CHEZ_FLOOR_VERSION }}-threads${{ inputs.chez-cache-salt }}
@@ -60,7 +60,7 @@ runs:
     # never publishes a half-installed prefix under the key.
     - name: Save built Chez Scheme
       if: steps.chez-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ~/.local/chez
         key: ${{ steps.chez-cache.outputs.cache-primary-key }}
