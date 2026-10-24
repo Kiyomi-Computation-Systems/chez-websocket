@@ -6,7 +6,7 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-10-23
+## [0.2.0] - 2026-10-24
 
 Examples and a published docs site, on chez-http-server v0.7.0. The library's code is
 unchanged from 0.1.0 but for its comments.
