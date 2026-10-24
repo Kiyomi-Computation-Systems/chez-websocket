@@ -2632,3 +2632,17 @@ MERGED to main on 2026-10-24, on the owner's "Run the closing ritual for PR 93":
 `make test` green on a17e919 (Darwin arm64), and `make check-help` and `make check-site` too.
 
 NEXT: hold CONTRIBUTING.md and the templates to the Makefile's targets and the checkout's paths, as the docs suite holds docs/. Akku, once chez-http-server is in its index. The echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-24, on the owner's "all green do the roitual": **the contributor files held to the checkout**, #94. The owner had asked to "hold CONTRIBUTING.md and the GitHub templates to the Makefile's targets and the checkout's paths, as test-docs holds docs/, test first, in a test: PR".
+- **What it changed.** `tests/test-docs.sps` reads CONTRIBUTING.md, the pull request template and each issue template (found by `directory-list`, so a new one is covered). Every make target they run, in a sh block or a `code` span, must be one the Makefile documents. Every file they name must be in the checkout: by a link, by a `code` span written as a path, or by a word of their prose that is a file's name. A provenance guard fails the suite (status 3) when the scan finds nothing. CONTRIBUTING.md's line on the docs suite says so.
+- **Watched failing.** Six defects were planted at once: a target in a `code` span and one in the sh block, a link, a template's path, and a prose file name in each issue template. Both new tests listed all six. Stubbing `named-files`, then `run-targets`, to read nothing tripped the guard each time.
+- **#94**, at f5881fc, was squashed as a7d57f4 (tree a46abe2, the tested head's; parent 44e53b5). Its run 40097102362 was green. The docs suite has 19 passes, up from 17.
+- **Branches.** `test/contributing` was deleted, local and remote. The main checkout is fast-forwarded to a7d57f4. No PR is open.
+
+**Reflect.**
+- **The planted defects tested the checker too.** The first red run also listed `.sls`, a bare extension in "R6RS `.sls` files", as a missing file. A scan run only on good input would have shown no such misreading. A file name now needs a name before its extension.
+- **Reading a path out of prose is a matter of what it refuses.** A path here is path characters alone, with a `/` or a file's extension. That refuses blanks, URLs, `<placeholder>`s and `fix:`. Prose words count only when they are a file's name, so "and/or" can't trip it.
+
+`make test` green on f5881fc (Darwin arm64), with `make check-help` and `make check-site`.
+
+NEXT: Akku, once chez-http-server is in its index. CONTRIBUTING.md links AGENTS.md, which archives leave out, so a release tarball's copy has that one dead link (chez-http-server's has the same). The echo image's Docker context still takes `.plans/` and `.superpowers/`.
