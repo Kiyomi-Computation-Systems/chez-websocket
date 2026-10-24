@@ -81,7 +81,7 @@ AUTOBAHN_ECHO ?= $(if $(filter Linux,$(shell uname -s)),host,container)
 AUTOBAHN_ECHO_IMAGE := chez-websocket-autobahn-echo:local
 CHEZ_FLOOR_VERSION := $(shell sed -n 's/^  CHEZ_FLOOR_VERSION: "\(.*\)"$$/\1/p' .github/workflows/ci.yml)
 
-.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn echo-image docker-smoke clean
+.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn echo-image docker-smoke site-deps site check-site check-site-deps clean
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -196,6 +196,48 @@ echo-image: submodules ## Build the Autobahn lane's echo server image, tests/aut
 
 docker-smoke: echo-image ## Start the echo image, wait until its HEALTHCHECK says ready, and check it stops cleanly
 	@ECHO_IMAGE=$(AUTOBAHN_ECHO_IMAGE) sh tests/autobahn/docker-smoke.sh
+
+# --- the docs site -----------------------------------------------------------
+# docs/*.md rendered to build/site/ through chez-cmark-gfm, as chez-http-server
+# renders its own.  Akku.lock pins chez-cmark-gfm for the site alone: nothing
+# under src/ and no tests/test-*.sps imports it, so `make test` needs none of
+# this.  The site needs the system cmark-gfm library (`cmark-gfm` from Homebrew
+# or apt), not libuv.
+#
+# chez-cmark-gfm comes from an `akku install` tree when there is one, and
+# otherwise from the archive Akku.lock pins, downloaded and checked against the
+# lock's sha256 by scripts/fetch-akku-lock.  Run `make site-deps` once where
+# there is a network; after that it needs none.  Akku.lock is `akku lock`'s
+# output for Akku.manifest, where chez-cmark-gfm is a development dependency.
+SITE_CMARK   := $(if $(wildcard .akku/lib/cmark/gfm.sls),.akku/lib,$(BUILD_DIR)/akku/chez-cmark-gfm/src)
+SITE_LIBDIRS := .:$(SITE_CMARK)
+SITE_REF     ?= main
+
+site-deps: ## Get chez-cmark-gfm as Akku.lock pins it: an `akku install` tree, else the locked archive
+	@if [ -f .akku/lib/cmark/gfm.sls ]; then \
+	  echo "site-deps: using .akku/lib (akku install)"; \
+	else \
+	  AKKU_DEST=$(BUILD_DIR)/akku sh scripts/fetch-akku-lock chez-cmark-gfm; \
+	fi
+
+site: site-deps ## Render docs/ into build/site/ (open build/site/index.html); SITE_REF=<tag> pins links to repository files
+	@mkdir -p $(BUILD_DIR)/site
+	@CHEZSCHEMELIBDIRS=$(SITE_LIBDIRS) SITE_REF="$(SITE_REF)" \
+	  SITE_OUT=$(BUILD_DIR)/site $(CHEZ) --program build-site.sps
+	@cp site/style.css $(BUILD_DIR)/site/style.css
+	@echo "site: $(BUILD_DIR)/site ready (open $(BUILD_DIR)/site/index.html)"
+
+# The generator's own suites (SRFI-64, so `deps` too), then the real site,
+# rendered in memory and checked.  site-unit runs with no chez-cmark-gfm on its
+# path, so a site library it tests that starts importing (cmark gfm) fails
+# there at import.
+check-site: site-deps deps ## Test the site generator, then render docs/ in memory: nav, links, anchors (GitHub's too), no .md leak, no <pre> reflow
+	@CHEZSCHEMELIBDIRS=.:tests:$(SRFI_LIBS) $(CHEZ) --program tests/site-unit.sps
+	@CHEZSCHEMELIBDIRS=$(SITE_LIBDIRS):tests:$(SRFI_LIBS) $(CHEZ) --program tests/site-render-unit.sps
+	@CHEZSCHEMELIBDIRS=$(SITE_LIBDIRS) SITE_REF="$(SITE_REF)" $(CHEZ) --program tests/site-check.sps
+
+check-site-deps: ## Test scripts/fetch-akku-lock offline, against a local archive and lock of its own
+	@sh tests/fetch-akku-lock.sh
 
 clean: ## Remove our build artifacts and the vendored shim
 	rm -rf $(BUILD_DIR)

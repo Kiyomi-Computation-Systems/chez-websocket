@@ -54,6 +54,14 @@ jobs:
       - name: Check help is complete
         run: make check-help
 
+      # The docs site: the fetch script's offline test, then the generator's
+      # suites and docs/ rendered in memory, so a broken link or anchor fails
+      # here, before the Pages workflow publishes it.
+      - name: Docs site
+        run: |
+          make check-site-deps
+          make check-site
+
   autobahn:
     name: autobahn
     # Autobahn's image is built for linux/amd64 alone, which this runner is,

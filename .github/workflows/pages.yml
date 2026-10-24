@@ -1,0 +1,69 @@
+name: Pages
+
+# Renders docs/ into build/site/ (`make site`, gated by `make check-site`)
+# and deploys it to GitHub Pages on a release tag, or by hand. It commits
+# nothing: build/site/ is made fresh here and handed to actions/deploy-pages
+# as an artifact.
+#
+# The setup action brings Chez at its floor, the pinned server and the
+# shim (`make check-site` runs the generator's SRFI-64 suites, so it needs
+# `deps`) and the system cmark-gfm library. chez-cmark-gfm comes from the
+# archive Akku.lock pins (`make site-deps`).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. A second tag pushed while one runs queues
+# rather than tearing a deployment out from under a reader.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The floor is written once, in ci.yml's env, as the Makefile reads it
+      # for the echo image; the setup action builds and checks against it.
+      - name: Read the Chez floor from ci.yml
+        run: |
+          floor=$(sed -n 's/^  CHEZ_FLOOR_VERSION: "\(.*\)"$/\1/p' .github/workflows/ci.yml)
+          [ -n "$floor" ] || { echo "::error::no CHEZ_FLOOR_VERSION in .github/workflows/ci.yml"; exit 1; }
+          echo "CHEZ_FLOOR_VERSION=$floor" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup
+
+      - name: Get chez-cmark-gfm as Akku.lock pins it
+        run: make site-deps
+
+      # SITE_REF is the pushed tag (or the ref picked for a manual run), so
+      # links out of the site to repository files pin to this release.
+      - name: Gate the site
+        run: make check-site SITE_REF="${GITHUB_REF_NAME}"
+
+      - name: Build the site
+        run: make site SITE_REF="${GITHUB_REF_NAME}"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
