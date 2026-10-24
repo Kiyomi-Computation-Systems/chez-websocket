@@ -2618,3 +2618,17 @@ MERGED to main on 2026-10-24, on the owner's "Run the closing ritual for PR 92 o
 - **An archive's attributes come from the tree it is made from.** v0.2.0's tarball keeps AGENTS.md, and only a release from f2cb39a on leaves it out. Rules like these belong in place before the first public tag.
 
 NEXT: Akku, once chez-http-server is in its index. The echo image's Docker context still takes `.plans/` and `.superpowers/`; it is a build context, not a release archive.
+
+MERGED to main on 2026-10-24, on the owner's "Run the closing ritual for PR 93": **contributor docs**, #93. The owner had asked to "add CONTRIBUTING.md, a PR template and bug/feature issue templates adapted from chez-http-server's, then open a docs: PR".
+- **What it added.** CONTRIBUTING.md follows chez-http-server's sections. Its checks are this repository's: `make test`, `check-pins`, `check-help`, `check-site-deps` and `check-site`, and `autobahn`. Its "When you change…" list covers a verdict that moves, the server pin (the submodule and `SERVER_PIN` together), Akku.manifest with Akku.lock, the Makefile, `docs/` and `examples/`. Its code rules name the pure libraries under `src/websocket/`, the binding and the facade. `.github/PULL_REQUEST_TEMPLATE.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) follow it, and README.org gains Contributing and Security sections, as the server's has.
+- **Left out.** The server's NOTICE check, its Akku pin rule and its Guix and Docker dev environments have no counterpart here.
+- **#93**, at a17e919, was squashed as 771c4ef (tree b999ad7, the tested head's; parent baa3a91). Its run 40095029812 was green.
+- **Branches.** `docs/contributing` was deleted, local and remote. The main checkout is fast-forwarded to 771c4ef. No PR is open.
+
+**Reflect.**
+- **An adapted rule is traced to the code before it is written.** Each of CONTRIBUTING.md's claims was read from the suite or target behind it. `tests/test-docs.sps` refuses a Scheme block it does not know, `tests/test-examples.sps` plays a fixed list, and `make test` runs `check-pins` first. A copied line would have promised a check this repository lacks.
+- **Nothing holds CONTRIBUTING.md to the checkout.** Every `make` target and path it and the templates name was checked by hand, once. `tests/test-docs.sps` holds only `docs/*.md` to the Makefile's targets and the files a link names, so a renamed target leaves CONTRIBUTING.md stale with every suite green.
+
+`make test` green on a17e919 (Darwin arm64), and `make check-help` and `make check-site` too.
+
+NEXT: hold CONTRIBUTING.md and the templates to the Makefile's targets and the checkout's paths, as the docs suite holds docs/. Akku, once chez-http-server is in its index. The echo image's Docker context still takes `.plans/` and `.superpowers/`.
