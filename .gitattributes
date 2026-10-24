@@ -6,7 +6,9 @@ tests/autobahn/fake/docker   text eol=lf
 tests/autobahn/fake/ps       text eol=lf
 tests/autobahn/verdicts.txt  text eol=lf
 
-# Design records and the development ledger stay in the repository but out of
-# release archives (git archive, GitHub's source tarballs).
+# Design records, the development ledger and the coding agents' instructions
+# stay in the repository but out of release archives (git archive, GitHub's
+# source tarballs).
 /.plans        export-ignore
 /.superpowers  export-ignore
+/AGENTS.md     export-ignore
