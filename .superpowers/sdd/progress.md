@@ -2560,3 +2560,22 @@ NEXT: the owner can delete the now-unused `SUBMODULES_READ_TOKEN` secret. The Pa
 - The deploy job's `ubuntu-latest` moves to Ubuntu 26.
 
 `probe/r-term`'s run, to confirm R-TERM's cause on CI, can go now that CI runs. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. The next `v*` tag republishes the site with links pinned to it.
+
+MERGED to main on 2026-10-23, on the owner's "Yes, run the closing ritual on PR #89: squash merge, catch up main, delete the branch and worktree, reflect, then run the Pages workflow by hand and check its annotations": **the actions on Node 24, and the Pages deploy runner pinned** (#89).
+- **Node 24.** Each bump was chosen by reading the tag's `action.yml` through `gh api`. Every old major runs `node20`; every new one runs `node24`.
+  - `actions/checkout` v4 → v7, in ci.yml and pages.yml.
+  - `actions/cache/restore` and `actions/cache/save` v4 → v6, in the setup action. Only the `uses:` lines changed; v6 keeps the `cache-hit` and `cache-primary-key` outputs the setup action reads.
+  - `actions/upload-artifact` v4 → v7, in autobahn's failure step. The Pages run never reached it, but it was on Node 20 and would warn on a failed run.
+- **The runner.** Pages' `deploy` job, the one job on `ubuntu-latest`, is on `ubuntu-24.04` like the rest.
+- **#89**, at ef5c444 (one commit on 36ae37e), was squashed as 2bb6120.
+- **CI.** The PR's run, 40046424762, was green on `linux` and `autobahn` with no annotations. Both jobs hit the Chez cache on the unchanged key `chez-Linux-ubuntu-24.04-X64-10.4.1-threads`. Main's push run on 2bb6120, 40046693229, was green with no annotations. `make test` and `actionlint` were green locally.
+- **Pages, by hand.** Run 40046745214 on 2bb6120 built and deployed with no annotations on either job, and the site answers 200.
+- **Branches.** `ci/node24` was deleted, local and remote, and its worktree, `.claude/worktrees/ci-node24`, removed. The main checkout is fast-forwarded to 2bb6120. No PR is open.
+
+**Reflect.**
+- **Before an empty result counts as a pass, the same check is shown to fail.** The check-runs annotations API returned nothing for the new runs. Read the same way, the old Pages run 40043210848 shows both warnings, the Node 20 one and the Ubuntu 26 one. So an empty list means the warnings are gone, not that the query missed them.
+- **The deprecation covers every action on the old runtime, not only the ones the run named.** Pages printed checkout and cache/restore. Reading each `uses:` line across the workflows found cache/save and upload-artifact too, both on Node 20 but not run on a green Pages build.
+- **`git worktree remove` refuses a worktree with submodules,** even a clean one. `--force` removed it once `git status` and `submodule foreach` both showed it clean and its one commit was squashed onto main.
+- **Pages ran before the reflect, not after,** so this entry records the deployment rather than promising it.
+
+NEXT: the owner can delete the now-unused `SUBMODULES_READ_TOKEN` secret. `probe/r-term`'s run, to confirm R-TERM's cause on CI, can go now that CI runs. AGENTS.md still ships in archives, and the echo image's Docker context still takes `.plans/` and `.superpowers/`. The next `v*` tag republishes the site with links pinned to it.
