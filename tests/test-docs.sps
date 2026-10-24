@@ -1,5 +1,7 @@
 #!r6rs
-;;; The user docs: what docs/ tells a user, held to what the library does.
+;;; The docs: what docs/ tells a user, held to what the library does, and
+;;; what CONTRIBUTING.md and the GitHub templates tell a contributor, held to
+;;; the checkout.
 ;;;
 ;;; The oracles:
 ;;; - (websocket limits): the variables it reads, in its order, and its
@@ -20,7 +22,10 @@
 ;;; - The checkout: the targets the Makefile documents, the files a link
 ;;;   names, and the numbers CHANGELOG.md, README.org and
 ;;;   tests/autobahn/verdicts.txt record, which the measured pages may repeat
-;;;   and may not invent.
+;;;   and may not invent.  The contributor files are held to the first two:
+;;;   the targets they run, in a sh block or a `code` span, and the files they
+;;;   name, by a link, by a `code` span written as a path, or by a word of
+;;;   their prose that is a file's name, each from the checkout's root.
 ;;;
 ;;; The pages are docs/*.md, read as a user reads them, CommonMark with
 ;;; GitHub's tables: configuration.md's first table whose first column is
@@ -361,6 +366,54 @@
              ((and after-make (target-name? (car ws))) (cons (car ws) (loop (cdr ws) #t)))
              (else (loop (cdr ws) #f)))))
    '() (text-lines text)))
+
+;; --- the contributor files --------------------------------------------------------
+
+;; path-char? : Char -> Boolean — a letter, a digit, or one of - _ . /
+(define (path-char? c)
+  (or (char-alphabetic? c) (char-numeric? c) (memv c '(#\- #\_ #\. #\/))))
+
+;; file-extensions : (Listof String) — the extensions of the files a contributor file names.
+(define file-extensions '(".md" ".org" ".sls" ".sps" ".sh" ".txt" ".yml" ".lock" ".manifest"))
+
+;; file-name? : String -> Boolean
+;; A name, then one of file-extensions: .sls alone is an extension, not a file.
+(define (file-name? s)
+  (exists (lambda (e) (and (> (string-length s) (string-length e)) (ends? s e))) file-extensions))
+
+;; path-like? : String -> Boolean
+;; Written as a file of the checkout is: of path characters alone, so no
+;; blank, URL or <placeholder>, and with a / or a file's extension.
+(define (path-like? s)
+  (and (> (string-length s) 0)
+       (for-all path-char? (string->list s))
+       (or (and (memv #\/ (string->list s)) #t) (file-name? s))))
+
+;; bare : String -> String — the word without a ( before it, or . , ; : ) ! ? after it.
+(define (bare w)
+  (let* ((w (if (starts? w "(") (substring w 1 (string-length w)) w))
+         (n (string-length w)))
+    (if (and (> n 0) (memv (string-ref w (- n 1)) '(#\. #\, #\; #\: #\) #\! #\?)))
+        (bare (substring w 0 (- n 1)))
+        w)))
+
+;; named-files : String -> (Listof String)
+;; The files a text names: each link's file, each `code` span of its prose
+;; written as a path, and each word of its prose that is a file's name.
+(define (named-files text)
+  (let ((p (prose text)))
+    (append (filter (lambda (path) (and path (not (string=? path "")))) (map local-path (links text)))
+            (filter path-like? (code-spans p))
+            (filter (lambda (w) (and (path-like? w) (file-name? w)))
+                    (map bare (apply append (map words (text-lines p))))))))
+
+;; run-targets : String String -> (Listof String)
+;; The make targets the named text runs: in its sh blocks, and in each `code`
+;; span of its prose.
+(define (run-targets name text)
+  (append (apply append (map (lambda (k) (make-targets (block-text k)))
+                             (filter (lambda (k) (string=? (block-language k) "sh")) (blocks name text))))
+          (apply append (map make-targets (code-spans (prose text))))))
 
 ;; --- the numbers a page writes ---------------------------------------------------
 
@@ -737,6 +790,14 @@
 ;; page : String -> String — docs/'s page of that name.
 (define (page name) (slurp (string-append "docs/" name)))
 
+;; The contributor files: CONTRIBUTING.md, the pull request template, and
+;; each issue template, in order.
+(define contributor-files
+  (append '("CONTRIBUTING.md" ".github/PULL_REQUEST_TEMPLATE.md")
+          (map (lambda (f) (string-append ".github/ISSUE_TEMPLATE/" f))
+               (list-sort string<? (filter (lambda (f) (ends? f ".md"))
+                                           (directory-list ".github/ISSUE_TEMPLATE"))))))
+
 (run-suite "docs"
   (lambda ()
     ;; Its echoes are the defaults': the binding reads CHEZ_WS_ variables as
@@ -800,6 +861,34 @@
           (filter (lambda (t) (not (member t documented)))
                   (apply append (map (lambda (k) (make-targets (block-text k)))
                                      (filter (lambda (k) (string=? (block-language k) "sh")) all-blocks))))))
+
+      ;; --- the contributor files ---
+
+      (let ((contributing (map (lambda (f) (cons f (slurp f))) contributor-files)))
+        ;; Each file names a file, CONTRIBUTING.md runs a target, and an
+        ;; issue template is among them, so a scan that reads nothing cannot pass.
+        (unless (and (for-all (lambda (t) (pair? (named-files (cdr t)))) contributing)
+                     (pair? (run-targets "CONTRIBUTING.md" (cdr (assoc "CONTRIBUTING.md" contributing))))
+                     (exists (lambda (f) (starts? f ".github/ISSUE_TEMPLATE/")) contributor-files))
+          (provenance-failure "the contributor files' scan reads nothing"))
+
+        (test-equal "every make target CONTRIBUTING.md and the GitHub templates run is one the Makefile documents"
+          '()
+          (let ((documented (documented-targets (slurp "Makefile"))))
+            (apply append
+                   (map (lambda (t)
+                          (map (lambda (target) (list (car t) target))
+                               (filter (lambda (target) (not (member target documented)))
+                                       (run-targets (car t) (cdr t)))))
+                        contributing))))
+
+        (test-equal "every file CONTRIBUTING.md and the GitHub templates name is one in the checkout"
+          '()
+          (apply append
+                 (map (lambda (t)
+                        (map (lambda (path) (list (car t) path))
+                             (filter (lambda (path) (not (file-exists? path))) (named-files (cdr t)))))
+                      contributing))))
 
       (test-equal "every number performance.md and testing.md write is one the repository records: CHANGELOG.md, README.org or tests/autobahn/verdicts.txt"
         '()

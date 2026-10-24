@@ -29,9 +29,10 @@ make test
 CI runs these on every pull request, on Linux. Keep them green:
 
 - `make test`: every suite passes (`ALL SUITES PASSED`). Among them, the
-  docs suite runs the Scheme blocks in `docs/` and holds the names,
-  defaults, targets and links the pages give to the library and the
-  checkout; the examples suite plays each program in `examples/`; and the
+  docs suite runs the Scheme blocks in `docs/`, holds the names, defaults,
+  targets and links the pages give to the library and the checkout, and
+  holds this file and the GitHub templates to the targets and files they
+  name; the examples suite plays each program in `examples/`; and the
   import audit holds each pure library to its imports.
 - `make check-pins`: the server sits at its pin, and each pin it carries
   where the server records it. `make test` runs it first.
