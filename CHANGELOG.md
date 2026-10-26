@@ -6,6 +6,25 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Pinned at chez-http-server v0.9.0**, from v0.7.0 by way of v0.8.0. The pins under
+  it: chez-libuv v0.11.0, as before; chez-httparse v0.5.0 with byte-machine v0.8.0;
+  and uriparse v0.8.0. The library's code is unchanged.
+  - `(http-server)` exports sixteen more names, among them `request-header-list`,
+    `request-has-body?`, `request-on-done!`, `sized-body`, `next-body-piece` and the
+    connection's addresses and ports. A program that imports all of `(http-server)`
+    beside `(websocket)` and defines one of them itself no longer loads: rename its
+    own, or import `(http-server)` with `except`. The binding and the examples
+    define none of them.
+  - A connection costs about 5.6 KB, from 5.3 KB. On v0.9.0 an idle WebSocket holds
+    5,463 to 5,680 B of heap, 5,608 to 5,613 B after 10 echoes, and the server's own
+    idle connection 2,079 to 2,246 B. On v0.7.0, measured the same hour, they were
+    5,314 to 5,429 B, 5,331 to 5,485 B and 1,808 to 1,977 B: the server's connection
+    grew by about 270 B, and a WebSocket's with it.
+  - Autobahn|Testsuite's 301 cases keep their verdicts: 291 OK, 7 NON-STRICT and 3
+    INFORMATIONAL.
+
 ## [0.2.0] - 2026-10-24
 
 Examples and a published docs site, on chez-http-server v0.7.0. The library's code is

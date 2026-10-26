@@ -29,7 +29,7 @@ WebSocket (RFC 6455) for [[https://github.com/Kiyomi-Computation-Systems/chez-ht
 - *A pure core.* SHA-1, base64, UTF-8, the frame codec, the protocol and the
   handshake are pure libraries: steps that read no clock and do no I/O. A
   binding runs them over the server's transport. An idle connection costs the
-  server about 5.3 KB.
+  server about 5.6 KB.
 - *Tested against the real thing.* [[https://github.com/crossbario/autobahn-testsuite][Autobahn|Testsuite]]'s 301 cases, without
   compression, run in CI against an echo server built from the library, and
   each case's verdict is held. RFC test vectors, Chrome's handshakes, and
