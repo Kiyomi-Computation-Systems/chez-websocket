@@ -2660,3 +2660,19 @@ MERGED to main on 2026-10-26, on the owner's "Yes: once PR 95's CI is green, run
 - **A server change that keeps nothing more can still move a heap reading.** The notice's new references grow nothing, and the swing came from where objects lie, not how many.
 
 NEXT: the v0.9.0 pin's PR, from the stash: `SERVER_PIN`, the gitlink, `docs/installing.md` and `docs/configuration.md` at v0.9.0, CHANGELOG.md's Unreleased, and `docs/performance.md` and README.org at about 5.6 KB, measured on v0.9.0. Akku, once chez-http-server is in its index.
+
+MERGED to main on 2026-10-26, on the owner's "do ritual": **the server's v0.9.0, pinned**, #96. The owner had asked to "bump the chez-http-server pin to it in a PR, with SERVER_PIN, the docs that name the tag, and a CHANGELOG entry".
+- **The pin.** chez-http-server moves from v0.7.0 (a9f0ef5) to v0.9.0 (d928e41, the tag signed, a good signature). The pins it carries: chez-libuv afe79a5 (v0.11.0, as before), chez-httparse 52a62e5 (v0.5.0) with byte-machine c1f7791 (v0.8.0), uriparse 9416299 (v0.8.0) and chez-srfi 7879b52. The tag adds only its release commit to 9195305, which every suite and Autobahn had passed beforehand (`301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`).
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` named the server's mismatch, the five carried pins ok, exit 2.
+- **Records:** the Makefile's pin; `docs/installing.md` at v0.9.0; `docs/configuration.md`'s link to the server's configuration page, now `docs/configuration.md` at v0.9.0 (the server's docs became Markdown in 0.8.0); CHANGELOG.md's Unreleased, the pin and the sixteen names `(http-server)` gains, which nothing here defines.
+- **Measured again** (`ws-cost.sps`, Darwin arm64, v0.7.0 beside it the same hour): an idle WebSocket 5,463 to 5,680 B on v0.9.0, 5,314 to 5,429 B on v0.7.0; the server's own connection 2,079 to 2,246 B, 1,808 to 1,977 B. So about 5.6 KB, from 5.3 KB, the server's connection about 270 B bigger; `docs/performance.md` and README.org say so.
+- **S-LETGO** went red on v0.9.0 until #95 (the entry above) read its heap with nothing marked in place. On this branch, over #95: `make test` 3 of 3, the socket suite 5 of 5 more.
+- **#96**, at aa1c56d (two commits: the pin with its pages, then the records), was squashed as a0c57c0 (tree 5c76f56, the tested head's; parent 59d7171). Its run 40330916184 was green: autobahn 59 s, linux 6 m 22 s, where it has taken about a minute.
+- **Branches.** `chore/pin-server-v0.9.0` was deleted, local and remote; the stash is empty. The main checkout is fast-forwarded to a0c57c0, the server at v0.9.0, every pin ok. No PR is open.
+
+**Reflect.**
+- **A pin measured first must be measured more than once.** The suites against the server's main passed in one run, and the let-go check then failed 4 of 6 on the branch. A suite with heap checks is run several times before a pin is called clean.
+- **A line that names "the pin today" binds the bump to a measurement.** `docs/performance.md`'s did, and measuring found 270 B a connection that the server's CHANGELOG does not count as a cost.
+- **"Tagged" is checked on the remote first.** The first request to pin v0.9.0 came while its release PR was still open, and no tag was there to pin.
+
+NEXT: Akku, once chez-http-server is in its index (its 0.8.0 was submitted). Linux CI's 6 m 22 s, if it stays. CONTRIBUTING.md's AGENTS.md link is dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
