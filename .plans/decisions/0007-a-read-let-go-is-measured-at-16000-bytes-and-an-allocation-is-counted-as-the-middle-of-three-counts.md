@@ -4,7 +4,8 @@ Date: 2026-10-09
 Status: accepted (user decision, 2026-10-09, by form, before the server's v0.4.1 pin: "Fix
 both checks here", the recommended). Amended the same day, #57's review: the counter is the
 middle of three counts. Amended 2026-10-11: the 2.9 KB was the heap falling between
-S-LETGO's two readings, which nothing keeps.
+S-LETGO's two readings, which nothing keeps. Amended 2026-10-26, before the server's
+v0.9.0 pin: S-LETGO's readings follow collections that mark no object in place.
 Design: [the design](../2026-10-04-chez-websocket-design.md) §8
 
 ## Context
@@ -143,3 +144,57 @@ settled the item by measurement on 2026-10-11, on its owner's form: **nothing is
   value a wake handed it, and more of that kind, fixed in chez-http-server#178 for its
   next release. This binding wakes its receives with `#t`, so its connections never kept
   a message that way.
+
+## Amendment of 2026-10-26 (before the server's v0.9.0 pin)
+
+Run on the server's v0.9.0, S-LETGO went red in 4 of 6 runs of the socket suite, and in
+none of 6 on v0.7.0 the same hour. The binding is the same on both.
+
+- **The red readings** (the three differences, bound 8,004 B): −3,296, 9,040 and −61,544;
+  −3,312, 9,080 and 2,840; −3,536, 9,256 and 2,960; −20,672, 26,496 and 2,840. One
+  difference too high, its neighbour as far too low, and a third at the floor.
+- **Nothing is kept.** S-LETGO's spike (`s-letgo-floor.sps`, 16,000 bytes) measured 2,880
+  to 2,896 B, a big message then a small one, on both servers. A copy of the suite that
+  read Chez's object counts by type at each reading found the live objects moving by the
+  stack's floor alone, about 2.9 KB, and the live bytevectors not at all.
+- **What moves is the heap no object owns:** `bytes-allocated` less every live object's
+  bytes. On v0.9.0 it moved 5.8 to 6.9 KB, one way and then back, every third reading,
+  in 7 of 9 runs; on v0.7.0 by 200 B at most, in 6 of 6.
+- **The server's commit that brings it:** bisected over the server's history, it is
+  #236's (d73b437), which keeps the handler's coroutine on the request's notice, and the
+  connection on the notice, for the body's pull. Its parent moved it 96 B at most; it,
+  6,768 B.
+- **Why:** Chez's collector marks some objects of the oldest generation in place rather
+  than copy them, and a segment it marks stays whole, the dead objects in it counted by
+  `bytes-allocated` until a later collection frees them. With `in-place-minimum-generation`
+  above the oldest generation, so that every live object is copied, the heap no object
+  owns moved 32 B at most, in 5 of 5 runs on v0.9.0.
+
+Measured on Darwin arm64, Chez Scheme 10.4.1.
+
+### Decision
+
+- **S-LETGO's readings follow two full collections that mark no object in place**:
+  `footprint` collects with `in-place-minimum-generation` one above
+  `(collect-maximum-generation)`. The 16,000-byte message and the bound, half its frame,
+  stand.
+  - Green: 10 of 10 runs on v0.9.0, and 4 of 4 on v0.7.0.
+  - Kept, R-20's kind (the binding keeping each read's bytevector until the next read):
+    red in 3 of 3 on v0.9.0, at 18,832 to 18,912 B, and on v0.7.0, in 2 of 2, at 18,816 to 18,992 B.
+
+**Weighed, not taken:**
+- **"The middle of the three differences"**, as the counter takes the middle of three
+  counts. Every red run above had one difference off, and passes so. But that rests on
+  the swing's shape, every third reading, which is the collector's to change.
+- **"Count the live bytevectors"** by Chez's object counts. Exact for a kept bytevector,
+  but blind to a read kept as anything else, and no longer the heap the rest of the
+  suite's measures read.
+- **"Ask the server to keep less"**: the notice keeps what its pull needs, and nothing it
+  keeps grows. The dead objects are the collector's to count.
+
+### Consequences
+
+- **The fix lands on its own, before the pin**, green on v0.7.0; the pin's change runs it
+  on v0.9.0.
+- **The research spikes read the heap as before.** `ws-cost.sps` spreads 6 KB over 400
+  connections, 15 B each; `s-letgo-floor.sps` did not swing in its own setting.

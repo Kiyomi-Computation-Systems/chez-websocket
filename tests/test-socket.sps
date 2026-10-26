@@ -64,12 +64,18 @@
 ;;;   after a 4,000-, 40,000- or 400,000-byte message.  Two 1-byte messages
 ;;;   measure as far apart, 2,888 to 2,944 B: the heap falls between the
 ;;;   readings, as the server's full drain uses up the thread's stack, and
-;;;   nothing is kept.  The bound is half the frame.
+;;;   nothing is kept.  The bound is half the frame.  Each reading follows two
+;;;   full collections that mark no object in place.  A collection that marks
+;;;   one leaves the rest of its segment where it is, and the heap counts the
+;;;   dead objects there: on the server's v0.9.0 that moved a reading by about
+;;;   6 KB either way, nothing kept, and a check whose bound is 8,004 B went
+;;;   red.
 ;;; - The cap, 4,000 turns: over ten times the most a wait here took, 366
 ;;;   turns on Darwin and 205 on Linux.  A turn with nothing to do takes about
 ;;;   1.2 ms on Darwin, so a check that cannot finish costs about 5 s.
 (import (rnrs) (srfi :64) (ws-testing) (ws-play)
-        (only (chezscheme) collect collect-maximum-generation bytes-allocated)
+        (only (chezscheme) collect collect-maximum-generation in-place-minimum-generation parameterize
+              bytes-allocated)
         (libuv) (uv-testing) (shell-testing) (response-reader)
         (http-server)
         (only (http-server limits) default-limits limits-with)
@@ -226,10 +232,13 @@
    (lambda (thunk) (transport-on-close! t thunk))
    (lambda () (transport-abort! t))))
 
-;; footprint : -> Nat — the heap after two full collections.
+;; footprint : -> Nat
+;; The heap after two full collections, each copying every live object, none
+;; marked in place, so no dead object is counted.
 (define (footprint)
-  (collect (collect-maximum-generation))
-  (collect (collect-maximum-generation))
+  (parameterize ((in-place-minimum-generation (+ (collect-maximum-generation) 1)))
+    (collect (collect-maximum-generation))
+    (collect (collect-maximum-generation)))
   (bytes-allocated))
 
 (run-suite "socket"
