@@ -6,6 +6,11 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-28
+
+`websocket-limits-from-environment` in the facade, for a host that reads its settings
+through a lookup of its own.
+
 ### Added
 
 - **`websocket-limits-from-environment` is in the facade.** It builds the limits from
@@ -211,7 +216,8 @@ against chez-http-server v0.5.0.
   | the same, after 10 echoes | 5,353 to 5,477 B |
   | the server's own connection, idle after a GET, for scale | 1,900 to 2,055 B |
 
-[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/releases/tag/v0.1.0
