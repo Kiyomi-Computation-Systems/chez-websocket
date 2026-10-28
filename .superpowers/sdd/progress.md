@@ -2745,3 +2745,13 @@ MERGED to main on 2026-10-28, on the owner's "Run the release chain": **the v0.4
 - **A release asked in one word runs as the steps it was asked as.** "Run the release chain" answered a question that named four steps, and each ran in order, its check read before the next began.
 
 NEXT: tag 4456814 `v0.4.0` and push it, which republishes the docs site with links pinned to v0.4.0; then circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+RELEASED v0.4.0 on 2026-10-28, on the owner's "Run the release chain": tag 4456814 `v0.4.0`, push the tag, and check that the Pages run republishes the site.
+- **The tag.** `v0.4.0` (object accbffc) is an annotated tag on 4456814, signed with the Kiyomi releases key (`git tag -s`; `git tag -v` reports a good signature). Its message follows v0.3.0's.
+- **Published.** The tag's Pages run, 40696817602, built and deployed on its first attempt, in 42 s. The site's eight pages link out to the repository nine times, at seven addresses, each naming `blob/v0.4.0/`. Five answer 200; the two that name a folder, `docs` and `examples`, answer 301 to `tree/v0.4.0/`, which answers 200. The reference page has `websocket-limits-from-environment`'s entry, and the configuration page names it. main's run on f330bbc, 40696783731, was green; the one on 4456814 was cancelled by it, as the workflow's concurrency does.
+
+**Reflect.**
+- **Only Akku.manifest names the version.** `git grep 0.3.0` outside CHANGELOG.md and the records found it alone, so a release PR is those two files.
+- **A folder's `blob/` link answers 301.** It reaches `tree/` and 200; a check of the site's links follows redirects, or counts a 301 as a failure that isn't one.
+
+NEXT: circuit's 6c pins chez-websocket at v0.4.0. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive, v0.4.0's among them; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
