@@ -346,3 +346,97 @@ K-49, the end that wakes no send, was killed by the old W-END and C-SENDCLOSING 
 table). It is now killed by W-END-TIMEOUT, by the write timeout's check and by
 C-SENDCLOSING: a send told the end while reading is stopped is a write-timeout's, or
 the server's close's, not a client's.
+
+## A handshake for another host (2026-10-28)
+
+### What changed
+
+`websocket-handshake` and its six accessors, in the binding and through the facade:
+the handshake for a host on the server whose requests and responses are its own
+(decision 0009). `handshake-answer` answers its fields as string pairs, and
+`websocket-accept` is built on `websocket-handshake`, turning them into bytes itself.
+Measured on Linux 7.1.1 x86_64, in circuit's pinned Guix container: Chez 10.4.1
+threaded, libuv 1.52.1, the server at v0.9.0.
+
+### Test first
+
+- **The binding suite's 11 new checks** (HB-ACCEPT, HB-TELL, HB-REFUSE, HB-JOIN, HB-ARGS,
+  HB-READER, HB-DEFAULTS, HB-OWN, HB-TAKEOVER, HB-CLOSED, HB-ENV): against the old code
+  the suite did not expand, `handshake-accepted?` unbound (status 255); against a
+  `websocket-handshake` that answers `'stub`, all 11 red by value.
+- **The handshake suite:** 8 checks red against the old code, bytevector pairs where
+  strings were expected.
+- **The driver suite:** red against the old code, 500s and then a harness error (status 2).
+- **The door suite's answers check (D-ANSWERS)** now runs `websocket-accept` on the fake
+  shell for its 10 requests, and hands the server's checks what it answers: green on the
+  old code, as it must be, and red on H-24 and H-25.
+- **After the review, three more:** HB-HOST (the host given is the one compared, not the
+  Host field), HB-HOST-ABS (an absolute-form target's authority, through
+  `websocket-accept` and through `websocket-handshake` given `request-host`), and
+  D-OWN-BYTES (each answer `websocket-accept` makes has field bytes of its own). Each red
+  on its mutants below.
+
+### The mutants
+
+Every suite on each mutant's tree; the docs mutants run the docs suite in a copy of the
+checkout. Predictions hashed before the first run (sha256 `6d72b377`); the runner
+`057a5456`, its mutant trees `005dc226`; the docs runner `f627041b`, its trees
+`304d90ee`. **5 mismatches, each a prediction's; no survivor but H-26, equivalent.**
+
+| ID | mutation | watched red | result |
+|---|---|---|---|
+| BASE | none | none | as named |
+| H-1 to H-6 | an argument check dropped: method, reader, host, procedure, settings, limits | HB-ARGS | as named, each |
+| H-7, H-8, H-9 | the reader's answer not checked; checked as a list only; for strings only | HB-READER | as named, each |
+| H-10 | lines joined with "," alone | HB-JOIN | as named |
+| H-11 | a field's first line alone read | HB-JOIN, B-SPLIT-CONN, B-SPLIT-PROTO, B-TWO-KEYS, DOC-FRAGMENTS | as named |
+| H-12 | lines joined last first | HB-JOIN, B-XFP | as named |
+| H-13 | the 4-argument form's settings accept any origin | HB-DEFAULTS | as named |
+| H-14, H-15 | the 4- and 5-argument forms take the default limits, not the environment's | HB-ENV | as named, each |
+| H-16 | the take-over carries no subprotocol | HB-CLOSED, B-SPLIT-PROTO | as named |
+| H-17 | the take-over takes the default limits, not those given | HB-CLOSED, B-ENV, HB-ENV, DOC-FRAGMENTS | **mismatch:** B-ENV and HB-ENV not predicted |
+| H-18 | the take-over handed no bytes read past the request | HB-TAKEOVER, DOC-FRAGMENTS | as named |
+| H-19 | a refusal carries no fields | HB-REFUSE, HB-JOIN, HB-OWN, B-VERSION, DOC-FRAGMENTS | as named |
+| H-20 | a refusal's status always 400 | HB-REFUSE, HB-JOIN, HB-DEFAULTS, B-ORIGIN, B-XFP, DOC-FRAGMENTS | as named |
+| H-21 to H-23 | `websocket-accept`'s procedure, settings, limits check dropped | B-ACCEPT-ARGS, B-CLOSE-ARGS | as named, each |
+| H-24 | `websocket-accept` hands the server the strings | D-ANSWERS, B-RFC, B-VERSION, B-SPLIT-CONN, B-SPLIT-PROTO, B-CLOSE-ARGS, DOC-FRAGMENTS | **mismatch:** note 1 |
+| H-25 | the conversion swaps each name and value | as H-24 | **mismatch:** note 1 |
+| H-26 | `websocket-accept`'s reader refusal names `websocket-handshake` | none | as named: equivalent, the server's `request-header-values` answers a list of strings |
+| H-27 | the 6-argument form reads Upgrade before its checks | HB-ARGS | as named |
+| HK-1, HK-2 | `header` copies no name; no value | HS-OWN, HB-OWN, HB-TAKEOVER, HB-CLOSED | **mismatch:** note 2 |
+| DM-1 | the other-host block answers its refusal with no fields | DOC-FRAGMENTS | as named |
+| DM-2 | handlers.md writes `handshake-accepted-header` | DOC-NAMES | as named |
+| DM-3 | DM-2, with main's name prefixes in the docs suite | none | as named: the new prefixes catch it |
+| DM-4 | the reference's call form drops `[limits]` | DOC-CLAIM | as named |
+| DM-5 | the block renamed `other-hosts` | DOC-KNOWN, DOC-LOST | as named |
+
+1. With no 101 written, the binding suite's own setup calls `((cadr told))` while `go` is
+   still `#f`, and the suite stops with a harness error (status 2): B-ENV, near its end,
+   never runs. The socket suite's let-go guard ends in a provenance failure (status 3), no
+   connection reading a frame.
+2. The written-over literal reaches every later 101 in the process, and the binding suite
+   stops with the same harness error. Chez 10.4.1 lets a program write over a library's
+   string literal (`(string-fill! (lit) #\x)` then `(lit)` answers `"xxxxxxx"`,
+   reproduced by the session), so `header` copies.
+
+### The review's and the session's
+
+Made by the review and the session after the build, on its final code, every suite run;
+not predicted, so not hashed. The first two survived the build's suites, and the three
+checks above were written for them.
+
+| ID | mutation | on the build's suites | after the three checks |
+|---|---|---|---|
+| RV-12 | `websocket-handshake` compares the Host field, read through the reader, not `host` | survived | HB-HOST, HB-HOST-ABS |
+| SV-1 | `websocket-handshake` compares `server.example.com`, whatever host it is given | survived | HB-HOST, HB-HOST-ABS |
+| SV-2 | `websocket-accept` gives the Host field's first line, not `request-host` | survived | HB-HOST-ABS |
+| RV-11 | `websocket-accept` shares one `Upgrade` pair of bytes between answers | survived | D-OWN-BYTES |
+| SV-3 | `websocket-accept` shares one `Sec-WebSocket-Version` pair between refusals | survived | D-OWN-BYTES |
+| SV-4 | `websocket-accept`'s refusal always 400 | binding, docs, examples | — |
+| SV-5 | `websocket-accept`'s refusal carries no fields | binding | — |
+| SV-6 | `websocket-accept` hands the take-over no bytes read past the request | binding, docs, examples | — |
+| SV-7 | `websocket-accept` gives the host as `""` | examples | — |
+| SV-8 | `websocket-accept` reads a field's first line alone | binding | — |
+| SV-9 | the chosen subprotocol is the settings' own string | handshake | — |
+
+The review's other ten (RV-1 to RV-10) were each killed by the build's suites.
