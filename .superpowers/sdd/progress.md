@@ -2701,3 +2701,14 @@ MERGED to main on 2026-10-28, on the owner's "do ritual on 97": **`websocket-han
 - **A count is read from the whole output.** A rerun kept through `tail -25` lost the suite totals; CI's log gave them back.
 
 NEXT: v0.3.0, a release PR (`release/v0.3.0`: Unreleased to `[0.3.0] - date`, and Akku.manifest), then the signed tag, on the owner's word; circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's AGENTS.md link is dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`. Linux CI took 51 s, so the 6 m 22 s didn't stay.
+
+MERGED to main on 2026-10-28, on the owner's "do closing ritual on green": **the v0.3.0 release**, #98. The owner had asked "lets do the 0.3.0 release", then "update the changelog with 92 - 95".
+- **#98** moves Unreleased to `[0.3.0] - 2026-10-28`, with a one-line summary and the compare links (`v0.2.0...v0.3.0`, and Unreleased from `v0.3.0`), and bumps Akku.manifest to 0.3.0. Akku.lock names no version of this package. Its second commit, on the owner's word, adds what #92 to #95 had left out of the CHANGELOG: under Added, the contributor docs (#93), held to the checkout (#94); under Changed, archives without AGENTS.md (#92); under Fixed, the let-go check on v0.9.0 (#95). Since v0.2.0 only #97 changes `src/`.
+- **#98**, at 0f9783f (two commits: 89f9f89, the release; 0f9783f, the entries), was squashed as 577127d (tree 5b3a78d, the tested head's; parent 127a01c), merged on the day it is dated. Its run 40665464331 was green: autobahn 1 m 1 s (`301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`), linux 52 s, with `check-site` and 16 suites, 433 rows. Locally (Linux x86-64, circuit's Guix container) `make test` passed 433 rows on each commit, with `check-help`, and `check-pins` on the host.
+- **Branches.** `release/v0.3.0` was deleted, local and remote. The main checkout is fast-forwarded to 577127d. No PR is open, and the remote has no `v0.3.0` tag.
+
+**Reflect.**
+- **A release's notes are read against every PR since the last tag.** #92 to #95 merged with no CHANGELOG entry, and the first draft of 0.3.0's notes followed the Unreleased section alone. `git log v0.2.0..main --first-parent` names each one.
+- **A check watched straight after a push may not exist yet.** `gh pr checks --watch` exited 0 with both checks pending. Watching the head commit's own run (`gh run list --commit`) waits for it.
+
+NEXT: tag 577127d `v0.3.0` and push it, on the owner's word, which republishes the docs site with links pinned to v0.3.0; then circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive, v0.3.0's among them; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
