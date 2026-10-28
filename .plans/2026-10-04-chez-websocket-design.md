@@ -287,7 +287,9 @@ are stepped through the core in place, and the actions run at once:
   them once, as a program that imports it starts: Chez runs a library's body before
   the program's, so a malformed `CHEZ_WS_` value stops the program before its first
   line (§7). The facade exports the binding's verbs, `make-handshake-settings`, and
-  the limits' constructors and accessors.
+  the limits' constructors and accessors, `websocket-limits-from-environment` among
+  them: a host that reads its settings through a lookup of its own, such as circuit's
+  `run-server`, builds limits from that lookup (circuit's slice 6c).
 - **Another host (0009).** `(websocket-handshake method field-lines host proc [settings
   [limits]])` is the handshake for a host on the server whose requests and responses
   are its own. It answers an accepted record, the 101's fields as string pairs and the
