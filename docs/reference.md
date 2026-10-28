@@ -202,6 +202,18 @@ over them, read once as your program starts.
 
 **Details:** [Configuration](configuration.md)
 
+### `websocket-limits-from-environment` (procedure)
+
+`(websocket-limits-from-environment lookup) -> WebsocketLimits`
+
+The defaults, with each `CHEZ_WS_` variable `lookup` gives applied over them.
+`lookup` takes a variable's name and answers its value, or `#f` for none, as
+`getenv` does: `environment-websocket-limits` is this, given `getenv`. A host
+that reads its settings through a procedure of its own passes that one. A bad
+value is refused, naming the variable.
+
+**Details:** [Configuration](configuration.md)
+
 ### `default-websocket-limits` (value)
 
 `default-websocket-limits : WebsocketLimits`

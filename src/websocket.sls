@@ -11,7 +11,9 @@
 ;;; status and fields onto its response.  A handler's settings, its
 ;;; subprotocols and origins, are made once with make-handshake-settings;
 ;;; its limits, if it gives any, with the limits' own constructors, and
-;;; otherwise are the environment's, read as the program starts.
+;;; otherwise are the environment's, read as the program starts.  A host
+;;; that reads its settings through a lookup of its own builds limits from
+;;; that lookup with websocket-limits-from-environment.
 ;;;
 ;;;   websocket-accept : Request (WebSocket -> Any) [HandshakeSettings [WebsocketLimits]] -> Answer
 ;;;   websocket-handshake : Symbol (String -> (Listof String)) String (WebSocket -> Any)
@@ -30,6 +32,7 @@
 ;;;   &websocket-closed, raised by a receive or a send once the connection
 ;;;     has ended: its code, reason and whether it closed cleanly
 ;;;   environment-websocket-limits : WebsocketLimits
+;;;   websocket-limits-from-environment : (String -> (U String #f)) -> WebsocketLimits
 ;;; and (websocket handshake)'s settings and (websocket limits)' record, each
 ;;; documented there.
 (library (websocket)
@@ -43,6 +46,7 @@
           make-handshake-settings handshake-settings?
           make-websocket-limits websocket-limits? default-websocket-limits
           websocket-limits-with environment-websocket-limits
+          websocket-limits-from-environment
           websocket-limits-max-message-bytes websocket-limits-max-queue
           websocket-limits-ping-interval-ms websocket-limits-ping-timeout-ms
           websocket-limits-close-timeout-ms websocket-limits-write-high-water

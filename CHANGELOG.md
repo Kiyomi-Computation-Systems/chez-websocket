@@ -6,6 +6,14 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`websocket-limits-from-environment` is in the facade.** It builds the limits from
+  the `CHEZ_WS_` variables a lookup procedure gives, as `environment-websocket-limits`
+  is built from `getenv`. A host that reads its settings through a procedure of its
+  own, such as circuit's `run-server`, passes that procedure, and hands the limits to
+  `websocket-handshake` or `websocket-accept`.
+
 ## [0.3.0] - 2026-10-28
 
 `websocket-handshake`, for a host on the server whose requests and responses are its
