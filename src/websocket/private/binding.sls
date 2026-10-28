@@ -2,10 +2,16 @@
 ;;; (websocket private binding) — the shell: the core over the server's
 ;;; transport, the waits, and the environment.
 ;;;
-;;; `websocket-accept` checks the handshake ((websocket handshake)), reading
-;;; every line of a field, joined with commas (RFC 9110 §5.3), and answers the
-;;; server's door: a refusal, or `(switch-protocols headers take-over)`.  The
-;;; take-over runs in place, inside the server's callbacks, and cannot wait:
+;;; `websocket-handshake` checks the handshake ((websocket handshake)) for
+;;; a host on the server whose requests and responses are its own, given
+;;; what it reads of the request: every line of a field, joined with commas
+;;; (RFC 9110 §5.3).  It answers a record: accepted, the 101's fields and
+;;; the take-over; or refused, the status and its fields; the fields string
+;;; pairs, each answer's its own.  `websocket-accept` is that for the
+;;; server's own handlers: it reads the server's request, and answers the
+;;; server's door, a refusal, or `(switch-protocols headers take-over)`, the
+;;; fields made bytes there.  The take-over runs in place, inside the
+;;; server's callbacks, and cannot wait:
 ;;; it makes the core's state, arms the deadline the state names, starts
 ;;; reading, feeds the core the bytes the server read past the request, and
 ;;; answers `(awaiting thunk)`, whose thunk runs the handler's procedure with
@@ -69,7 +75,10 @@
 ;;; imports the binding starts, so a malformed value stops it there: Chez
 ;;; runs a library's body before the program's.
 (library (websocket private binding)
-  (export websocket-accept websocket-receive websocket-send! websocket-close!
+  (export websocket-accept websocket-handshake
+          handshake-accepted? handshake-accepted-headers handshake-accepted-take-over
+          handshake-refused? handshake-refused-status handshake-refused-headers
+          websocket-receive websocket-send! websocket-close!
           websocket-subprotocol websocket?
           &websocket-closed websocket-closed? websocket-closed-code
           websocket-closed-reason websocket-closed-clean?
@@ -136,7 +145,9 @@
   ;; status and fields (websocket-handshake's), with no body; or the switch,
   ;; whose take-over runs `proc` with the WebSocket.  The settings default to
   ;; no subprotocols and the request's own host as the one origin, and the
-  ;; limits to the environment's.
+  ;; limits to the environment's.  A procedure, settings or limits outside
+  ;; the contract are an assertion violation naming websocket-accept, before
+  ;; the request is read.
   (define websocket-accept
     (case-lambda
       ((request proc) (websocket-accept request proc default-settings environment-websocket-limits))
@@ -148,23 +159,89 @@
          (assertion-violation 'websocket-accept "not handshake settings" settings))
        (unless (websocket-limits? limits)
          (assertion-violation 'websocket-accept "not limits" limits))
-       (let ((answer (handshake-answer (request-method request)
-                                       (lambda (name) (field-lines request name))
-                                       (request-host request)
-                                       settings)))
-         (if (eq? (car answer) 'accept)
-             (switch-protocols (cadr answer)
-                               (lambda (transport retained)
-                                 (take-over transport retained proc limits (caddr answer))))
-             (make-response (cadr answer) #f (caddr answer) #f))))))
+       (let ((h (handshake 'websocket-accept (request-method request)
+                           (lambda (name) (request-header-values request name))
+                           (request-host request) proc settings limits)))
+         (if (handshake-accepted? h)
+             (switch-protocols (field-bytes (handshake-accepted-headers h)) (handshake-accepted-take-over h))
+             (make-response (handshake-refused-status h) #f (field-bytes (handshake-refused-headers h)) #f))))))
 
-  ;; field-lines : Request String -> (U String #f)
+  ;; An accepted handshake: the 101's fields, Upgrade, Sec-WebSocket-Accept,
+  ;; and Sec-WebSocket-Protocol when a subprotocol is chosen; and the
+  ;; take-over, which a host calls with the server's transport and the bytes
+  ;; read past the request, and whose answer it answers.
+  ;;   handshake-accepted? : Any -> Boolean
+  ;;   handshake-accepted-headers : HandshakeAccepted -> (Listof (Pair String String))
+  ;;   handshake-accepted-take-over : HandshakeAccepted -> (Transport Bytevector -> Answer)
+  (define-record-type (handshake-accepted new-accepted handshake-accepted?)
+    (fields (immutable headers handshake-accepted-headers)
+            (immutable take-over handshake-accepted-take-over)))
+
+  ;; A refused handshake: the status, 400 or 403, and its fields, which a
+  ;; host answers with no body.
+  ;;   handshake-refused? : Any -> Boolean
+  ;;   handshake-refused-status : HandshakeRefused -> Nat
+  ;;   handshake-refused-headers : HandshakeRefused -> (Listof (Pair String String))
+  (define-record-type (handshake-refused new-refused handshake-refused?)
+    (fields (immutable status handshake-refused-status)
+            (immutable headers handshake-refused-headers)))
+
+  ;; websocket-handshake : Symbol (String -> (Listof String)) String (WebSocket -> Any)
+  ;;                       [HandshakeSettings [WebsocketLimits]] -> Handshake
+  ;;   Handshake = (U HandshakeAccepted HandshakeRefused)
+  ;; The handshake, for a host whose requests and responses are its own:
+  ;; the request's method, as the symbol the host names it by; a reader
+  ;; answering every line of a field by its name, without regard to ASCII
+  ;; case, in order, '() when the request has none; and the host the request
+  ;; names.  Accepted, the take-over runs `proc` with the WebSocket.  The
+  ;; settings and the limits default as websocket-accept's do.  Arguments
+  ;; outside the contract are an assertion violation naming
+  ;; websocket-handshake, before the reader is called, and so is a reader
+  ;; that answers anything but a list of strings.
+  (define websocket-handshake
+    (case-lambda
+      ((method lines host proc)
+       (websocket-handshake method lines host proc default-settings environment-websocket-limits))
+      ((method lines host proc settings)
+       (websocket-handshake method lines host proc settings environment-websocket-limits))
+      ((method lines host proc settings limits)
+       (unless (symbol? method) (assertion-violation 'websocket-handshake "not a method" method))
+       (unless (procedure? lines) (assertion-violation 'websocket-handshake "not a reader of fields" lines))
+       (unless (string? host) (assertion-violation 'websocket-handshake "not a host" host))
+       (unless (procedure? proc) (assertion-violation 'websocket-handshake "not a procedure" proc))
+       (unless (handshake-settings? settings)
+         (assertion-violation 'websocket-handshake "not handshake settings" settings))
+       (unless (websocket-limits? limits) (assertion-violation 'websocket-handshake "not limits" limits))
+       (handshake 'websocket-handshake method lines host proc settings limits))))
+
+  ;; handshake : Symbol Symbol (String -> (Listof String)) String (WebSocket -> Any)
+  ;;             HandshakeSettings WebsocketLimits -> Handshake
+  ;; The handshake of arguments already checked, a reader's answer that is
+  ;; not a list of strings refused naming `who`.
+  (define (handshake who method lines host proc settings limits)
+    (let ((answer (handshake-answer method (lambda (name) (field-lines who lines name)) host settings)))
+      (if (eq? (car answer) 'accept)
+          (let ((subprotocol (caddr answer)))
+            (new-accepted (cadr answer)
+                          (lambda (transport retained)
+                            (take-over transport retained proc limits subprotocol))))
+          (new-refused (cadr answer) (caddr answer)))))
+
+  ;; field-lines : Symbol (String -> (Listof String)) String -> (U String #f)
   ;; Every line of the field, in order, joined with ", " (RFC 9110 §5.3), or
-  ;; #f when the request has none.
-  (define (field-lines request name)
-    (let ((lines (request-header-values request name)))
-      (and (pair? lines)
-           (fold-left (lambda (all line) (string-append all ", " line)) (car lines) (cdr lines)))))
+  ;; #f when the request has none.  A reader that answers anything but a
+  ;; list of strings is an assertion violation naming `who`.
+  (define (field-lines who lines name)
+    (let ((ls (lines name)))
+      (unless (and (list? ls) (for-all string? ls))
+        (assertion-violation who "not every line of a field, each a string" name ls))
+      (and (pair? ls)
+           (fold-left (lambda (all line) (string-append all ", " line)) (car ls) (cdr ls)))))
+
+  ;; field-bytes : (Listof (Pair String String)) -> (Listof (Pair Bytevector Bytevector))
+  ;; The fields as the server's make-response and switch-protocols take them.
+  (define (field-bytes fields)
+    (map (lambda (f) (cons (string->utf8 (car f)) (string->utf8 (cdr f)))) fields))
 
   ;; take-over : Transport Bytevector (WebSocket -> Any) WebsocketLimits (U String #f) -> Awaiting
   (define (take-over transport retained proc limits subprotocol)

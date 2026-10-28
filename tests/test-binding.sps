@@ -28,6 +28,11 @@
 ;;;   &websocket-closed it lets out does nothing more, any other raise closes
 ;;;   with 1011 and is logged; the limits read from the environment once, as
 ;;;   the program starts, a malformed value stopping it there.
+;;; - websocket-handshake's contract, for a host whose requests and responses
+;;;   are its own: its arguments checked before a field is read, a reader's
+;;;   every line of a field joined, the answers' fields string pairs of their
+;;;   own, the take-over handed to the server's switch-protocols as such a
+;;;   host hands it, and the defaults websocket-accept's are.
 ;;; - websockets 17.2 (asyncio/connection.py, send_context): a send while the
 ;;;   closing handshake is under way waits for the connection to close, then
 ;;;   raises ConnectionClosed.
@@ -55,7 +60,7 @@
 ;;; is read as a client would, the 101 by the server's (response-reader).
 ;;; The binding logs to the current output port, which each check that looks
 ;;; for a line takes for its own.
-(import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
+(import (rnrs) (rnrs mutable-strings) (srfi :64) (ws-testing) (http-server) (fake-shell) (response-reader)
         (only (chezscheme) system getenv)
         (only (http-server limits) default-limits)
         (only (http-server private serve) log-line)
@@ -179,6 +184,70 @@
   (lambda (ws)
     (guard (e ((websocket-closed? e) (note! n (closed e))))
       (let loop () (note! n (websocket-receive ws)) (loop)))))
+
+;; --- another host ------------------------------------------------------------
+
+;; Fields = (Listof (Pair String String)), a request's, a line each.
+
+;; RFC 6455 §1.3's opening handshake's fields, and the host it names.
+(define rfc-fields
+  '(("Host" . "server.example.com") ("Upgrade" . "websocket") ("Connection" . "Upgrade")
+    ("Sec-WebSocket-Key" . "dGhlIHNhbXBsZSBub25jZQ==") ("Sec-WebSocket-Version" . "13")))
+(define rfc-host "server.example.com")
+
+;; The 101's fields for its key, with no subprotocol (§1.3, §4.2.2).
+(define rfc-101
+  '(("Upgrade" . "websocket") ("Sec-WebSocket-Accept" . "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")))
+
+;; lines-of : Fields -> (String -> (Listof String))
+;; Every line of a field, by its name without regard to ASCII case, in
+;; order, and '() for none: as the server's request-header-values reads a
+;; request's.
+(define (lines-of fields)
+  (lambda (name) (map cdr (filter (lambda (f) (string-ci=? (car f) name)) fields))))
+
+;; with-field : Fields String (U String #f) -> Fields
+;; The fields with `name`'s lines replaced by one of `value`, or taken out
+;; when #f.
+(define (with-field fields name value)
+  (let ((rest (remp (lambda (f) (string-ci=? (car f) name)) fields)))
+    (if value (append rest (list (cons name value))) rest)))
+
+;; outcome : Any -> (U (List 'accepted Fields) (List 'refused Nat Fields) (List 'neither Any))
+;; What a handshake answered, as its predicates tell it: one of them, and
+;; not the other.
+(define (outcome h)
+  (cond ((and (handshake-accepted? h) (not (handshake-refused? h)))
+         (list 'accepted (handshake-accepted-headers h)))
+        ((and (handshake-refused? h) (not (handshake-accepted? h)))
+         (list 'refused (handshake-refused-status h) (handshake-refused-headers h)))
+        (else (list 'neither h))))
+
+;; shake : Symbol Fields . Any -> outcome's
+;; websocket-handshake's answer to a request of the fields, to the RFC's
+;; host, with any settings and limits given.
+(define (shake method fields . options)
+  (outcome (apply websocket-handshake method (lines-of fields) rfc-host (lambda (ws) #t) options)))
+
+;; as-bytes : Fields -> (Listof (Pair Bytevector Bytevector))
+;; The fields as the server's own types take them.
+(define (as-bytes fields) (map (lambda (f) (cons (b (car f)) (b (cdr f)))) fields))
+
+;; hosting : (WebSocket -> Any) . Any -> (Request -> Answer)
+;; A handler that takes the WebSocket as another host would: websocket-
+;; handshake given what it reads of the request, with any settings and
+;; limits given, and its answer mapped onto the server's own: the take-over
+;; handed to switch-protocols, a refusal made a response with no body.
+(define (hosting proc . options)
+  (lambda (request)
+    (let ((h (apply websocket-handshake (request-method request)
+                    (lambda (name) (request-header-values request name))
+                    (request-host request) proc options)))
+      (cond ((handshake-accepted? h)
+             (switch-protocols (as-bytes (handshake-accepted-headers h)) (handshake-accepted-take-over h)))
+            ((handshake-refused? h)
+             (make-response (handshake-refused-status h) #f (as-bytes (handshake-refused-headers h)) #f))
+            (else (make-response 500 #f '() #f))))))
 
 ;; --- a client that reads nothing ---------------------------------------------
 
@@ -337,6 +406,144 @@
         (list '(websocket-close! websocket-close! websocket-close!) (list 101 nothing) 'websocket-accept)
         (list (seen n) (after-101 sh)
               (who-of (lambda () (websocket-accept 'request (lambda (ws) #t) 'settings))))))
+
+    ;; --- the handshake, for another host ---
+
+    (test-equal "websocket-handshake accepts RFC 6455's example handshake: the 101's fields as string pairs, Upgrade: websocket and the example's Sec-WebSocket-Accept, and Sec-WebSocket-Protocol only when a subprotocol is offered and chosen"
+      (list (list 'accepted rfc-101)
+            (list 'accepted (append rfc-101 '(("Sec-WebSocket-Protocol" . "chat"))))
+            (list 'accepted rfc-101))
+      (let ((settings (make-handshake-settings '("chat") 'any)))
+        (list (shake 'GET rfc-fields settings)
+              (shake 'GET (with-field rfc-fields "Sec-WebSocket-Protocol" "superchat, chat") settings)
+              (shake 'GET (with-field rfc-fields "Sec-WebSocket-Protocol" "superchat") settings))))
+
+    (test-equal "handshake-accepted? and handshake-refused? each take their own answer alone, and neither takes anything else: settings, a string, #f"
+      '((#t #f) (#f #t) (#f #f) (#f #f) (#f #f))
+      (let ((settings (make-handshake-settings '() 'any)))
+        (map (lambda (x) (list (handshake-accepted? x) (handshake-refused? x)))
+             (list (websocket-handshake 'GET (lines-of rfc-fields) rfc-host (lambda (ws) #t) settings)
+                   (websocket-handshake 'POST (lines-of rfc-fields) rfc-host (lambda (ws) #t) settings)
+                   settings "accepted" #f))))
+
+    ;; Each request is the RFC's with one check broken.
+    (test-equal "websocket-handshake refuses each check that fails with its status and fields as string pairs, and no more: the method, Upgrade, Connection, Sec-WebSocket-Version with Sec-WebSocket-Version: 13, and Sec-WebSocket-Key 400, and a browser's Origin of another host 403"
+      '((refused 400 ()) (refused 400 ()) (refused 400 ())
+        (refused 400 (("Sec-WebSocket-Version" . "13"))) (refused 400 ()) (refused 403 ()))
+      (let ((settings (make-handshake-settings '("chat") '(same-host))))
+        (list (shake 'POST rfc-fields settings)
+              (shake 'GET (with-field rfc-fields "Upgrade" #f) settings)
+              (shake 'GET (with-field rfc-fields "Connection" "keep-alive") settings)
+              (shake 'GET (with-field rfc-fields "Sec-WebSocket-Version" "8") settings)
+              (shake 'GET (with-field rfc-fields "Sec-WebSocket-Key" "dGhlIHNhbXBsZSBub25jZQ") settings)
+              (shake 'GET (with-field rfc-fields "Origin" "http://evil.example") settings))))
+
+    ;; A handler may list any string as an origin, so one listed as two
+    ;; lines joined shows how they are joined.
+    (test-equal "a field over two lines is read as one, its lines joined with \", \" in order: Connection: keep-alive then Connection: Upgrade is accepted, a subprotocol on the second line chosen, two versions of 13 refused 400, and two Origin lines are the origin a handler lists as them joined, in their order"
+      (list (list 'accepted rfc-101)
+            (list 'accepted (append rfc-101 '(("Sec-WebSocket-Protocol" . "superchat"))))
+            '(refused 400 (("Sec-WebSocket-Version" . "13")))
+            (list 'accepted rfc-101)
+            '(refused 403 ()))
+      (let ((two (lambda (name one other)
+                   (append (with-field rfc-fields name #f) (list (cons name one) (cons name other)))))
+            (any (make-handshake-settings '() 'any))
+            (joined (make-handshake-settings '() '("http://a.example, http://b.example"))))
+        (list (shake 'GET (two "Connection" "keep-alive" "Upgrade") any)
+              (shake 'GET (two "Sec-WebSocket-Protocol" "chat" "superchat") (make-handshake-settings '("superchat" "chat") 'any))
+              (shake 'GET (two "Sec-WebSocket-Version" "13" "13") any)
+              (shake 'GET (two "Origin" "http://a.example" "http://b.example") joined)
+              (shake 'GET (two "Origin" "http://b.example" "http://a.example") joined))))
+
+    ;; A request's host and its Host field differ: an absolute-form
+    ;; target's authority is the host (RFC 9112 §3.2.2), and a host may
+    ;; rewrite a request's.
+    (test-equal "the host compared is the one given, not the request's Host field: to websocket-handshake given app.example for a request whose Host is internal:8080, an Origin of https://app.example is accepted and one of http://internal:8080 refused 403"
+      (list (list 'accepted rfc-101) '(refused 403 ()))
+      (map (lambda (origin)
+             (outcome (websocket-handshake 'GET (lines-of (with-field (with-field rfc-fields "Host" "internal:8080")
+                                                                      "Origin" origin))
+                                           "app.example" (lambda (ws) #t))))
+           '("https://app.example" "http://internal:8080")))
+
+    (test-equal "to an absolute-form target of app.example with Host: internal:8080, websocket-accept, and websocket-handshake given request-host, each take an Origin of http://app.example with a 101 and refuse one of http://internal:8080 403"
+      '((101 403) (101 403))
+      (let ((to-app (lambda (origin)
+                      (b (string-append "GET http://app.example/chat HTTP/1.1\r\nHost: internal:8080\r\n"
+                                        upgrade "\r\n" connection "\r\n" rfc-key "\r\n" version "\r\n"
+                                        "Origin: " origin "\r\n\r\n")))))
+        (map (lambda (handler)
+               (map (lambda (origin) (car (answer (connect handler (to-app origin)))))
+                    '("http://app.example" "http://internal:8080")))
+             (list (lambda (request) (websocket-accept request (lambda (ws) #t)))
+                   (hosting (lambda (ws) #t))))))
+
+    (test-equal "websocket-handshake refuses arguments outside its contract, naming itself, before it reads a field: a method not a symbol, a reader not a procedure, a host not a string, a procedure not one, settings not settings, and limits not limits"
+      (list (map (lambda (x) 'websocket-handshake) '(1 2 3 4 5 6)) '() 'key-read)
+      (let* ((read '())
+             (reader (lambda (name) (set! read (cons name read)) ((lines-of rfc-fields) name)))
+             (proc (lambda (ws) #t))
+             (settings (make-handshake-settings '() 'any))
+             (whos (list (who-of (lambda () (websocket-handshake "GET" reader rfc-host proc)))
+                         (who-of (lambda () (websocket-handshake 'GET 'reader rfc-host proc)))
+                         (who-of (lambda () (websocket-handshake 'GET reader 'host proc)))
+                         (who-of (lambda () (websocket-handshake 'GET reader rfc-host 42)))
+                         (who-of (lambda () (websocket-handshake 'GET reader rfc-host proc 'settings)))
+                         (who-of (lambda () (websocket-handshake 'GET reader rfc-host proc settings 'limits)))))
+             (before read))
+        ;; The same reader, in a call that keeps the contract, is read.
+        (websocket-handshake 'GET reader rfc-host proc settings)
+        (list whos before (if (member "Sec-WebSocket-Key" read) 'key-read 'key-not-read))))
+
+    (test-equal "websocket-handshake refuses a reader that answers anything but a list of strings, naming itself: a string, #f, a symbol, a list holding a symbol, an improper list, and a list holding a number for Sec-WebSocket-Protocol alone"
+      (map (lambda (x) 'websocket-handshake) '(1 2 3 4 5 6))
+      (let ((settings (make-handshake-settings '("chat") 'any)))
+        (map (lambda (reader) (who-of (lambda () (websocket-handshake 'GET reader rfc-host (lambda (ws) #t) settings))))
+             (list (lambda (name) "websocket")
+                   (lambda (name) #f)
+                   (lambda (name) 'websocket)
+                   (lambda (name) (list "websocket" 'upgrade))
+                   (lambda (name) (cons "websocket" "upgrade"))
+                   (lambda (name)
+                     (if (string-ci=? name "Sec-WebSocket-Protocol") (list "chat" 7) ((lines-of rfc-fields) name)))))))
+
+    (test-equal "websocket-handshake's short forms take the defaults: no settings are no subprotocols and the request's own host as the one origin, and no limits the environment's, its ping clock armed at 20 s"
+      (list (list 'accepted rfc-101) '(refused 403 ()) 25000 25000)
+      (list (shake 'GET (with-field (with-field rfc-fields "Origin" "http://server.example.com") "Sec-WebSocket-Protocol" "chat"))
+            (shake 'GET (with-field rfc-fields "Origin" "http://evil.example"))
+            (fake-shell-armed (connect (hosting (receiving-all (make-notes))) handshake))
+            (fake-shell-armed (connect (hosting (receiving-all (make-notes)) (make-handshake-settings '())) handshake))))
+
+    ;; Each answer is written over whole before the next is made.
+    (test-equal "each answer's strings are its own: writing over one answer's names and values changes neither the next answer nor the settings, whose subprotocol is still chosen"
+      (list (list 'accepted (append rfc-101 '(("Sec-WebSocket-Protocol" . "chat"))))
+            '(refused 400 (("Sec-WebSocket-Version" . "13"))))
+      (let* ((settings (make-handshake-settings '("chat") 'any))
+             (offer (with-field rfc-fields "Sec-WebSocket-Protocol" "chat"))
+             (version (with-field rfc-fields "Sec-WebSocket-Version" "8"))
+             (spoil! (lambda (fields)
+                       (for-each (lambda (f) (string-fill! (car f) #\x) (string-fill! (cdr f) #\x)) fields))))
+        (spoil! (handshake-accepted-headers (websocket-handshake 'GET (lines-of offer) rfc-host (lambda (ws) #t) settings)))
+        (spoil! (handshake-refused-headers (websocket-handshake 'GET (lines-of version) rfc-host (lambda (ws) #t) settings)))
+        (list (shake 'GET offer settings) (shake 'GET version settings))))
+
+    (let* ((n (make-notes))
+           (sh (connect (hosting (echoing n) (make-handshake-settings '() 'any))
+                        (bv-concat (list handshake rfc-masked-hello))))
+           (a (answer sh)))
+      (test-equal "the take-over, handed to the server's switch-protocols as another host hands it, runs the procedure with a WebSocket over the server's transport: a Hello sent with the handshake is received, and its echo follows the 101"
+        (list 101 "websocket" "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" rfc-hello '("Hello"))
+        (list (car a) (field (cadr a) "Upgrade") (field (cadr a) "Sec-WebSocket-Accept") (caddr a) (seen n))))
+
+    (let* ((n (make-notes))
+           (sh (connect (hosting (lambda (ws) (note! n (websocket-subprotocol ws)) ((receiving-all n) ws))
+                                 (make-handshake-settings '("chat") 'any)
+                                 (limits '((ping-interval-ms . 40000))))
+                        (request upgrade connection rfc-key version "Sec-WebSocket-Protocol: superchat, chat"))))
+      (test-equal "the take-over closes over the subprotocol chosen and the limits given: websocket-subprotocol names chat, and the ping clock is armed at the handler's 40 s"
+        (list 101 '("chat") 45000)
+        (list (car (answer sh)) (seen n) (fake-shell-armed sh))))
 
     ;; --- messages ---
 
@@ -1038,4 +1245,8 @@
       (map (lambda (value)
              (system (string-append "CHEZ_WS_PING_INTERVAL=" value
                                     " \"${CHEZ:-chez}\" --program tests/start-with-environment.sps >/dev/null 2>&1")))
-           '("4" "x")))))
+           '("4" "x")))
+
+    (test-equal "websocket-handshake takes the environment's limits in both its forms that leave them out: a ping interval of 4 s armed twice"
+      8
+      (system "CHEZ_WS_PING_INTERVAL=4 \"${CHEZ:-chez}\" --program tests/start-with-environment.sps handshake >/dev/null 2>&1"))))

@@ -68,15 +68,17 @@ in this order, answering the first failure:
 
 - **The checks are a pure library's, `(websocket handshake)` (M4.1).**
   - It is given the method, a reader of the request's fields and the request's host,
-    as the server's `request-method`, `request-header` and `request-host` read them,
-    and the handler's settings.
+    as the host reads them, and the handler's settings: for `websocket-accept`, the
+    server's `request-method`, `request-header-values` joined, and `request-host`
+    (0009).
   - **A handler's settings**, its subprotocols and its origins, are made once with
     `make-handshake-settings`, and checked there. So a bad name stops the program
     where the settings are made, not at the first client. They keep copies of what
     they were made with (M4.1's review).
   - It answers either the 101's fields and the subprotocol chosen, or a refusal: its
-    status, its fields, and the check that failed. Each answer's bytevectors and
-    strings are its own (M4.1's review).
+    status, its fields, and the check that failed. The fields are string pairs, which
+    `websocket-accept` makes bytes for the server (0009). Each answer's strings are its
+    own (M4.1's review).
   - A refusal has no body, as the server's own refusals have none.
 - **A wrong version is refused 400, not 426** (0003, by form, "400 with 13"). RFC 9110
   has a 426 carry `Upgrade`, and a sender of `Upgrade` put `upgrade` in `Connection`.
@@ -286,8 +288,16 @@ are stepped through the core in place, and the actions run at once:
   the program's, so a malformed `CHEZ_WS_` value stops the program before its first
   line (§7). The facade exports the binding's verbs, `make-handshake-settings`, and
   the limits' constructors and accessors.
-- **The handshake reads every line of a field**, `request-header-values` joined with
-  ", " (RFC 9110 §5.3; 0004).
+- **Another host (0009).** `(websocket-handshake method field-lines host proc [settings
+  [limits]])` is the handshake for a host on the server whose requests and responses
+  are its own. It answers an accepted record, the 101's fields as string pairs and the
+  take-over, or a refused one, the status and its fields. The host maps them onto its
+  own 101 and response, and answers what the take-over answers. `websocket-accept` is
+  built on it: it reads the server's request, and turns the fields into bytes, once a
+  connection. Its arguments are checked before a field is read, each refusal naming it.
+- **The handshake reads every line of a field**, the lines the host's reader gives
+  (the server's `request-header-values` for `websocket-accept`), joined with ", " (RFC
+  9110 §5.3; 0004).
 - **`websocket-receive`** answers the oldest queued message and steps `(taken
   nbytes)`, or parks on `await` until one comes.
 - **A text message's string keeps a leading U+FEFF.** UTF-8 allows it, and the

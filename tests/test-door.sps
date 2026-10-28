@@ -9,18 +9,22 @@
 ;;; may park, before it calls `register`.  The binding's driver suite holds
 ;;; the rest, on the server's fake shell.
 ;;;
-;;; And what (websocket handshake) answers is what the server writes: a 101
-;;; its switch-fault passes against the request's fields, a refusal its
-;;; response-fault passes.  Those are the rules the server applies to what a
-;;; handler answers, in (http-server serializer), a library its facade does
-;;; not export, so this suite is where they are named: the handshake's own
-;;; suite needs no server.
-(import (rnrs) (srfi :64) (ws-testing) (http-server)
+;;; And what websocket-accept answers, (websocket handshake)'s answer made
+;;; the server's own, is what the server writes: a 101 its switch-fault
+;;; passes against the request's fields, a refusal its response-fault
+;;; passes, each answer made on the server's fake shell for a request sent
+;;; there.  Those are the rules the server applies to what a handler
+;;; answers, in (http-server serializer), a library its facade does not
+;;; export, so this suite is where they are named: the handshake's own suite
+;;; needs no server.
+(import (rnrs) (srfi :64) (ws-testing) (http-server) (fake-shell)
+        (only (http-server limits) default-limits)
         (only (http-server serializer) switch-fault response-fault)
-        (websocket handshake))
+        (only (http-server switch) switch-headers)
+        (only (http-server response) response-headers)
+        (websocket))
 
-;; The example request of RFC 6455 §1.3 and §4.1, as request-header reads a
-;; request's fields: the value of the first of a name, without regard to case.
+;; The example request of RFC 6455 §1.3 and §4.1, its fields in order.
 (define rfc-request
   '(("Host" . "server.example.com")
     ("Upgrade" . "websocket")
@@ -34,11 +38,42 @@
 (define (with fields name value)
   (cons (cons name value) (remp (lambda (f) (string-ci=? (car f) name)) fields)))
 
-;; reader : Fields -> (String -> (U String #f))
-(define (reader fields)
-  (lambda (name)
-    (let ((f (find (lambda (f) (string-ci=? (car f) name)) fields)))
-      (and f (cdr f)))))
+;; accepted-with : Symbol Fields (Listof String) Origins (Answer -> Any) -> Any
+;; What `then` makes of what websocket-accept answers a request of the
+;; method and fields, to /chat, a field a line, sent on the server's fake
+;; shell, with the settings of the subprotocols and origins; then runs inside
+;; the handler.  not-answered when the handler never ran.
+(define (accepted-with method fields subprotocols origins then)
+  (let* ((found 'not-answered)
+         (settings (make-handshake-settings subprotocols origins))
+         (sh (make-fake-connection default-limits
+               (lambda (request)
+                 (let ((a (websocket-accept request (lambda (ws) #t) settings)))
+                   (set! found (then a))
+                   a))
+               #f 0)))
+    (fake-shell-feed-input! sh
+      (string->utf8 (apply string-append (symbol->string method) " /chat HTTP/1.1\r\n"
+                           (append (map (lambda (f) (string-append (car f) ": " (cdr f) "\r\n")) fields)
+                                   '("\r\n"))))
+      4096)
+    (fake-shell-settle! sh)
+    found))
+
+;; fault-of : Symbol Fields (Listof String) Origins -> (U #f Symbol)
+;; What the server's checks find in what websocket-accept answers, as
+;; accepted-with sends the request: a response's response-fault, or else a
+;; switch's switch-fault against the request's fields; #f when they find
+;; nothing, and not-answered when the handler never ran.
+(define (fault-of method fields subprotocols origins)
+  (let ((offered (map (lambda (f) (cons (string->utf8 (car f)) (string->utf8 (cdr f)))) fields)))
+    (accepted-with method fields subprotocols origins
+      (lambda (a) (if (response? a) (response-fault a) (switch-fault a offered))))))
+
+;; fields-of : Answer -> (Listof (Pair Bytevector Bytevector))
+;; A 101's or a refusal's fields, as the server holds them.
+(define (fields-of a)
+  (if (response? a) (response-headers a) (switch-headers a)))
 
 ;; noting-transport : (Any -> Any) -> Transport
 ;; A transport whose eight procedures hand `note` what they were called
@@ -87,21 +122,30 @@
 
     ;; A 101, then each refusal's kind: method, upgrade, connection, version,
     ;; key and origin; then a 101 naming a subprotocol.
-    (test-equal "every answer of (websocket handshake) is one the server writes: a 101's fields pass its switch-fault against the request's, and a refusal's its response-fault"
+    (test-equal "every answer websocket-accept makes of (websocket handshake)'s is one the server writes: a 101's fields pass its switch-fault against the request's, and a refusal's its response-fault"
       (map (lambda (x) 'ok) '(1 2 3 4 5 6 7 8 9 10))
       (map (lambda (method fields subprotocols origins)
-             (let ((a (handshake-answer method (reader fields) "server.example.com"
-                                        (make-handshake-settings subprotocols origins)))
-                   (offered (map (lambda (f) (cons (string->utf8 (car f)) (string->utf8 (cdr f)))) fields)))
-               (or (case (car a)
-                     ((accept) (switch-fault (switch-protocols (cadr a) (lambda (t r) t)) offered))
-                     ((refuse) (response-fault (make-response (cadr a) #f (caddr a) #f)))
-                     (else (car a)))
-                   'ok)))
+             (or (fault-of method fields subprotocols origins) 'ok))
            '(GET GET GET POST GET GET GET GET GET GET)
            (list rfc-request rfc-request (with rfc-request "Upgrade" "WebSocket")
                  rfc-request (with rfc-request "Upgrade" "h2c") (with rfc-request "Connection" "close")
                  (with rfc-request "Sec-WebSocket-Version" "8") (with rfc-request "Sec-WebSocket-Key" "x")
                  rfc-request (with rfc-request "Sec-WebSocket-Protocol" "superchat"))
            '(("chat") () () () () () () () () ("superchat"))
-           '(any any any any any any any any () any)))))
+           '(any any any any any any any any () any)))
+
+    ;; Each answer's bytes are written over whole before the next is made.
+    (test-equal "each answer websocket-accept makes has field bytes of its own: writing over one 101's and one refusal's leaves the next answer's as they were"
+      '((("Upgrade" . "websocket") ("Sec-WebSocket-Accept" . "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+         ("Sec-WebSocket-Protocol" . "chat"))
+        (("Sec-WebSocket-Version" . "13")))
+      (let ((spoil! (lambda (a)
+                      (for-each (lambda (f) (bytevector-fill! (car f) 0) (bytevector-fill! (cdr f) 0))
+                                (fields-of a))))
+            (strings (lambda (a)
+                       (map (lambda (f) (cons (utf8->string (car f)) (utf8->string (cdr f)))) (fields-of a))))
+            (version (with rfc-request "Sec-WebSocket-Version" "8")))
+        (accepted-with 'GET rfc-request '("chat") 'any spoil!)
+        (accepted-with 'GET version '() 'any spoil!)
+        (list (accepted-with 'GET rfc-request '("chat") 'any strings)
+              (accepted-with 'GET version '() 'any strings))))))

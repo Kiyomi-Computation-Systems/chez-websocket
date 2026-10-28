@@ -130,6 +130,43 @@ The fields are `max-message-bytes`, `max-queue`, `ping-interval-ms`,
 `ping-timeout-ms`, `close-timeout-ms`, `write-high-water`, `write-low-water`
 and `write-timeout-ms`.
 
+## Taking a WebSocket from another host
+
+`websocket-accept` reads chez-http-server's request and answers its response.
+A host with requests and responses of its own, such as a framework on top of
+the server, asks `websocket-handshake` instead. Give it the request's method,
+a way to read every line of a field, the request's host, and your procedure.
+Settings and limits come after, as for `websocket-accept`.
+
+The answer is one of two, its fields string pairs:
+
+- **Accepted** (`handshake-accepted?`): answer `101` with
+  `handshake-accepted-headers`, and hand `handshake-accepted-take-over` to the
+  server's `switch-protocols`. Your procedure runs once the `101` is sent.
+  If you wrap the take-over, answer what it answers, or your procedure never
+  runs.
+- **Refused** (`handshake-refused?`): answer `handshake-refused-status` with
+  `handshake-refused-headers`, and no body.
+
+Here it is mapped onto the server's own types, as `websocket-accept` maps it.
+Your host maps it onto its own.
+
+```scheme name=other-host
+(define (bytes fields)
+  (map (lambda (f) (cons (string->utf8 (car f)) (string->utf8 (cdr f))))
+       fields))
+
+(let ((h (websocket-handshake (request-method request)
+                              (lambda (name) (request-header-values request name))
+                              (request-host request)
+                              chat)))
+  (if (handshake-accepted? h)
+      (switch-protocols (bytes (handshake-accepted-headers h))
+                        (handshake-accepted-take-over h))
+      (make-response (handshake-refused-status h) #f
+                     (bytes (handshake-refused-headers h)) #f)))
+```
+
 ## More examples
 
 [examples](../examples) holds whole servers, each with a page at `/` to try

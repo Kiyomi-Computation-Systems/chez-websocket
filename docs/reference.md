@@ -13,7 +13,8 @@ Arguments in `[brackets]` may be left out, from the right. A line like
 procedure.
 
 **Types.** `Nat` is a non-negative exact integer. `Request` is the request a
-chez-http-server handler is given, and `Answer` what it returns. `WebSocket`,
+chez-http-server handler is given, `Answer` what it returns, and `Transport`
+the stream the server hands a `101`'s take-over. `WebSocket`, `Handshake`,
 `HandshakeSettings` and `WebsocketLimits` are records you read only through
 the names below.
 
@@ -35,6 +36,60 @@ is not, the answer is the refusal, `400` or `403`, and `procedure` never runs.
 `environment-websocket-limits`.
 
 **Details:** [Handlers](handlers.md)
+
+### `websocket-handshake` (procedure)
+
+`(websocket-handshake method field-lines host procedure [settings [limits]]) -> Handshake`
+
+The same check, for a host whose requests and responses are its own.
+`method` is the request's method as a symbol, such as `GET`. `(field-lines
+name)` gives every line of the request's field `name`, matched without regard
+to case, in order: `'()` for none. `host` is the host the request names. The
+answer is accepted or refused, and its fields are string pairs of its own.
+`settings` and `limits` default as for `websocket-accept`.
+
+**Details:** [Handlers](handlers.md)
+
+### `handshake-accepted?` (predicate)
+
+`(handshake-accepted? object) -> Boolean`
+
+Whether `object` is an accepted handshake.
+
+### `handshake-accepted-headers` (procedure)
+
+`(handshake-accepted-headers handshake) -> (Listof (Pair String String))`
+
+The `101`'s fields: `Upgrade`, `Sec-WebSocket-Accept`, and
+`Sec-WebSocket-Protocol` when a subprotocol is chosen.
+
+### `handshake-accepted-take-over` (procedure)
+
+`(handshake-accepted-take-over handshake) -> (Transport Bytevector -> Answer)`
+
+What takes the connection over once the `101` is sent: hand it to the
+server's `switch-protocols`. Called with the server's transport and the bytes
+read past the request, it runs `procedure` with the WebSocket. If you wrap it,
+answer what it answers, or `procedure` never runs.
+
+### `handshake-refused?` (predicate)
+
+`(handshake-refused? object) -> Boolean`
+
+Whether `object` is a refused handshake.
+
+### `handshake-refused-status` (procedure)
+
+`(handshake-refused-status handshake) -> Nat`
+
+The refusal's status, `400` or `403`.
+
+### `handshake-refused-headers` (procedure)
+
+`(handshake-refused-headers handshake) -> (Listof (Pair String String))`
+
+The refusal's fields: `Sec-WebSocket-Version: 13` for a wrong version, and
+otherwise none. Answer them with no body.
 
 ### `websocket?` (predicate)
 

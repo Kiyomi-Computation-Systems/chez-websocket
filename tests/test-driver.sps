@@ -171,9 +171,14 @@
 
 (define (none transport) #f)
 
+;; as-bytes : (Listof (Pair String String)) -> (Listof (Pair Bytevector Bytevector))
+;; An answer's fields, as the server's own types take them.
+(define (as-bytes fields) (map (lambda (f) (cons (b (car f)) (b (cdr f)))) fields))
+
 ;; handler : Taker (Transport -> Any) (Taker -> (-> Any)) -> (Request -> Answer)
-;; (websocket handshake)'s answer from the request.  Accepted, the
-;; take-over as above, `extra` run with the transport before it answers.
+;; (websocket handshake)'s answer from the request, its fields made bytes.
+;; Accepted, the take-over as above, `extra` run with the transport before
+;; it answers.
 (define (handler t extra thunk-of)
   (lambda (request)
     (let ((a (handshake-answer (request-method request)
@@ -182,7 +187,7 @@
                                (make-handshake-settings '() 'any))))
       (if (eq? (car a) 'accept)
           (switch-protocols
-           (cadr a)
+           (as-bytes (cadr a))
            (lambda (transport retained)
              (taker-transport-set! t transport)
              (when (> (bytevector-length retained) 0) (taker-pieces-set! t (list retained)))
@@ -191,7 +196,7 @@
              (transport-read-start! transport (on-bytes t) (on-end t))
              (extra transport)
              (awaiting (thunk-of t))))
-          (make-response (cadr a) #f (caddr a) #f)))))
+          (make-response (cadr a) #f (as-bytes (caddr a)) #f)))))
 
 ;; connect : Taker (Transport -> Any) (Taker -> (-> Any)) Bytevector -> FakeShell
 ;; A fake connection, its clock at 5,000 ms, read `input` and settled: every

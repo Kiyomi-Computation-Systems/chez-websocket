@@ -6,11 +6,33 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`websocket-handshake`, the handshake for a host of its own.** A host on the server
+  whose requests and responses are its own, such as a framework, gives it the request's
+  method, a reader of every line of a field, the request's host and your procedure,
+  with settings and limits as for `websocket-accept`. It answers one of two:
+  - **accepted:** the `101`'s fields as string pairs, read with
+    `handshake-accepted-headers`, and the take-over to hand the server's
+    `switch-protocols`, `handshake-accepted-take-over`. A host that wraps the take-over
+    answers what it answers;
+  - **refused:** `handshake-refused-status` and `handshake-refused-headers`, answered
+    with no body.
+
+  `handshake-accepted?` and `handshake-refused?` tell them apart. `docs/handlers.md`
+  has a section on it.
+
 ### Changed
 
+- **`websocket-accept` is built on `websocket-handshake`.** What it takes and answers is
+  unchanged.
+- **`(websocket handshake)`'s `handshake-answer` answers its fields as string pairs**,
+  not bytevector pairs. The facade doesn't export it and the docs don't name it, but a
+  program that imports `(websocket handshake)` itself and hands its fields to the server
+  must now turn them into bytes.
 - **Pinned at chez-http-server v0.9.0**, from v0.7.0 by way of v0.8.0. The pins under
   it: chez-libuv v0.11.0, as before; chez-httparse v0.5.0 with byte-machine v0.8.0;
-  and uriparse v0.8.0. The library's code is unchanged.
+  and uriparse v0.8.0. The pin needs no change to the library's code.
   - `(http-server)` exports sixteen more names, among them `request-header-list`,
     `request-has-body?`, `request-on-done!`, `sized-body`, `next-body-piece` and the
     connection's addresses and ports. A program that imports all of `(http-server)`

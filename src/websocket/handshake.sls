@@ -2,17 +2,18 @@
 ;;; (websocket handshake) — the opening handshake's check, and the 101's
 ;;; fields (RFC 6455 §4.2).
 ;;;
-;;; Pure: the request is the server's, so this library is given what it
-;;; reads of it.  The method is the symbol llhttp names.  A reader answers a
-;;; field's value from its name, without regard to ASCII case, or #f: the
-;;; facade gives every line of the field, joined with commas.  The host is
-;;; the request's, as its request-host reads it.  A test gives it a table.
+;;; Pure: the request is the host's, so this library is given what it reads
+;;; of it.  The method is the symbol the host names it by, llhttp's for the
+;;; server.  A reader answers a field's value from its name, without regard
+;;; to ASCII case, or #f: the binding's websocket-handshake gives every line
+;;; of the field, joined with commas.  The host is the request's, as the
+;;; server's request-host reads it.  A test gives it a table.
 ;;;
 ;;; A handler's settings, its subprotocols and its origins, are made once,
 ;;; with make-handshake-settings, and checked there, so a bad name stops the
 ;;; program where the settings are made, not at the first client.  They keep
-;;; copies of what they were made with, and each answer's bytevectors and
-;;; strings are its own.
+;;; copies of what they were made with, and each answer's strings are its
+;;; own.
 ;;;
 ;;; The checks, in order; the first that fails answers (§4.2.1):
 ;;;   the method is GET                                   400
@@ -105,10 +106,9 @@
   ;;           | (List 'refuse Nat Headers Symbol)
   ;;               the status, its fields, and the check that failed: method,
   ;;               upgrade, connection, version, key or origin
-  ;;   Headers = (Listof (Pair Bytevector Bytevector)), as the server's
-  ;;             make-response and switch-protocols take them, each made
-  ;;             for its answer
-  ;; What the server answers the request: the 101's fields, or a refusal.
+  ;;   Headers = (Listof (Pair String String)), each name and value made
+  ;;             for its answer: a host turns them into its own
+  ;; What the host answers the request: the 101's fields, or a refusal.
   ;; Arguments outside the contract are an assertion violation naming
   ;; handshake-answer, and so is a field the reader answers with anything
   ;; but a string or #f.
@@ -145,9 +145,9 @@
 
   (define (refusal status headers why) (list 'refuse status headers why))
 
-  ;; header : String String -> (Pair Bytevector Bytevector) — a field, made
-  ;; for its answer.
-  (define (header name value) (cons (string->utf8 name) (string->utf8 value)))
+  ;; header : String String -> (Pair String String) — a field, made for its
+  ;; answer.
+  (define (header name value) (cons (string-copy name) (string-copy value)))
 
   (define (refuse-argument message irritant)
     (assertion-violation 'handshake-answer message irritant))

@@ -495,12 +495,14 @@
 ;; library-name? : String -> Boolean
 ;; Whether the word is written as one of the library's names: websocket?, or
 ;; one beginning websocket-, &websocket-, make-websocket-, make-handshake-,
-;; handshake-settings, default-websocket- or environment-websocket-.
+;; handshake-settings, handshake-accepted, handshake-refused,
+;; default-websocket- or environment-websocket-.
 (define (library-name? w)
   (or (string=? w "websocket?")
       (exists (lambda (p) (starts? w p))
               '("websocket-" "&websocket-" "make-websocket-" "make-handshake-"
-                "handshake-settings" "default-websocket-" "environment-websocket-"))))
+                "handshake-settings" "handshake-accepted" "handshake-refused"
+                "default-websocket-" "environment-websocket-"))))
 
 ;; names : String -> (Listof String)
 ;; Each word of the text, a run of name characters, that is written as one of
@@ -760,7 +762,11 @@
 ;;   page from the origin listed is accepted, one from another site refused
 ;;   403;
 ;; - upload-limits: a message the default cap refuses is taken, so a frame
-;;   announcing 2,000,000 bytes gets no close.
+;;   announcing 2,000,000 bytes gets no close;
+;; - other-host: a handler mapping websocket-handshake's answer onto the
+;;   server's own types, as websocket-accept maps it, does what it does: an
+;;   echo, and a wrong version, sent as a second line, refused 400 with
+;;   Sec-WebSocket-Version: 13, its refusal's fields answered.
 (define known-blocks
   (list (list "echo" 'program
               (lambda (make)
@@ -780,7 +786,13 @@
               '((101 "chat.v2") (403 #f)))
         (list "upload-limits" 'handler
               (lambda (make) (played make (bv-concat (list (handshake "/") big-header)) #f heard))
-              (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (make-bytevector 0)))))
+              (list 101 "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (make-bytevector 0)))
+        (list "other-host" 'handler
+              (lambda (make)
+                (list (played make (echo-input "/") client-close heard)
+                      (played make (handshake "/" "Sec-WebSocket-Version: 8") #f
+                              (head-field "Sec-WebSocket-Version"))))
+              (list echo-heard '(400 "13")))))
 
 ;; --- the pages -------------------------------------------------------------------
 
