@@ -2712,3 +2712,12 @@ MERGED to main on 2026-10-28, on the owner's "do closing ritual on green": **the
 - **A check watched straight after a push may not exist yet.** `gh pr checks --watch` exited 0 with both checks pending. Watching the head commit's own run (`gh run list --commit`) waits for it.
 
 NEXT: tag 577127d `v0.3.0` and push it, on the owner's word, which republishes the docs site with links pinned to v0.3.0; then circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive, v0.3.0's among them; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+RELEASED v0.3.0 on 2026-10-28, on the owner's "do it": push the ledger, then tag 577127d `v0.3.0`, push the tag, and check that the Pages run republishes the site.
+- **The tag.** `v0.3.0` is an annotated tag on 577127d, signed with the Kiyomi releases key (`git tag -s`; `git tag -v` reports a good signature). Its message follows v0.2.0's.
+- **Published.** The tag's Pages run, 40666101036, built and deployed on its first attempt, in 51 s. The site's eight pages link out to the repository seven times, each naming `blob/v0.3.0/`, and each answers 200 on GitHub. The reference and handlers pages carry `websocket-handshake`, and the handlers page has "Taking a WebSocket from another host". main's run on ad0d125, 40666058823, was green.
+
+**Reflect.**
+- **A deploy rule set at one release holds for the next.** v0.2.0's first deploy was refused until `github-pages` allowed `v*` tags; v0.3.0's deployed at once.
+
+NEXT: circuit's 6c pins chez-websocket at v0.3.0. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive, v0.3.0's among them; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
