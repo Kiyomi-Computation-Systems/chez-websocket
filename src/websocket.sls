@@ -4,12 +4,25 @@
 ;;; A handler of chez-http-server's takes a WebSocket by answering what
 ;;; websocket-accept returns; its procedure then reads with
 ;;; websocket-receive, which waits, and writes with websocket-send! and
-;;; websocket-close!.  A handler's settings, its subprotocols and origins,
-;;; are made once with make-handshake-settings; its limits, if it gives any,
-;;; with the limits' own constructors, and otherwise are the environment's,
-;;; read as the program starts.
+;;; websocket-close!.  A host whose requests and responses are its own takes
+;;; one through websocket-handshake, given what it reads of the request, and
+;;; maps the answer onto its own: an accepted one's fields and take-over onto
+;;; its 101, which the server's switch-protocols writes, and a refused one's
+;;; status and fields onto its response.  A handler's settings, its
+;;; subprotocols and origins, are made once with make-handshake-settings;
+;;; its limits, if it gives any, with the limits' own constructors, and
+;;; otherwise are the environment's, read as the program starts.
 ;;;
 ;;;   websocket-accept : Request (WebSocket -> Any) [HandshakeSettings [WebsocketLimits]] -> Answer
+;;;   websocket-handshake : Symbol (String -> (Listof String)) String (WebSocket -> Any)
+;;;                         [HandshakeSettings [WebsocketLimits]] -> Handshake
+;;;     Handshake = (U HandshakeAccepted HandshakeRefused)
+;;;   handshake-accepted? : Any -> Boolean
+;;;   handshake-accepted-headers : HandshakeAccepted -> (Listof (Pair String String))
+;;;   handshake-accepted-take-over : HandshakeAccepted -> (Transport Bytevector -> Answer)
+;;;   handshake-refused? : Any -> Boolean
+;;;   handshake-refused-status : HandshakeRefused -> Nat
+;;;   handshake-refused-headers : HandshakeRefused -> (Listof (Pair String String))
 ;;;   websocket-receive : WebSocket -> (U String Bytevector)
 ;;;   websocket-send! : WebSocket (U String Bytevector) -> Void
 ;;;   websocket-close! : WebSocket [Nat [String]] -> Void
@@ -20,7 +33,10 @@
 ;;; and (websocket handshake)'s settings and (websocket limits)' record, each
 ;;; documented there.
 (library (websocket)
-  (export websocket-accept websocket-receive websocket-send! websocket-close!
+  (export websocket-accept websocket-handshake
+          handshake-accepted? handshake-accepted-headers handshake-accepted-take-over
+          handshake-refused? handshake-refused-status handshake-refused-headers
+          websocket-receive websocket-send! websocket-close!
           websocket-subprotocol websocket?
           &websocket-closed websocket-closed? websocket-closed-code
           websocket-closed-reason websocket-closed-clean?

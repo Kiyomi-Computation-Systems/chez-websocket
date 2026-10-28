@@ -16,7 +16,7 @@
 ;;;   same-host, as coder and gorilla do; the Origin's scheme, held to
 ;;;   X-Forwarded-Proto when that names http or https.
 ;;; - A handler's settings, checked once where they are made, keep copies of
-;;;   what they were made with; each answer's bytes and strings are its own.
+;;;   what they were made with; each answer's strings are its own.
 ;;;
 ;;; That every answer is one the server writes is the door suite's to hold:
 ;;; this suite needs no server.
@@ -42,17 +42,14 @@
   (let ((rest (remp (lambda (f) (string-ci=? (car f) name)) fields)))
     (if value (cons (cons name value) rest) rest)))
 
-;; strings : (Listof (Pair Bytevector Bytevector)) -> Fields
-(define (strings headers)
-  (map (lambda (h) (cons (utf8->string (car h)) (utf8->string (cdr h)))) headers))
-
 ;; readable : Answer -> (U (List 'accept Fields (U String #f))
-;;                         (List 'refuse Nat Fields Symbol))
-;; An answer, its fields as strings, to compare.
+;;                         (List 'refuse Nat Fields Symbol)
+;;                         (List 'not-an-answer Any))
+;; An answer, to compare: its fields are string pairs, as Fields are.
 (define (readable a)
   (case (car a)
-    ((accept) (list 'accept (strings (cadr a)) (caddr a)))
-    ((refuse) (list 'refuse (cadr a) (strings (caddr a)) (cadddr a)))
+    ((accept) (list 'accept (cadr a) (caddr a)))
+    ((refuse) (list 'refuse (cadr a) (caddr a) (cadddr a)))
     (else (list 'not-an-answer a))))
 
 ;; answer : Symbol Fields String (Listof String) Origins -> readable's
@@ -361,7 +358,7 @@
                                                 rfc-host settings))))))
 
     ;; Each answer is spoiled whole before the next is made.
-    (test-equal "each answer's fields are bytevectors of its own, and its subprotocol a string of its own: writing over one answer's leaves the next answer's as they were"
+    (test-equal "each answer's fields are strings of its own, and its subprotocol a string of its own: writing over one answer's leaves the next answer's as they were"
       (list (list 'accept
                   (list (cons "Upgrade" "websocket")
                         (cons "Sec-WebSocket-Accept" "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
@@ -371,7 +368,7 @@
       (let ((settings (make-handshake-settings '("chat") 'any))
             (version (with rfc-request "Sec-WebSocket-Version" "8")))
         (define (spoil! a)
-          (for-each (lambda (h) (bytevector-fill! (car h) 0) (bytevector-fill! (cdr h) 0))
+          (for-each (lambda (h) (string-fill! (car h) #\x) (string-fill! (cdr h) #\x))
                     (if (eq? (car a) 'accept) (cadr a) (caddr a)))
           (when (and (eq? (car a) 'accept) (caddr a)) (string-fill! (caddr a) #\x)))
         (spoil! (handshake-answer 'GET (reader rfc-request) rfc-host settings))
