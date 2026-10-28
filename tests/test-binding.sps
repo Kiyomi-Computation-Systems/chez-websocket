@@ -1249,4 +1249,25 @@
 
     (test-equal "websocket-handshake takes the environment's limits in both its forms that leave them out: a ping interval of 4 s armed twice"
       8
-      (system "CHEZ_WS_PING_INTERVAL=4 \"${CHEZ:-chez}\" --program tests/start-with-environment.sps handshake >/dev/null 2>&1"))))
+      (system "CHEZ_WS_PING_INTERVAL=4 \"${CHEZ:-chez}\" --program tests/start-with-environment.sps handshake >/dev/null 2>&1"))
+
+    ;; --- the limits from a host's own lookup ---
+
+    ;; The suite runs with no CHEZ_WS_ variable set (checked above), so getenv
+    ;; would give the defaults: 1048576 B and 20 s.
+    (test-equal "websocket-limits-from-environment, through the facade, reads the lookup it is given, not the process's environment: 4096 B and a ping interval of 4 s over the defaults, the queue's 16 kept, and a malformed value refused naming the procedure and the variable"
+      '(4096 4000 16 (websocket-limits-from-environment "CHEZ_WS_MAX_QUEUE" "x"))
+      (let* ((own (lambda (name)
+                    (cond ((string=? name "CHEZ_WS_MAX_MESSAGE_BYTES") "4096")
+                          ((string=? name "CHEZ_WS_PING_INTERVAL") "4")
+                          (else #f))))
+             (limits (websocket-limits-from-environment own))
+             (refused (guard (e ((assertion-violation? e)
+                                 (cons (condition-who e) (condition-irritants e))))
+                        (websocket-limits-from-environment
+                         (lambda (name) (and (string=? name "CHEZ_WS_MAX_QUEUE") "x")))
+                        'no-raise)))
+        (list (websocket-limits-max-message-bytes limits)
+              (websocket-limits-ping-interval-ms limits)
+              (websocket-limits-max-queue limits)
+              refused)))))

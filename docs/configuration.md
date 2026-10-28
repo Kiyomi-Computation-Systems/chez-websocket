@@ -52,6 +52,11 @@ CHEZ_WS_MAX_MESSAGE_BYTES=16777216 CHEZ_WS_PING_INTERVAL=30 make run PROGRAM=ech
 `environment-websocket-limits` is what was read. To give one handler other
 limits, see [Handlers](handlers.md).
 
+A host that reads its settings through a procedure of its own, rather than
+the process's environment, builds limits from it with
+`(websocket-limits-from-environment lookup)`, and hands them to
+`websocket-handshake` or `websocket-accept`.
+
 The server's own variables still apply: where it listens, how many
 connections it takes, and how long a closed connection lingers for the
 client (`CHEZ_HTTP_LINGER_TIMEOUT`). See chez-http-server's
