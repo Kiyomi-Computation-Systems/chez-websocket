@@ -6,6 +6,11 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
+`websocket-handshake`, for a host on the server whose requests and responses are its
+own, on chez-http-server v0.9.0.
+
 ### Added
 
 - **`websocket-handshake`, the handshake for a host of its own.** A host on the server
@@ -179,6 +184,7 @@ against chez-http-server v0.5.0.
   | the same, after 10 echoes | 5,353 to 5,477 B |
   | the server's own connection, idle after a GET, for scale | 1,900 to 2,055 B |
 
-[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/releases/tag/v0.1.0
