@@ -26,6 +26,13 @@ own, on chez-http-server v0.9.0.
 
   `handshake-accepted?` and `handshake-refused?` tell them apart. `docs/handlers.md`
   has a section on it.
+- **Contributor docs.** `CONTRIBUTING.md` covers setup, the checks CI runs, what to do
+  when a change moves a verdict, the server pin, `Akku.manifest`, the Makefile,
+  `docs/` or `examples/`, and the rules for code, tests and pull requests. A pull
+  request template and bug and feature issue templates follow it, and README.org has
+  Contributing and Security sections. The docs suite holds all four files to the
+  checkout: each `make` target they run must be one the Makefile documents, and each
+  file they name must exist.
 
 ### Changed
 
@@ -51,6 +58,18 @@ own, on chez-http-server v0.9.0.
     grew by about 270 B, and a WebSocket's with it.
   - Autobahn|Testsuite's 301 cases keep their verdicts: 291 OK, 7 NON-STRICT and 3
     INFORMATIONAL.
+- **Release archives leave out `AGENTS.md`**, as they already left out `.plans/` and
+  `.superpowers/`. That holds for `git archive` and GitHub's source tarballs, and
+  Akku's scan skips `AGENTS.md` too. v0.2.0's tarball still carries it.
+
+### Fixed
+
+- **The socket suite's let-go check holds on chez-http-server v0.9.0.** It went red in
+  4 of 6 runs there with nothing kept. Chez's collector marks some objects of the
+  oldest generation in place, and a marked segment's dead objects still count in
+  `bytes-allocated`. The check now collects with nothing marked in place. It passed 10
+  of 10 runs on v0.9.0 and on v0.7.0, and still fails for a binding that keeps each
+  read's bytevector, at 18,816 to 18,992 B.
 
 ## [0.2.0] - 2026-10-24
 
