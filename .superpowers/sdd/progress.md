@@ -2721,3 +2721,17 @@ RELEASED v0.3.0 on 2026-10-28, on the owner's "do it": push the ledger, then tag
 - **A deploy rule set at one release holds for the next.** v0.2.0's first deploy was refused until `github-pages` allowed `v*` tags; v0.3.0's deployed at once.
 
 NEXT: circuit's 6c pins chez-websocket at v0.3.0. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive, v0.3.0's among them; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-28, on the owner's "Run the release chain": **`websocket-limits-from-environment` in the facade**, #99. Circuit's 6c found that an app there reads its settings from the ENV it gives `run-server`, which `environment-websocket-limits` never sees: that is read through `getenv` as the program starts. Asked from circuit, the owner chose "Release chez-websocket first", and that the app builds its limits from its own ENV and passes them in.
+- **The change.** The facade exports `websocket-limits-from-environment : (String -> (U String #f)) -> WebsocketLimits`, which `(websocket limits)` defined already and `environment-websocket-limits` is made from, with `getenv`. `docs/reference.md` has its entry, and `docs/configuration.md` says a host with a lookup of its own passes it. CHANGELOG.md's Unreleased and the design's facade bullet name it.
+- **The row.** One binding row, through the facade: a lookup's 4096 B and 4 s over the defaults, the queue's 16 kept, where the suite's own environment (checked empty) would give 1 MiB and 20 s; and a malformed value refused, naming the procedure and the variable, with a no-raise sentinel.
+- **Watched to fail:** with the reference entry written and the export missing, the docs suite failed its two export rows, and the binding suite stopped at the unbound name.
+- **Where it ran:** Linux x86-64, circuit's pinned Guix container with procps. `make test` passed 16 suites, 434 rows (main 433), with `check-help`, and `check-pins` on the host.
+- **#99**, at ea3cbc2 (two commits: 567f58f, the export, docs and row; ea3cbc2, the records), was squashed as 07e0388 (tree b34be2b, the tested head's; parent 4a17082). Its run 40683925069 was green: autobahn 1 m 35 s (`301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`), linux 1 m 12 s, with `check-site` and 434 rows.
+- **Branches.** `feat/limits-from-environment` was deleted, local and remote. The main checkout is fast-forwarded to 07e0388. No PR is open.
+
+**Reflect.**
+- **A value read at load answers the process, not a host.** `environment-websocket-limits` was the only way to the variables, and a host whose settings come through a procedure of its own had none until the procedure behind it was exported.
+- **A host's first use is the facade's review.** Circuit's 6c was the first host apart from the server's handlers, and the gap showed only there.
+
+NEXT: v0.4.0, a release PR (`release/v0.4.0`: Unreleased to `[0.4.0] - 2026-10-28`, and Akku.manifest), then the signed tag; circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
