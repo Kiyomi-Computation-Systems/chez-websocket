@@ -2676,3 +2676,28 @@ MERGED to main on 2026-10-26, on the owner's "do ritual": **the server's v0.9.0,
 - **"Tagged" is checked on the remote first.** The first request to pin v0.9.0 came while its release PR was still open, and no tag was there to pin.
 
 NEXT: Akku, once chez-http-server is in its index (its 0.8.0 was submitted). Linux CI's 6 m 22 s, if it stays. CONTRIBUTING.md's AGENTS.md link is dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-28, on the owner's "do ritual on 97": **`websocket-handshake`, the handshake for a host of its own**, #97. The owner had asked, from circuit, "lets do the websocket handshake": items 1 and 2 of circuit's slice 6 design, §6 "The change in chez-websocket", which the owner approved on 2026-10-27 (decision 0009).
+- **The interface.** `websocket-handshake`, in the binding and through the facade, takes the method as a symbol, a reader of every line of a field, the request's host and the procedure, with optional settings and limits. It answers `handshake-accepted` (the 101's fields as string pairs, and the take-over, `Transport Bytevector -> Answer`) or `handshake-refused` (a status and its fields), read by six accessors. Its argument checks name it, before the reader is called. `websocket-accept` is built on it, its contract unchanged, and turns the fields into bytes itself, once a connection. `handshake-answer` answers string pairs, and `header` copies its strings.
+- **The build** (Opus 5.5; 357,838 tokens, 34.7 minutes): the code, 11 binding rows (HB-*), the reference's seven entries and the handlers page's "Taking a WebSocket from another host". The brief said the door suite stays unchanged, which `websocket-accept`'s new conversion made impossible; on the session's word it now holds `websocket-accept`'s own answers on the fake shell, where it held `handshake-answer`'s. Its mutants, predictions hashed first (`6d72b377`): 5 mismatches, each a prediction's; H-26 survived, equivalent.
+- **A read-only Opus review** (Opus 5.5; 161,158 tokens, 12.6 minutes) found, each fixed by the session:
+  - the host argument untested: RV-12 (the `Host` field read instead), and the session's SV-1 and SV-2, survived every suite. Now HB-HOST, a host given apart from `Host`, and HB-HOST-ABS, an absolute-form target over the wire;
+  - no row held that each answer's bytes are its own: RV-11 and SV-3 survived. Now D-OWN-BYTES spoils one 101's bytes and one refusal's;
+  - a host that wraps the take-over and drops its answer writes the 101 and never runs the procedure (its probe). The reference and the handlers page say to answer what it answers;
+  - two comments over-claimed: that every argument check of `websocket-accept` names it, and a handshake "for any host".
+  The review's other ten mutants, and the session's SV-4 to SV-9, were killed by the build's suites.
+- **Measured** (`ws-cost.sps`, Linux x86-64, main beside it): an idle WebSocket 5,513 to 5,679 B, 5,513 to 5,680 B on main; after 10 echoes 5,490 to 5,668 B, 5,465 to 5,635 B. Unchanged.
+- **Where it ran:** Linux x86-64, Chez 10.4.1 threaded, in circuit's pinned Guix container with procps (`test-autobahn-run` needs `ps`). `make test` passed 16 suites, 433 rows (main 419), on the final tree and again before the commit; `make check-help`; `make check-pins` on the host. `check-site` (no cmark-gfm there) and Autobahn were left to CI.
+- **#97**, at efdf0c3 (two commits: 6f86dfc, the code, tests and docs; efdf0c3, the records), was squashed as 4e39d7e (tree b427417, the tested head's; parent e4687af). Its run 40661773107 was green: autobahn 54 s (`301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`), linux 51 s, with `check-site` and 433 rows.
+- **Branches.** `feat/host-neutral-handshake` was deleted, local and remote. The main checkout is fast-forwarded to 4e39d7e. No PR is open.
+- **Traps:**
+  - Chez 10.4.1 lets a program write over a library's string literal: `string-fill!` on a literal a library answered printed `xxxxxxx`. `header` copies.
+  - `--libdirs` skips a missing directory silently. The review's mutant folders are source roots, with no `src/` inside, and a run naming `…/src` tested the real code.
+
+**Reflect.**
+- **An argument a field could stand in for is tested with a value apart from the field.** The builder's rows gave the host as `Host` gave it, so a handshake that read the field passed. The brief named the argument, not that test; circuit's 6c brief names it for `req-host`.
+- **A conversion that moves takes its test of sharing with it.** Each answer's bytes were its own while `handshake-answer` made them; once `websocket-accept` made them, nothing held it until D-OWN-BYTES.
+- **A contract a host can break silently is written where the host reads.** A dropped take-over answer hangs, with no error. Circuit's `TakeOver` type reads `-> Any` (its `src/circuit/response.sls:52`), and 6c makes it `-> Answer`.
+- **A count is read from the whole output.** A rerun kept through `tail -25` lost the suite totals; CI's log gave them back.
+
+NEXT: v0.3.0, a release PR (`release/v0.3.0`: Unreleased to `[0.3.0] - date`, and Akku.manifest), then the signed tag, on the owner's word; circuit's 6c pins it. Akku, once chez-http-server is in its index. CONTRIBUTING.md's AGENTS.md link is dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`. Linux CI took 51 s, so the 6 m 22 s didn't stay.
