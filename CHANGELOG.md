@@ -6,6 +6,10 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-29
+
+chez-http-server v0.9.1 pinned, with no change to the library's code.
+
 ### Changed
 
 - **Pinned at chez-http-server v0.9.1**, from v0.9.0. The pins under it are v0.9.0's:
@@ -231,7 +235,8 @@ against chez-http-server v0.5.0.
   | the same, after 10 echoes | 5,353 to 5,477 B |
   | the server's own connection, idle after a GET, for scale | 1,900 to 2,055 B |
 
-[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.1.0...v0.2.0
