@@ -2777,3 +2777,9 @@ MERGED to main on 2026-10-29, on the owner's "Run the whole chain": **the v0.4.1
 
 **Reflect.**
 - **Wait for main's run on the squash before the next push.** The tag goes on the squash, and the workflow's concurrency cancels a run that a later push overtakes, as v0.4.0's was.
+
+RELEASED v0.4.1 on 2026-10-29, on the owner's "Run the whole chain": tag 579c118 `v0.4.1`, push the tag, and check that the Pages run republishes the site.
+- **The tag.** `v0.4.1` (object e9cbc43) is an annotated tag on 579c118, signed with the Kiyomi releases key (`git tag -s`; `git tag -v` reports a good signature). Its message follows v0.4.0's. Checked absent on the remote first, then pushed alone.
+- **Published.** The tag's Pages run, 40877599249, built and deployed on its first attempt, in 47 s. The site's eight pages answer 200, and they link out to the repository at seven addresses, each naming `blob/v0.4.1/`; with redirects followed, each answers 200. No GitHub Release is made, as none was for the tags before it.
+
+NEXT: circuit pins chez-websocket at v0.4.1 and the server at v0.9.1, on one commit. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
