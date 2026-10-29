@@ -6,7 +6,7 @@
 ;; under vendor/, so this manifest names no `depends` and the library is not
 ;; installed through Akku. Akku.lock is `akku lock`'s output for this file.
 ;; .akkuignore keeps `akku install` to chez-cmark-gfm alone.
-(akku-package ("chez-websocket" "0.4.0")
+(akku-package ("chez-websocket" "0.4.1")
   (synopsis "WebSocket (RFC 6455) support for chez-http-server R6RS")
   (authors "Kiyomi Computation Systems LLC")
   (homepage "https://github.com/Kiyomi-Computation-Systems/chez-websocket")
