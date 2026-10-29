@@ -60,4 +60,4 @@ the process's environment, builds limits from it with
 The server's own variables still apply: where it listens, how many
 connections it takes, and how long a closed connection lingers for the
 client (`CHEZ_HTTP_LINGER_TIMEOUT`). See chez-http-server's
-[configuration](https://github.com/Kiyomi-Computation-Systems/chez-http-server/blob/v0.9.0/docs/configuration.md).
+[configuration](https://github.com/Kiyomi-Computation-Systems/chez-http-server/blob/v0.9.1/docs/configuration.md).
