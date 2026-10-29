@@ -33,7 +33,7 @@ under `tests/`; it ends with `ALL SUITES PASSED`.
 ## The pinned server
 
 The one dependency, chez-http-server, is a git submodule under `vendor/`,
-pinned at a release tag, v0.9.0. It carries its own pins: chez-libuv,
+pinned at a release tag, v0.9.1. It carries its own pins: chez-libuv,
 chez-httparse, uriparse, and chez-srfi for the tests. You don't install any
 of them yourself: `make build` clones what the build needs.
 
