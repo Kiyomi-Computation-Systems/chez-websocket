@@ -6,6 +6,21 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Pinned at chez-http-server v0.9.1**, from v0.9.0. The pins under it are v0.9.0's:
+  chez-libuv v0.11.0, chez-httparse v0.5.0 with byte-machine v0.8.0, and uriparse
+  v0.8.0. The pin needs no change to the library's code, and `(http-server)` exports
+  what it did.
+  - A procedure registered with `request-on-done!` costs the server about 240 B a
+    request, from about 725, and the test host leaves a pulled body's failure out of
+    its log, as `serve` does. The binding uses neither.
+  - An idle WebSocket costs what it did. On Linux x86-64, measured the same hour, it
+    held 5,512 to 5,674 B on v0.9.1 and 5,514 to 5,679 B on v0.9.0, and the server's
+    own idle connection 2,128 to 2,144 B and 2,140 to 2,144 B.
+  - Autobahn|Testsuite's 301 cases keep their verdicts: 291 OK, 7 NON-STRICT and 3
+    INFORMATIONAL.
+
 ## [0.4.0] - 2026-10-28
 
 `websocket-limits-from-environment` in the facade, for a host that reads its settings
