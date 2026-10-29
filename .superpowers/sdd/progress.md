@@ -2769,3 +2769,11 @@ MERGED to main on 2026-10-29, on the owner's "lets go ahead and pin chez-websock
 - **A number a page writes is a number the records hold.** The docs suite holds `docs/performance.md`'s figures to CHANGELOG.md's, so a measurement goes into both in the same commit, every figure the page gives.
 
 NEXT: v0.4.1, a release PR (`release/v0.4.1`: Unreleased to `[0.4.1] - 2026-10-29`, and Akku.manifest), then the signed tag; circuit pins it with the server's v0.9.1. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-29, on the owner's "Run the whole chain": **the v0.4.1 release**, #102. The chain, asked from circuit: #101's ritual, this release PR and its ritual once green, then the signed tag, its push and the Pages check. The owner had chosen "v0.4.1" for it.
+- **#102** moves Unreleased to `[0.4.1] - 2026-10-29`, with a one-line summary and the compare links (`v0.4.0...v0.4.1`, and Unreleased from `v0.4.1`), and bumps Akku.manifest to 0.4.1. `git log v0.4.0..main --first-parent` names #101 and three ledger commits, so #101's entry is the release's whole. It is a patch: the server's pin moves to a patch release, and the library's code and its facade do not change. The server gitlink stays b7381a0 (v0.9.1).
+- **#102**, at fbd7779 (one commit), was squashed as 579c118 (tree 234dc29, the tested head's; parent 58fb87d), merged on the day it is dated. Its run 40877235752 was green: autobahn 53 s (`301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`), linux 49 s, with `check-site` and 16 suites, 434 rows. Locally (Linux x86-64, circuit's Guix container) `make test` passed 434 rows, with `check-help`, and `check-pins` on the host. Main's run on 579c118, 40877427824, passed both jobs before anything else was pushed.
+- **Branches.** `release/v0.4.1` was deleted, local and remote. The main checkout is fast-forwarded to 579c118. No PR is open.
+
+**Reflect.**
+- **Wait for main's run on the squash before the next push.** The tag goes on the squash, and the workflow's concurrency cancels a run that a later push overtakes, as v0.4.0's was.
