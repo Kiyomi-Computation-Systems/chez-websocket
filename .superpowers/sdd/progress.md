@@ -2799,3 +2799,19 @@ MERGED to main on 2026-10-30, on the owner's "Run the ritual": **the server's v0
 - **A version the owner names is checked against the tags.** "v0.1.0" named no new tag; v0.10.0 was the newest, released that hour.
 
 NEXT: a chez-websocket release on the server's v0.10.0, for circuit to pin, if the owner asks. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-30, on the owner's "Run the ritual": **the v0.5.0 release**, #104. The owner had asked whether a release was needed for the v0.10.0 pin and chose "Yes, v0.5.0".
+- **#104** moves Unreleased to `[0.5.0] - 2026-10-30`, with a one-line summary and the compare links (`v0.4.1...v0.5.0`, and Unreleased from `v0.5.0`), and bumps Akku.manifest to 0.5.0. Akku.lock names no version of this package. `git log v0.4.1..main --first-parent` names #103 and ledger commits, so #103's entry is the release's whole. It is a minor release: a host's log now lists each request the server refuses itself, which a test comparing the whole log sees, the reason the server's own release is 0.10.0. The library's code and its facade do not change. The server gitlink stays 5c16f64 (v0.10.0).
+- **#104**, at ad140ce (one commit), was squashed as 9e8398f (tree 62b2add, the tested head's; parent 39c3555), merged on the day it is dated. Its run 41104100692 was green: linux 1 m 6 s, autobahn 1 m 14 s. Locally (Darwin arm64) `make test` passed, 16 suites, 434 rows, with `check-help`, `check-site` and `check-pins`. Main's run on 9e8398f, 41105462533, passed both jobs before anything else was pushed to main.
+- **The #103 reflect** (39c3555) went to main before the release PR was cut, its push overtaking nothing: main's run on 42d2220 passed (41103463156), as did the reflect's own (41103928795).
+- **Branches.** `release/v0.5.0` was deleted, local and remote. The main checkout is fast-forwarded to 9e8398f. No PR is open.
+
+RELEASED v0.5.0 on 2026-10-30, on the owner's "when the ritual is done push the tag".
+- **The tag.** `v0.5.0` (object dcff01b) is an annotated tag on 9e8398f, signed with the Kiyomi releases key (CC2923E5…5130, `git tag -s -u`, the tagger releases@kiyomicomputation.systems, as v0.4.1's; `git tag -v` reports a good signature). Its message follows v0.4.1's. Checked absent on the remote first, then pushed alone.
+- **Published.** The tag's Pages run, 41105622843, started at 18:17 UTC, during GitHub's incident with Actions, Pages and Webhooks.
+
+**Reflect.**
+- **The release key is not the default key.** `user.signingkey` names the owner's own key; the releases are signed `-u` with the Kiyomi releases key and its address as the tagger, read from the tag before this one.
+- **Wait for main's run on the squash, then push.** It took one look this time: main's run on 9e8398f had passed by the time the tag was made, so the reflect's push could overtake nothing.
+
+NEXT: circuit pins chez-websocket at v0.5.0 and the server at v0.10.0, on one commit. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
