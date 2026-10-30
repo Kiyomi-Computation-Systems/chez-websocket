@@ -2835,3 +2835,9 @@ MERGED to main on 2026-10-30, on the owner's "its green lets go homie": **the v0
 - **Branches.** `release/v0.5.1` was deleted, local and remote. The main checkout is fast-forwarded to 4b70f22. No PR is open.
 
 NEXT: the signed tag `v0.5.1` on 4b70f22 (the releases key, `-u`), its push and the Pages check, on the owner's word. Then circuit pins chez-websocket at v0.5.1 and the server at v0.10.0, on one commit. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+RELEASED v0.5.1 on 2026-10-30, on the owner's "Push the tag".
+- **The tag.** `v0.5.1` (object 6fd8584) is an annotated tag on 4b70f22, signed with the Kiyomi releases key (CC2923E5…5130, `git tag -s -u`, the tagger releases@kiyomicomputation.systems, as v0.5.0's; `git tag -v` reports a good signature). Its message follows v0.5.0's. Checked absent on the remote first, then pushed alone.
+- **Published.** The tag's Pages run, 41113149408, built and deployed on its first attempt, in about a minute. The site's eight pages answer 200, and they link out to the repository at seven addresses, each naming `blob/v0.5.1/`; with redirects followed, each answers 200. No GitHub Release is made, as none was for the tags before it.
+
+NEXT: circuit pins chez-websocket at v0.5.1 and the server at v0.10.0, on one commit. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
