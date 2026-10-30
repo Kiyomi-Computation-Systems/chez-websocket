@@ -6,6 +6,21 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Pinned at chez-http-server v0.10.0**, from v0.9.1. The pins under it are v0.9.1's:
+  chez-libuv v0.11.0, chez-httparse v0.5.0 with byte-machine v0.8.0, and uriparse
+  v0.8.0. The pin needs no change to the library's code, and `(http-server)` exports
+  what it did.
+  - The server now logs a request it refuses itself, such as a malformed head or a
+    missing `Host`, as one `request-refused` line, and keeps every log line one line.
+    A handshake the binding refuses is a handler's answer, so it is not one of them.
+  - An idle WebSocket costs what it did. On an Apple M1, measured the same hour, it
+    held 5,449 to 5,683 B on v0.10.0 and 5,453 to 5,662 B on v0.9.1, and the server's
+    own idle connection 2,078 to 2,238 B and 2,081 to 2,243 B.
+  - Autobahn|Testsuite's 301 cases keep their verdicts: 291 OK, 7 NON-STRICT and 3
+    INFORMATIONAL.
+
 ## [0.4.1] - 2026-10-29
 
 chez-http-server v0.9.1 pinned, with no change to the library's code.

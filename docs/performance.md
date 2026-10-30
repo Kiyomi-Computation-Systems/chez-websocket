@@ -26,7 +26,7 @@ Measured on an Apple M1 (8 cores), macOS 26, Chez Scheme 10.4.1
 v0.7.0, measured the same hour, a WebSocket cost about 5.3 KB: the server's
 own connection grew by about 270 B in v0.9.0, and a WebSocket's with it.
 
-The pin today, v0.9.1, costs the same. On Linux x86-64, Chez Scheme 10.4.1
-and libuv 1.52.1, measured the same hour, an idle WebSocket held 5,512 to
-5,674 B on v0.9.1 and 5,514 to 5,679 B on v0.9.0, and the server's own
-connection 2,128 to 2,144 B and 2,140 to 2,144 B.
+The pin today, v0.10.0, costs the same. On the same M1, measured the same
+hour, an idle WebSocket held 5,449 to 5,683 B on v0.10.0 and 5,453 to
+5,662 B on v0.9.1, and the server's own connection 2,078 to 2,238 B and
+2,081 to 2,243 B.
