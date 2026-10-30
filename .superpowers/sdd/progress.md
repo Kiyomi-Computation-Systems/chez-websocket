@@ -2783,3 +2783,19 @@ RELEASED v0.4.1 on 2026-10-29, on the owner's "Run the whole chain": tag 579c118
 - **Published.** The tag's Pages run, 40877599249, built and deployed on its first attempt, in 47 s. The site's eight pages answer 200, and they link out to the repository at seven addresses, each naming `blob/v0.4.1/`; with redirects followed, each answers 200. No GitHub Release is made, as none was for the tags before it.
 
 NEXT: circuit pins chez-websocket at v0.4.1 and the server at v0.9.1, on one commit. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
+
+MERGED to main on 2026-10-30, on the owner's "Run the ritual": **the server's v0.10.0, pinned**, #103. The owner had told of the release ("http-server landed a v0.1.0 release", read as v0.10.0, the server's newest tag) and answered "Yes, open the PR" to pinning it.
+- **The pin.** chez-http-server moves from v0.9.1 (b7381a0) to v0.10.0 (5c16f64, the tag signed, a good signature). The pins it carries are v0.9.1's: chez-libuv afe79a5 (v0.11.0), chez-httparse 52a62e5 (v0.5.0) with byte-machine c1f7791 (v0.8.0), uriparse 9416299 (v0.8.0) and chez-srfi 7879b52. `(http-server)` exports what it did. What reaches here: the server logs a request it refuses itself as one `request-refused` line, and keeps every log line one line; no suite here compares a log that changes.
+- **Measured first,** in a scratch worktree with the server at v0.10.0 and `SERVER_PIN` given on the command line (Darwin arm64): `make test` three times, 16 suites, 434 rows each; the socket suite five times more, 5 of 5; `make autobahn`, `301 cases as the ratchet holds them: 291 OK, 7 NON-STRICT, 3 INFORMATIONAL`.
+- **Watched to fail:** with the gitlink moved and `SERVER_PIN` not, `make check-pins` named the server's mismatch, the five carried pins ok, exit 2.
+- **Records:** the Makefile's pin; `docs/installing.md` and `docs/configuration.md`'s link at v0.10.0 (the page answers 200 at the tag); CHANGELOG.md's Unreleased; `docs/performance.md` names v0.10.0 as the pin today.
+- **Measured again** (`ws-cost.sps`, the M1 of the page's table, v0.9.1 the same hour, five holds each): an idle WebSocket 5,449 to 5,683 B on v0.10.0, 5,453 to 5,662 B on v0.9.1; the server's own connection 2,078 to 2,238 B and 2,081 to 2,243 B. So unchanged; CHANGELOG.md records every figure the page gives.
+- **On the branch:** `make test` three times, 16 suites, 434 rows each; the socket suite five times more, 5 of 5; `check-pins`, `check-help` and `check-site`.
+- **#103**, at b29d521 (two commits: 16a7a5d, the pin with its pages; b29d521, the records), was squashed as 42d2220 (tree 21df2df, the tested head's; parent 45b7320). Its run 41101023801 was green: linux 1 m 26 s, autobahn 4 m 17 s, after waiting about 15 minutes for a runner during GitHub's incident with Actions, Pages and Webhooks.
+- **Branches.** `chore/pin-server-v0.10.0` was deleted, local and remote. The main checkout is fast-forwarded to 42d2220, the server at v0.10.0, every pin ok. No PR is open.
+
+**Reflect.**
+- **A queued run is GitHub's before it is ours.** No runner had taken either job for nine minutes; GitHub's status page named an incident with Actions, and the server's run before it had gone through. Nothing here needed fixing.
+- **A version the owner names is checked against the tags.** "v0.1.0" named no new tag; v0.10.0 was the newest, released that hour.
+
+NEXT: a chez-websocket release on the server's v0.10.0, for circuit to pin, if the owner asks. Akku, once chez-http-server is in its index. CONTRIBUTING.md's links to AGENTS.md and `.plans/decisions/` are dead in a release archive; the echo image's Docker context still takes `.plans/` and `.superpowers/`.
