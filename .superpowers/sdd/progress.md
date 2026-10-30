@@ -2808,7 +2808,7 @@ MERGED to main on 2026-10-30, on the owner's "Run the ritual": **the v0.5.0 rele
 
 RELEASED v0.5.0 on 2026-10-30, on the owner's "when the ritual is done push the tag".
 - **The tag.** `v0.5.0` (object dcff01b) is an annotated tag on 9e8398f, signed with the Kiyomi releases key (CC2923E5…5130, `git tag -s -u`, the tagger releases@kiyomicomputation.systems, as v0.4.1's; `git tag -v` reports a good signature). Its message follows v0.4.1's. Checked absent on the remote first, then pushed alone.
-- **Published.** The tag's Pages run, 41105622843, started at 18:17 UTC, during GitHub's incident with Actions, Pages and Webhooks.
+- **Published.** The tag's Pages run, 41105622843, built and deployed on its first attempt, during GitHub's incident with Actions, Pages and Webhooks; its deploy waited on a runner, not an approval (no pending deployment, the environment's one rule its branch policy). The site's eight pages answer 200, and they link out to the repository at seven addresses, each naming `blob/v0.5.0/`; with redirects followed, each answers 200. No GitHub Release is made, as none was for the tags before it.
 
 **Reflect.**
 - **The release key is not the default key.** `user.signingkey` names the owner's own key; the releases are signed `-u` with the Kiyomi releases key and its address as the tagger, read from the tag before this one.
