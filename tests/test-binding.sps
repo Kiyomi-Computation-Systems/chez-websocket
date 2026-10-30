@@ -1165,11 +1165,16 @@
         run))
 
     (let* ((raised (list "hi there" #f (make-oops) '("a b")
-                         (condition (make-error) (make-message-condition "line one\nline two"))))
+                         (condition (make-error) (make-message-condition "line one\nline two"))
+                         "first\nsecond" (string->symbol "a\nb") #\newline "a\rb"
+                         "an\x1b;escape" "a\x7f;b"
+                         (condition (make-error) (make-message-condition "bad message")
+                                    (make-irritants-condition (list (make-oops))))
+                         (list (make-oops))))
            (run (logged (lambda ()
                           (for-each (lambda (x) (connect (accepting (lambda (ws) (raise x))) handshake))
                                     raised)))))
-      (test-equal "a procedure's raise is logged as the server's own log-line writes the detail: a string, #f, a record, a list, and a condition over two lines"
+      (test-equal "a procedure's raise is logged as the server's own log-line writes the detail: a string, #f, a record, a list, a condition over two lines, a string, a symbol and a character holding a line break, an escape, a delete, and a record inside a condition and inside a list"
         (apply string-append (map (lambda (x) (server-logged 'websocket-handler-failed (list x))) raised))
         (cadr run)))
 

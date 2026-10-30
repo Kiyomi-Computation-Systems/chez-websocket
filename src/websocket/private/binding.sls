@@ -526,19 +526,29 @@
       (flush-output-port out)))
 
   ;; put-detail : OutputPort Any -> Void
-  ;; A condition as display-condition shows it, on one line; a string,
-  ;; symbol, number, boolean or character displayed; a record by its type's
-  ;; name; anything else written.
+  ;; `d` as show-detail writes it, its control characters made spaces,
+  ;; wherever they come from: a raised string may quote a client's bytes.
   (define (put-detail out d)
-    (cond ((condition? d)
-           (put-string out (one-line (call-with-string-output-port (lambda (p) (display-condition d p))))))
-          ((or (string? d) (symbol? d) (number? d) (boolean? d) (char? d)) (display d out))
-          ((record? d)
-           (put-string out "#<")
-           (display (record-type-name (record-rtd d)) out)
-           (put-string out ">"))
-          (else (write d out))))
+    (put-string out (one-line (call-with-string-output-port (lambda (p) (show-detail p d))))))
 
-  ;; one-line : String -> String — its line breaks made spaces.
+  ;; show-detail : OutputPort Any -> Void
+  ;; A condition as display-condition shows it; a string, symbol, number,
+  ;; boolean or character displayed; a record by its type's name; anything
+  ;; else written. A record inside a condition or a written value shows as
+  ;; `#<record of type name>`, not its fields, as `print-record` #f has it.
+  (define (show-detail out d)
+    (parameterize ((print-record #f))
+      (cond ((condition? d) (display-condition d out))
+            ((or (string? d) (symbol? d) (number? d) (boolean? d) (char? d)) (display d out))
+            ((record? d)
+             (put-string out "#<")
+             (display (record-type-name (record-rtd d)) out)
+             (put-string out ">"))
+            (else (write d out)))))
+
+  ;; one-line : String -> String — its control characters made spaces:
+  ;; each below U+0020, line feed and carriage return among them, and
+  ;; delete.
   (define (one-line s)
-    (list->string (map (lambda (c) (if (memv c '(#\newline #\return)) #\space c)) (string->list s)))))
+    (list->string (map (lambda (c) (if (or (char<? c #\space) (char=? c #\delete)) #\space c))
+                       (string->list s)))))

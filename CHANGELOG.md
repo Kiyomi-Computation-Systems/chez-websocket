@@ -6,6 +6,17 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A procedure's raise is logged on one line, as the server logs since v0.10.0.** The
+  binding writes `websocket-handler-failed` with its own copy of the server's code,
+  and kept the copy from before v0.10.0. A raised string, symbol or character holding
+  a line feed wrote two lines, and an escape or a delete went to the log as it was. A
+  record inside a raised condition or list was written whole, its fields and the
+  records in them: 1,169 characters for a raise naming the WebSocket. The binding now
+  writes each detail as the server does: every control character a space, and a record
+  inside a condition or a list as `#<record of type websocket>`.
+
 ## [0.5.0] - 2026-10-30
 
 chez-http-server v0.10.0 pinned, with no change to the library's code. A host's log now
