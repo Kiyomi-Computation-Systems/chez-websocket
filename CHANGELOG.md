@@ -6,6 +6,19 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A heading's anchor on the docs site is GitHub's,** as chez-http-server's site has
+  it. The site dropped `_`, made each run of spaces and hyphens one hyphen, trimmed
+  hyphens from both ends and kept circled digits such as `①`. GitHub keeps `_`, makes
+  each space a hyphen of its own, trims nothing and drops circled digits, so a heading
+  such as `CHEZ_WS_PING_INTERVAL` or `[0.5.1] - 2026-10-30` failed `make check-site`.
+  The site now uses GitHub's rule: lower case; keep letters, marks, decimal digits,
+  connector punctuation, hyphens and spaces; each space becomes a hyphen. A repeated
+  heading is numbered as GitHub numbers it, so headings `echo`, `echo`, `echo 1` are
+  `echo`, `echo-1`, `echo-1-1`, where the site gave `echo-1` twice. No anchor in
+  `docs/` changes, and the site renders as it did.
+
 ## [0.5.1] - 2026-10-30
 
 A procedure's raise is logged as the server logs since v0.10.0: on one line, with no record
