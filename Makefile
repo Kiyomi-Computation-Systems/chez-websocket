@@ -8,12 +8,21 @@
 # each pin it carries at the commit its parent records, so a server pin that
 # moves brings them along; it refuses a checkout with local edits.  `make
 # build` builds chez-libuv's shim and assembles one library path.
+#
+# The same libraries are an Akku package: Akku.manifest's depends names the
+# server at its vendored version, and check-pins holds it there
+# (AKKU_VENDORED, below).  `make check-akku` installs the package as a
+# consumer would.
 
 CHEZ ?= chez
 
 # --- the pin -----------------------------------------------------------------
 SERVER_DIR := vendor/chez-http-server
 SERVER_PIN := 5c16f64b34087ff32225de4838fe0b83a3d55bb2  # v0.10.0
+
+# The package Akku.manifest's depends names, with its vendored copy, the one
+# the suites run against: NAME=DIR.  check-pins holds the manifest to it.
+AKKU_VENDORED := chez-http-server=$(SERVER_DIR)
 
 # --- the pins it carries ------------------------------------------------------
 LIBUV_DIR        := $(SERVER_DIR)/vendor/chez-libuv
@@ -81,7 +90,7 @@ AUTOBAHN_ECHO ?= $(if $(filter Linux,$(shell uname -s)),host,container)
 AUTOBAHN_ECHO_IMAGE := chez-websocket-autobahn-echo:local
 CHEZ_FLOOR_VERSION := $(shell sed -n 's/^  CHEZ_FLOOR_VERSION: "\(.*\)"$$/\1/p' .github/workflows/ci.yml)
 
-.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn echo-image docker-smoke site-deps site check-site check-site-deps clean
+.PHONY: help check-help submodules check-pins check-imports deps build dev run test prod autobahn echo-image docker-smoke site-deps site check-site check-site-deps check-akku-lock check-akku clean
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -125,6 +134,8 @@ check-pins: ## Verify the server sits at its pin, and each pin it carries where 
 	    echo "PIN DIRTY: $$d has local edits to tracked files" >&2; fail=1; fi; \
 	done; \
 	exit $$fail
+	@command -v $(CHEZ) >/dev/null 2>&1 || { echo "check-pins: no '$(CHEZ)' on PATH to read Akku.manifest with; name your Chez, as in make check-pins CHEZ=scheme" >&2; exit 2; }
+	@$(CHEZ) -q --script scripts/check-akku-manifest.ss $(AKKU_VENDORED)
 
 # The import audit is a suite, tests/test-imports.sps, which `make test` runs
 # with the others: it reads each library under src/ with Chez's own reader and
@@ -199,10 +210,10 @@ docker-smoke: echo-image ## Start the echo image, wait until its HEALTHCHECK say
 
 # --- the docs site -----------------------------------------------------------
 # docs/*.md rendered to build/site/ through chez-cmark-gfm, as chez-http-server
-# renders its own.  Akku.lock pins chez-cmark-gfm for the site alone: nothing
-# under src/ and no tests/test-*.sps imports it, so `make test` needs none of
-# this.  The site needs the system cmark-gfm library (`cmark-gfm` from Homebrew
-# or apt), not libuv.
+# renders its own.  The site alone uses chez-cmark-gfm, which Akku.lock pins:
+# nothing under src/ and no tests/test-*.sps imports it, so `make test` needs
+# none of this.  The site needs the system cmark-gfm library (`cmark-gfm` from
+# Homebrew or apt), not libuv.
 #
 # chez-cmark-gfm comes from an `akku install` tree when there is one, and
 # otherwise from the archive Akku.lock pins, downloaded and checked against the
@@ -236,8 +247,23 @@ check-site: site-deps deps ## Test the site generator, then render docs/ in memo
 	@CHEZSCHEMELIBDIRS=$(SITE_LIBDIRS):tests:$(SRFI_LIBS) $(CHEZ) --program tests/site-render-unit.sps
 	@CHEZSCHEMELIBDIRS=$(SITE_LIBDIRS) SITE_REF="$(SITE_REF)" $(CHEZ) --program tests/site-check.sps
 
-check-site-deps: ## Test scripts/fetch-akku-lock offline, against a local archive and lock of its own
+check-site-deps: ## Test the site's and the Akku scripts offline: fetch-akku-lock, check-akku-lock and check-akku-manifest on fakes
 	@sh tests/fetch-akku-lock.sh
+	@sh tests/check-akku-lock.sh
+	@CHEZ="$(CHEZ)" sh tests/check-akku-manifest.sh
+
+# Needs a working akku and its index (`akku update` refreshes it); where akku
+# is missing or cannot lock at all, the check says so and passes.
+AKKU ?= akku
+check-akku-lock: ## Check Akku.lock is what `akku lock` makes of Akku.manifest (skipped where akku is missing or broken)
+	@AKKU="$(AKKU)" sh scripts/check-akku-lock
+
+# Needs akku, curl, and what chez-libuv's install hook needs: a C compiler,
+# pkg-config and libuv 1.48 or newer.  It downloads the dependencies'
+# archives the first time, into Akku's cache.  check-akku-lock first, so
+# the dependencies it installs are the ones `akku lock` picks today.
+check-akku: check-akku-lock ## Install this checkout with Akku as a consumer would: exactly src/'s libraries, and a WebSocket handshake on Akku's library path
+	@AKKU="$(AKKU)" CHEZ="$(CHEZ)" sh scripts/check-akku
 
 clean: ## Remove our build artifacts and the vendored shim
 	rm -rf $(BUILD_DIR)

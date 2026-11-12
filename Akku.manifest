@@ -1,14 +1,29 @@
 #!r6rs ; -*- scheme -*-
 (import (akku format manifest))
 
-;; Development only: chez-cmark-gfm renders docs/ into the docs site (`make
-;; site`). The library's own dependency, chez-http-server, is a submodule
-;; under vendor/, so this manifest names no `depends` and the library is not
-;; installed through Akku. Akku.lock is `akku lock`'s output for this file.
-;; .akkuignore keeps `akku install` to chez-cmark-gfm alone.
+;; The package installs the libraries under src/. Akku leaves the test
+;; libraries under tests/ out itself; .akkuignore keeps out the docs site's
+;; generator under site/, and the rest of the tree no consumer needs.
+;; `make check-akku` installs the package as a consumer would and checks
+;; that exactly src/'s libraries land.
+;;
+;; depends: the libraries under src/ import chez-http-server. Its range's
+;; floor is the version vendored under vendor/, which is what the suites run
+;; against; `make check-pins` holds the floor to the vendored copy's version,
+;; Akku.lock to the same version, and this package's version to
+;; CHANGELOG.md's latest release. The server's own dependencies come with
+;; it: chez-libuv, chez-httparse, chez-uri and byte-machine. chez-libuv
+;; builds its C shim on the consumer's machine, through its own install hook.
+;;
+;; depends/dev: chez-cmark-gfm renders docs/ into the docs site (`make
+;; site`). A project that depends on chez-websocket does not get it.
+;; Akku.lock is `akku lock`'s output for this file; `make check-akku-lock`
+;; checks it still is.
 (akku-package ("chez-websocket" "0.5.1")
   (synopsis "WebSocket (RFC 6455) support for chez-http-server R6RS")
+  (description "WebSocket (RFC 6455) for chez-http-server, the HTTP/1.1 server for Chez Scheme: a handler takes a WebSocket by answering websocket-accept, then reads whole messages and writes, with checked handshakes, bounded limits and pings answered for you. Requires threaded Chez and a C compiler.")
   (authors "Kiyomi Computation Systems LLC")
   (homepage "https://github.com/Kiyomi-Computation-Systems/chez-websocket")
   (license "BSD-3-Clause")
+  (depends ("chez-http-server" "^0.10.0"))
   (depends/dev ("chez-cmark-gfm" "^2.0.0")))
