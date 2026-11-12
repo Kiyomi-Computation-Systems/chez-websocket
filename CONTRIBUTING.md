@@ -34,8 +34,9 @@ CI runs these on every pull request, on Linux. Keep them green:
   holds this file and the GitHub templates to the targets and files they
   name; the examples suite plays each program in `examples/`; and the
   import audit holds each pure library to its imports.
-- `make check-pins`: the server sits at its pin, and each pin it carries
-  where the server records it. `make test` runs it first.
+- `make check-pins`: the server sits at its pin, each pin it carries where
+  the server records it, and `Akku.manifest` and `Akku.lock` ask for the
+  server's version. `make test` runs it first.
 - `make check-help`: every target has a description in `make help`.
 - `make check-site-deps` and `make check-site`: the docs site builds, and
   every link and anchor in it resolves.
@@ -51,11 +52,14 @@ CI runs these on every pull request, on Linux. Keep them green:
 - **The server pin:** chez-http-server is the one submodule, pinned at a
   release tag, and the pins it carries come with it. Move the submodule and
   `SERVER_PIN` in the Makefile together, on a commit of their own, with the
-  pages that name the tag. `make check-pins` fails until the two agree.
-- **`Akku.manifest`:** it names the docs site's one dependency,
-  chez-cmark-gfm. Commit `Akku.lock` with it (`akku lock` writes it):
-  `make site-deps` downloads the archive the lock names and checks its
-  sha256.
+  pages that name the tag, and `Akku.manifest`'s range for the server with
+  `Akku.lock`. `make check-pins` fails until they all agree.
+- **`Akku.manifest`:** it names the server, at the version vendored under
+  `vendor/`, and the docs site's chez-cmark-gfm. Commit `Akku.lock` with it
+  (`akku lock` writes it). `make check-akku-lock` checks the lock is what
+  `akku lock` makes, and `make check-akku` installs the package as a
+  consumer would, which needs `akku` and `curl`. `make site-deps` downloads
+  the archive the lock names for chez-cmark-gfm and checks its sha256.
 - **The Makefile:** give each new target a `## ` description, so
   `make help` lists it.
 - **`docs/`:** it is for people using the library. Keep it short and plain.

@@ -2,7 +2,7 @@
 
 chez-websocket is a set of R6RS libraries on top of chez-http-server. You
 build its dependencies once with `make build`, then run your program with
-the library path that build assembles.
+the library path that build assembles. Or let [Akku](#with-akku) do both.
 
 ## What you need
 
@@ -37,7 +37,8 @@ pinned at a release tag, v0.10.0. It carries its own pins: chez-libuv,
 chez-httparse, uriparse, and chez-srfi for the tests. You don't install any
 of them yourself: `make build` clones what the build needs.
 
-To check every checkout sits at its pin:
+To check every checkout sits at its pin, and that `Akku.manifest` asks for
+the server's version:
 
 ```sh
 make check-pins
@@ -57,3 +58,23 @@ the server with Ctrl-C.
 
 Your own program runs the same way: `make run PROGRAM=path/to/program.sps`.
 `make dev` starts a REPL with the same library path.
+
+## With Akku
+
+In a project that uses [Akku](https://akkuscm.org), one command fetches
+chez-websocket, the server, and the server's four dependencies (chez-libuv,
+chez-httparse, chez-uri and byte-machine), and builds chez-libuv's shim into
+your project's `.akku/ffi`. It needs a release of chez-websocket on the Akku
+index; `akku list | grep chez-websocket` shows whether there is one.
+
+```sh
+akku install chez-websocket
+. .akku/bin/activate    # puts .akku/lib on Chez's library path
+chez --program my-server.sps
+```
+
+It needs what the list above does, but not CMake: libuv must be 1.48 or
+newer where `pkg-config` sees it, since an Akku install has no copy of its
+own to fall back on. Your project's path may hold no spaces, nor any of
+`$ : % ' " \`. If the shim does not build, `.akku/ffi/chez-libuv-install.log`
+says why.

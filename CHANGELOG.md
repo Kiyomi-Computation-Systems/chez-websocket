@@ -6,6 +6,17 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **chez-websocket is an Akku package.** `akku install chez-websocket` fetches it
+  with chez-http-server and the server's four dependencies, and builds chez-libuv's
+  shim into the project; [Installing](docs/installing.md#with-akku) says how. It
+  needs a release on the Akku index. `Akku.manifest` names chez-http-server at
+  `^0.10.0`, the vendored version, and `make check-pins` holds the manifest and
+  `Akku.lock` to it. `make check-akku` installs the checkout as a consumer would,
+  and checks that exactly `src/`'s libraries land and that `examples/echo.sps`
+  answers a WebSocket handshake on Akku's library path alone.
+
 ### Fixed
 
 - **A heading's anchor on the docs site is GitHub's,** as chez-http-server's site has
