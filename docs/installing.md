@@ -61,13 +61,15 @@ Your own program runs the same way: `make run PROGRAM=path/to/program.sps`.
 
 ## With Akku
 
-In a project that uses [Akku](https://akkuscm.org), one command fetches
+In a project that uses [Akku](https://akkuscm.org), `akku install` fetches
 chez-websocket, the server, and the server's four dependencies (chez-libuv,
 chez-httparse, chez-uri and byte-machine), and builds chez-libuv's shim into
 your project's `.akku/ffi`. It needs a release of chez-websocket on the Akku
-index; `akku list | grep chez-websocket` shows whether there is one.
+index, which can trail the newest release; `akku show chez-websocket` names
+the version it has.
 
 ```sh
+akku update             # fetches the index
 akku install chez-websocket
 . .akku/bin/activate    # puts .akku/lib on Chez's library path
 chez --program my-server.sps
@@ -78,3 +80,8 @@ newer where `pkg-config` sees it, since an Akku install has no copy of its
 own to fall back on. Your project's path may hold no spaces, nor any of
 `$ : % ' " \`. If the shim does not build, `.akku/ffi/chez-libuv-install.log`
 says why.
+
+Run Akku in a UTF-8 locale, such as `LANG=en_US.UTF-8`. With `LANG` unset,
+it writes each non-ASCII character of the files it installs as question
+marks. In these packages that only touches comments, so the library still
+runs.
