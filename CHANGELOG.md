@@ -6,6 +6,20 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Pinned at chez-http-server v0.11.0**, from v0.10.0. The pins under it: chez-libuv
+  v0.11.0, and chez-httparse v0.6.0 and uriparse v0.9.0, both with byte-machine
+  v0.9.0. No code under the server's `src/` changes, and `(http-server)` exports what
+  it did; its two generated parsers, chez-httparse's message parser and uriparse's
+  scanner, are regenerated with byte-machine 0.9.0. The pin needs no change to the
+  library's code.
+  - An idle WebSocket costs what it did. On an Apple M1, measured the same hour, it
+    held 5,451 to 5,622 B on v0.11.0 and 5,456 to 5,646 B on v0.10.0, and the server's
+    own idle connection 2,070 to 2,234 B and 2,070 to 2,228 B.
+  - Autobahn|Testsuite's 301 cases keep their verdicts: 291 OK, 7 NON-STRICT and 3
+    INFORMATIONAL.
+
 ### Fixed
 
 - **A heading's anchor on the docs site is GitHub's,** as chez-http-server's site has
