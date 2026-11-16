@@ -19,7 +19,7 @@
 ;; site`). A project that depends on chez-websocket does not get it.
 ;; Akku.lock is `akku lock`'s output for this file; `make check-akku-lock`
 ;; checks it still is.
-(akku-package ("chez-websocket" "0.5.2")
+(akku-package ("chez-websocket" "0.6.0")
   (synopsis "WebSocket (RFC 6455) support for chez-http-server R6RS")
   (description "WebSocket (RFC 6455) for chez-http-server, the HTTP/1.1 server for Chez Scheme: a handler takes a WebSocket by answering websocket-accept, then reads whole messages and writes, with checked handshakes, bounded limits and pings answered for you. Requires threaded Chez and a C compiler.")
   (authors "Kiyomi Computation Systems LLC")

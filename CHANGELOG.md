@@ -6,14 +6,19 @@ All notable changes to chez-websocket are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
+chez-websocket is an Akku package, a new way to install it, with no change to the
+library's code.
+
 ### Added
 
 - **chez-websocket is an Akku package.** `akku install chez-websocket` fetches it
   with chez-http-server and the server's four dependencies, and builds chez-libuv's
   shim into the project; [Installing](docs/installing.md#with-akku) says how. It
-  needs a release on the Akku index. `Akku.manifest` names chez-http-server at
-  `^0.11.0`, the vendored version, and `make check-pins` holds the manifest and
-  `Akku.lock` to it. `make check-akku` installs the checkout as a consumer would,
+  installs once this release is on the Akku index. `Akku.manifest` names
+  chez-http-server at `^0.11.0`, the vendored version, and `make check-pins` holds
+  the manifest and `Akku.lock` to it. `make check-akku` installs the checkout as a consumer would,
   and checks that exactly `src/`'s libraries land and that `examples/echo.sps`
   answers a WebSocket handshake on Akku's library path alone.
 
@@ -315,7 +320,8 @@ against chez-http-server v0.5.0.
   | the same, after 10 echoes | 5,353 to 5,477 B |
   | the server's own connection, idle after a GET, for scale | 1,900 to 2,055 B |
 
-[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Kiyomi-Computation-Systems/chez-websocket/compare/v0.4.1...v0.5.0
